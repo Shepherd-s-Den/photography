@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Runs the affected component checks before a push; use `dagger call verify --all` for full verification.
+# Requires Docker (the Dagger engine) and the pinned toolchain (`mise install`).
+
+echo "pre-push: running affected checks — dagger call verify"
+
+run() {
+  if command -v mise >/dev/null 2>&1; then
+    mise exec -- "$@"
+  else
+    "$@"
+  fi
+}
+
+run dagger call verify

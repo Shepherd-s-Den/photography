@@ -4,9 +4,38 @@
 
 Architecture and design rationale live in [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md). This document covers engineering conventions and the expected contribution quality.
 
-## Stack direction
+## Stack and setup
 
-The application is planned around a Scala 3 backend using Typelevel libraries and Tagless Final for effectful application boundaries, with a SolidJS and TypeScript frontend. Keep implementation choices aligned with the living documents and reviewed proposals.
+The backend is Scala 3 and follows Typelevel and Tagless Final principles for effectful application boundaries. The frontend direction is SolidJS and TypeScript; the current entry point is static HTML. Dagger runs affected-component CI.
+
+Install the pinned Java 25, Scala 3.8, and Node 24 toolchain with [mise](https://mise.jdx.dev): `mise install`. Docker is required for Dagger's containerized checks.
+
+### Local development
+
+Compile the backend:
+
+```sh
+cd backend && sbt compile
+```
+
+| Task | Command |
+| --- | --- |
+| Backend gate | `dagger call backend-check` |
+| Frontend gate | `dagger call frontend-check` |
+| Pipeline tests | `dagger call pipeline-check` |
+| Pipeline module checks | `npm ci --prefix .dagger && dagger develop && npm --prefix .dagger run verify` |
+| Affected checks | `dagger call verify` |
+| All checks | `dagger call verify --all` |
+
+Enable the local pre-push hook with `git config core.hooksPath .githooks`; it runs affected checks before each push.
+
+| Path | What |
+| --- | --- |
+| `backend/` | Scala 3 backend scaffold. |
+| `frontend/` | SolidJS and TypeScript frontend scaffold. |
+| `.dagger/` | TypeScript Dagger CI module. |
+| `specs/` | Living product design, contracts, testing, and operational context. |
+| `ci/specs/` | Living documentation for the CI pipeline. |
 
 ## Documentation style
 
