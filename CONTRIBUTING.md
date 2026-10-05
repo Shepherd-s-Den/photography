@@ -68,10 +68,19 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 Proposals live under [`specs/changes/<slug>/proposal.md`](specs/changes/) and are archived under `specs/changes/archive/YYYY-MM-DD-<slug>/` after implementation. State current and intended behavior, observable acceptance criteria, invariants, tradeoffs, and specific living-document updates.
 
+## Development workflow — SDD
+
+Every product change follows the [SDD skill](.agents/skills/sdd/SKILL.md). Its phases are **classify → spike when needed → spec → tests → implement → sync & archive**.
+
+- A **Spec PR** contains the reviewed proposal and merges before implementation.
+- One or more **Implementation PRs** deliver the approved behavior and pass the applicable gates.
+- An **Archive + Living Docs PR** synchronizes documentation and archives the completed spec after implementation merges.
+- Work notes and review checklists live in the git-ignored `.agent-work/<slug>/` directory.
+
 ## Pull requests
 
 - Use one branch per change, named `feature/<slug>` or `investigation/<slug>`.
-- Keep implementation PRs focused on one reviewable behavior or seam. Link the reviewed proposal and identify the intended review focus.
+- Keep implementation PRs focused on one reviewable behavior or seam. Link the merged proposal and identify the intended review focus.
 - Commit subjects are imperative and no longer than 72 characters. Explain the reason in the body when the diff alone does not.
 
 ## Testing conventions
@@ -82,4 +91,4 @@ Proposals live under [`specs/changes/<slug>/proposal.md`](specs/changes/) and ar
 
 ## Definition of done
 
-A change is done when its proposal is reviewed, its acceptance criteria are satisfied, relevant tests pass, and the living documents it names are synchronized with the delivered behavior.
+A change is done when its proposal is reviewed, tests projected from its acceptance criteria pass, applicable component gates pass, living documents named in Doc Sync are updated, and the completed spec is archived.
