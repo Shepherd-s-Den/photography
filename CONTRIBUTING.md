@@ -4,9 +4,38 @@
 
 Architecture and design rationale live in [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md). This document covers engineering conventions and the expected contribution quality.
 
-## Stack direction
+## Stack and setup
 
-The application is planned around a Scala 3 backend using Typelevel libraries and Tagless Final for effectful application boundaries, with a SolidJS and TypeScript frontend. Keep implementation choices aligned with the living documents and reviewed proposals.
+The backend is Scala 3 and follows Typelevel and Tagless Final principles for effectful application boundaries. The frontend direction is SolidJS and TypeScript; the current entry point is static HTML. Dagger runs affected-component CI.
+
+Install the pinned Java 25, Scala 3.8, and Node 24 toolchain with [mise](https://mise.jdx.dev): `mise install`. Docker is required for Dagger's containerized checks.
+
+### Local development
+
+Compile the backend:
+
+```sh
+cd backend && sbt compile
+```
+
+| Task | Command |
+| --- | --- |
+| Backend gate | `dagger call backend-check` |
+| Frontend gate | `dagger call frontend-check` |
+| Pipeline tests | `dagger call pipeline-check` |
+| Pipeline module checks | `npm ci --prefix .dagger && dagger develop && npm --prefix .dagger run verify` |
+| Affected checks | `dagger call verify` |
+| All checks | `dagger call verify --all` |
+
+Enable the local pre-push hook with `git config core.hooksPath .githooks`; it runs affected checks before each push.
+
+| Path | What |
+| --- | --- |
+| `backend/` | Scala 3 backend scaffold. |
+| `frontend/` | SolidJS and TypeScript frontend scaffold. |
+| `.dagger/` | TypeScript Dagger CI module. |
+| `specs/` | Living product design, contracts, testing, and operational context. |
+| `ci/specs/` | Living documentation for the CI pipeline. |
 
 ## Documentation style
 
@@ -39,10 +68,19 @@ The application is planned around a Scala 3 backend using Typelevel libraries an
 
 Proposals live under [`specs/changes/<slug>/proposal.md`](specs/changes/) and are archived under `specs/changes/archive/YYYY-MM-DD-<slug>/` after implementation. State current and intended behavior, observable acceptance criteria, invariants, tradeoffs, and specific living-document updates.
 
+## Development workflow — SDD
+
+Every product change follows the [SDD skill](.agents/skills/sdd/SKILL.md). Its phases are **classify → spike when needed → spec → tests → implement → sync & archive**.
+
+- A **Spec PR** contains the reviewed proposal and merges before implementation.
+- One or more **Implementation PRs** deliver the approved behavior and pass the applicable gates.
+- An **Archive + Living Docs PR** synchronizes documentation and archives the completed spec after implementation merges.
+- Work notes and review checklists live in the git-ignored `.agent-work/<slug>/` directory.
+
 ## Pull requests
 
 - Use one branch per change, named `feature/<slug>` or `investigation/<slug>`.
-- Keep implementation PRs focused on one reviewable behavior or seam. Link the reviewed proposal and identify the intended review focus.
+- Keep implementation PRs focused on one reviewable behavior or seam. Link the merged proposal and identify the intended review focus.
 - Commit subjects are imperative and no longer than 72 characters. Explain the reason in the body when the diff alone does not.
 
 ## Testing conventions
@@ -53,4 +91,4 @@ Proposals live under [`specs/changes/<slug>/proposal.md`](specs/changes/) and ar
 
 ## Definition of done
 
-A change is done when its proposal is reviewed, its acceptance criteria are satisfied, relevant tests pass, and the living documents it names are synchronized with the delivered behavior.
+A change is done when its proposal is reviewed, tests projected from its acceptance criteria pass, applicable component gates pass, living documents named in Doc Sync are updated, and the completed spec is archived.

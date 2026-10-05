@@ -1,0 +1,13 @@
+# Root Prettier governs Markdown docs only. Code trees carry their own configs and gates;
+# generated and import-source files are left untouched.
+**/node_modules
+**/target
+**/dist
+frontend
+.dagger
+contract
+.agent-work
+plants
+guides
+GARDEN-GUIDE.md
+shopping-list.md
