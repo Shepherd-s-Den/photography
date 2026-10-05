@@ -2,11 +2,11 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 
-The engineering standard applies to everyone, not only agents. Read [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md) for architecture and [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and workflow. Use [README.md](README.md) for repository orientation and [specs/](specs/) for living product knowledge.
+The engineering standard applies to everyone, not only agents. Read [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md) for architecture and [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and workflow. Use [README.md](README.md) for repository orientation, [specs/](specs/) for living product knowledge, and the shared [SDD skill](.agents/skills/sdd/SKILL.md) for product changes.
 
-## Change documentation
+## How work happens here
 
-Changes that add or revise durable product behavior include a reviewed proposal under `specs/changes/`. Keep the proposal aligned with observable behavior and update the living documents it identifies.
+Classify each change through the SDD skill before implementation. A reviewed change spec is required when a change adds or revises knowledge that belongs in a living document. Only the maintainer may explicitly waive that requirement. Do not introduce product behavior outside a reviewed change spec when one is required.
 
 ## Gates
 
