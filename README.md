@@ -6,5 +6,9 @@ context and build foundations; product behavior will be defined in reviewed chan
 - [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md) — architecture and engineering principles.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — toolchain, workflow, conventions, and definition of done.
 - [AGENTS.md](AGENTS.md) — operational guardrails for coding agents.
+- [backend/](backend/) — Scala 3 service scaffold built with sbt.
+- [frontend/](frontend/) — static HTML entry point for the SolidJS application.
+- [.dagger/](.dagger/) — affected-component CI checks used by GitHub Actions.
 - [specs/](specs/) — living product design, contracts, testing, and operations context.
+- [ci/specs/](ci/specs/) — living documentation for the CI pipeline.
 - [LICENSE](LICENSE) — MIT.

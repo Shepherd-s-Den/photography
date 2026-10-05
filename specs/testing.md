@@ -4,4 +4,4 @@
 
 ## Strategy
 
-Tests should prove observable behavior at the domain, application, UI, and adapter boundaries as product behavior is introduced. Favor real seams and behavior-focused assertions over tests coupled to implementation details.
+The backend gate compiles the Scala 3 source, the frontend gate validates its minimal HTML entry point, and pipeline tests prove affected-component selection. Add behavior-focused tests at domain, application, UI, and adapter boundaries as product behavior is introduced.
