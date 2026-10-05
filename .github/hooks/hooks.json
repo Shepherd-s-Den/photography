@@ -1,0 +1,77 @@
+{
+  "hooks": {
+    "agentStop": [
+      {
+        "args": [
+          "hook",
+          "reflect",
+          "--host",
+          "copilot"
+        ],
+        "exec": "scout",
+        "type": "command"
+      }
+    ],
+    "postToolUse": [
+      {
+        "args": [
+          "hook",
+          "post-compress",
+          "--host",
+          "copilot"
+        ],
+        "exec": "scout",
+        "type": "command"
+      }
+    ],
+    "preCompact": [
+      {
+        "args": [
+          "hook",
+          "compact",
+          "--host",
+          "copilot"
+        ],
+        "exec": "scout",
+        "type": "command"
+      }
+    ],
+    "sessionStart": [
+      {
+        "args": [
+          "hook",
+          "session",
+          "--host",
+          "copilot"
+        ],
+        "exec": "scout",
+        "type": "command"
+      }
+    ],
+    "subagentStart": [
+      {
+        "args": [
+          "hook",
+          "subagent",
+          "--host",
+          "copilot"
+        ],
+        "exec": "scout",
+        "type": "command"
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "args": [
+          "hook",
+          "prompt",
+          "--host",
+          "copilot"
+        ],
+        "exec": "scout",
+        "type": "command"
+      }
+    ]
+  },
+  "version": 1
+}

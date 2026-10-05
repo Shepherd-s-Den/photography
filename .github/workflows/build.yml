@@ -1,0 +1,42 @@
+name: build
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Verify changed components
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Install Dagger
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.21.9 sh
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Verify changed components
+        run: |
+          npm ci --prefix .dagger --no-audit --no-fund
+          dagger develop
+          base="origin/$GITHUB_BASE_REF"
+          components=$(dagger call changed --base="$base")
+          if [[ ",$components," == *,pipeline,* ]]; then
+            npm --prefix .dagger run verify
+          fi
+          dagger call verify --base="$base"
