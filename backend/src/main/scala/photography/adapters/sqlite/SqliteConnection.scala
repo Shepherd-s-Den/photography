@@ -1,28 +1,34 @@
 package photography.adapters.sqlite
 
 import cats.effect.{Async, Resource}
+import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
 import org.sqlite.{SQLiteConfig, SQLiteDataSource}
 import org.typelevel.doobie.Transactor
 import org.typelevel.doobie.util.ExecutionContexts
+import photography.app.SqliteConfig
 
 import scala.util.chaining.*
 
-import java.nio.file.Path
-
 trait SqliteConnection[F[_]]:
-  def transactor: Transactor[F]
+  def transactor: Resource[F, Transactor[F]]
 
 object SqliteConnection:
-  def make[F[_]: Async](configuredPath: Path): Resource[F, SqliteConnection[F]] =
-    for
-      connectExecutionContext <- ExecutionContexts.fixedThreadPool[F](size = 8)
-      dataSource              <- Resource.eval(Async[F].blocking(createDataSource(configuredPath)))
-    yield new LiveSqliteConnection(Transactor.fromDataSource[F](dataSource, connectExecutionContext))
 
-  private def createDataSource(configuredPath: Path): SQLiteDataSource =
-    val path = configuredPath.toAbsolutePath.normalize()
-    val config = new SQLiteConfig().tap(_.enforceForeignKeys(true))
-    new SQLiteDataSource(config).tap(_.setUrl(s"jdbc:sqlite:$path"))
+  def make[F[_]: Async](config: SqliteConfig): SqliteConnection[F] =
+    new LiveSqliteConnection(config)
 
-  final private class LiveSqliteConnection[F[_]](override val transactor: Transactor[F])
-      extends SqliteConnection[F]
+  final private class LiveSqliteConnection[F[_]: Async](config: SqliteConfig) extends SqliteConnection[F]:
+    override def transactor: Resource[F, Transactor[F]] =
+      for
+        connectExecutionContext <- ExecutionContexts.fixedThreadPool[F](size = config.connectionAcquisitionThreads)
+        dataSource              <- Resource.make(Async[F].blocking(createDataSource()))(ds => Async[F].blocking(ds.close()))
+      yield Transactor.fromDataSource[F](dataSource, connectExecutionContext)
+
+    private def createDataSource(): HikariDataSource =
+      val driverConfig     = new SQLiteConfig().tap(_.enforceForeignKeys(true))
+      val sqliteDataSource = new SQLiteDataSource(driverConfig).tap(_.setUrl(s"jdbc:sqlite:${config.path.toAbsolutePath.normalize()}"))
+      new HikariConfig()
+        .tap(_.setDataSource(sqliteDataSource))
+        .tap(_.setMaximumPoolSize(config.maxSessions))
+        .tap(_.setPoolName("photography-sqlite"))
+        .pipe(new HikariDataSource(_))

@@ -7,7 +7,11 @@ import pureconfig.module.catseffect.syntax.*
 
 import java.nio.file.Path
 
-final case class SqliteConfig(path: Path) derives ConfigReader
+final case class SqliteConfig(
+    path: Path,
+    connectionAcquisitionThreads: Int,
+    maxSessions: Int
+) derives ConfigReader
 
 final case class AppConfig(sqlite: SqliteConfig) derives ConfigReader
 
