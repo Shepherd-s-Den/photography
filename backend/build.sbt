@@ -7,7 +7,6 @@ lazy val root = (project in file("."))
     name := "photography-backend",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-core" % "2.13.0",
-      "io.github.iltotore" %% "iron" % "3.3.2",
-      "org.scalameta" %% "munit" % "1.3.6" % Test
+      "io.github.iltotore" %% "iron" % "3.3.2"
     )
   )
