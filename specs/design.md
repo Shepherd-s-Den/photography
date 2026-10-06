@@ -73,7 +73,7 @@ The Scala domain package defines records, identities, refined scalar types, and 
 - The first tab creates a session; a second tab offers takeover or keep-existing. Keeping leaves the new tab inactive without a session.
 - Takeover atomically replaces the session, releases its locks, and creates one for the same profile; the old ID cannot edit or renew. Expiry is exclusive.
 
-Use `DomainRejection` for business-rule failures. Missing records, lock/session outcomes, infrastructure failures, and changed/unchanged mutation reporting belong to use cases.
+Missing records, lock/session outcomes, infrastructure failures, and changed/unchanged mutation reporting belong to use cases.
 
 ## Architecture constraints
 

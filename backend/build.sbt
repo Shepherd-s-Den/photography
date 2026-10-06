@@ -7,6 +7,12 @@ lazy val root = (project in file("."))
     name := "photography-backend",
     libraryDependencies ++= Seq(
       "org.typelevel" %% "cats-core" % "2.13.0",
-      "io.github.iltotore" %% "iron" % "3.3.2"
+      "org.typelevel" %% "cats-effect" % "3.6.3",
+      "io.github.iltotore" %% "iron" % "3.3.2",
+      "com.github.pureconfig" %% "pureconfig-core" % "0.17.9",
+      "com.github.pureconfig" %% "pureconfig-cats-effect" % "0.17.9",
+      "com.github.geirolz" %% "fly4s" % "1.1.1",
+      "org.flywaydb" % "flyway-core" % "11.18.0",
+      "org.xerial" % "sqlite-jdbc" % "3.53.4.0"
     )
   )
