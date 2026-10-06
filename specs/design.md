@@ -56,6 +56,7 @@ The Scala domain package defines records, identities, refined scalar types, and 
 - Spreads retain a matching template ID and kind; applying a template copies geometry into typed slots.
 - New photo slots have no bleed; only photo slots can have bleed, and slot order is spatial. Text slots render owner fields without separate placements.
 - Slot boxes use nonnegative positions and positive InDesign-point distances within the Saal `2381.102 × 765.354 pt` spread.
+- Spread coordinates use the top-left of the full two-page spread as the origin; x increases right and y increases down.
 - Cover front and back slots have distinct IDs, separate from spread-slot IDs; cover slots have no geometry or bleed.
 - Interior pages equal twice the spread count; choose the smallest listed Saal specification that fits, or the 130-page specification above 130.
 - Derive cover geometry from that specification; `SpineOwner` selects the panel extending across the spine. A cover is complete only when both slots are placed (`IncompleteCover`).
@@ -78,4 +79,5 @@ Missing records, lock/session outcomes, infrastructure failures, and changed/unc
 ## Architecture constraints
 
 - The backend is Scala 3 and follows Typelevel and Tagless Final principles.
+- The application maintains the SQLite schema with Flyway on startup.
 - The frontend is intended to use SolidJS and TypeScript.
