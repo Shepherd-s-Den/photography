@@ -7,5 +7,5 @@ object Main extends IOApp.Simple:
 
   override def run: IO[Unit] =
     AppConfig.load[IO].flatMap: config =>
-      AppResourcesBuilder.make[IO](config).use: resources =>
+      AppResourcesBuilder.make[IO](config).build.use: resources =>
         resources.flyway.migrate.flatMap(_ => IO.never[Unit])

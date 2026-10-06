@@ -16,5 +16,5 @@ object FlywayMigrator:
       Fly4sConfig(table = "flyway", locations = List(Location("db")), connectRetries = 3)
     )
 
-  private def jdbcUrl(configuredPath: Path): String =
+  private def jdbcUrl(configuredPath: Path) =
     s"jdbc:sqlite:${configuredPath.toAbsolutePath.normalize()}"

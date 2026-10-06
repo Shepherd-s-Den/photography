@@ -12,8 +12,8 @@ trait AppResourcesBuilder:
 
 object AppResourcesBuilder:
 
-  def make[F[_]: Async](config: AppConfig): Resource[F, AppResources[F]] =
-    new LiveAppResourcesBuilder(config).build
+  def make[F[_]: Async](config: AppConfig): AppResourcesBuilder =
+    new LiveAppResourcesBuilder(config)
 
   private class LiveAppResourcesBuilder(config: AppConfig) extends AppResourcesBuilder:
 
