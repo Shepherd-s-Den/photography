@@ -15,10 +15,10 @@ enum SpreadSlot:
 
 opaque type PhotoSpreadSlotId = UUID
 object PhotoSpreadSlotId:
-  def apply(value: UUID): PhotoSpreadSlotId = value
+  def apply(value: UUID): PhotoSpreadSlotId         = value
   extension (id: PhotoSpreadSlotId) def value: UUID = id
 
 opaque type TextSpreadSlotId = UUID
 object TextSpreadSlotId:
-  def apply(value: UUID): TextSpreadSlotId = value
+  def apply(value: UUID): TextSpreadSlotId         = value
   extension (id: TextSpreadSlotId) def value: UUID = id

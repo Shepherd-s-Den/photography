@@ -7,7 +7,7 @@ import io.github.iltotore.iron.constraint.all.*
 
 opaque type PhotoId = UUID
 object PhotoId:
-  def apply(value: UUID): PhotoId = value
+  def apply(value: UUID): PhotoId         = value
   extension (id: PhotoId) def value: UUID = id
 
 type PixelCount = Int :| Positive

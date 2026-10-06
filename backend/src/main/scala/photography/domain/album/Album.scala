@@ -8,7 +8,7 @@ import photography.domain.layout.Spread.*
 
 opaque type AlbumId = UUID
 object AlbumId:
-  def apply(value: UUID): AlbumId = value
+  def apply(value: UUID): AlbumId         = value
   extension (id: AlbumId) def value: UUID = id
 
 type AlbumName = String :| Not[Empty]

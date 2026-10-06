@@ -7,9 +7,9 @@ import java.util.UUID
 
 opaque type CameraId = UUID
 object CameraId:
-  def apply(value: UUID): CameraId = value
+  def apply(value: UUID): CameraId         = value
   extension (id: CameraId) def value: UUID = id
-  given Order[CameraId] = Order.from((left, right) => left.compareTo(right))
+  given Order[CameraId]                    = Order.from((left, right) => left.compareTo(right))
 
 type CameraExifCode = String :| Not[Empty]
 

@@ -19,7 +19,7 @@ final case class PhotoFrame(
 
 opaque type SpreadPlacementId = UUID
 object SpreadPlacementId:
-  def apply(value: UUID): SpreadPlacementId = value
+  def apply(value: UUID): SpreadPlacementId         = value
   extension (id: SpreadPlacementId) def value: UUID = id
 
 final case class SpreadPlacement(
@@ -32,7 +32,7 @@ final case class SpreadPlacement(
 
 opaque type CoverPlacementId = UUID
 object CoverPlacementId:
-  def apply(value: UUID): CoverPlacementId = value
+  def apply(value: UUID): CoverPlacementId         = value
   extension (id: CoverPlacementId) def value: UUID = id
 
 final case class CoverPlacement(
