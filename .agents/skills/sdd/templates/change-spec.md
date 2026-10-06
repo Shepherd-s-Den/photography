@@ -20,13 +20,14 @@ exploration was needed — never a bare assertion like "already understood." -->
 
 ## What & Why
 
-<!-- Current behavior → new behavior and why, at behavior/intent/domain-contract altitude: no
-file paths, class names, adapter/library choices, module layout, or diff walkthroughs. -->
+<!-- Current behavior → new behavior and why, at behavior/intent/domain-contract altitude.
+Avoid code structure and diff walkthroughs; name a tool only when it is part of the agreed
+behavior. -->
 
 ## Domain / Design Notes
 
-<!-- Required only when domain contracts, ports, or service/boundary contracts change. A little
-"how," still at contract altitude: no file paths, class names, or library choices. -->
+<!-- Include when domain, persisted-data, or boundary contracts change. State the guarantees
+and who enforces them; name constraint mechanisms when that makes the contract testable. -->
 
 ## Alternatives Considered
 
@@ -52,8 +53,8 @@ accessibility behavior where relevant. -->
 
 ## Doc Sync
 
-<!-- Required. Name the doc, the section, and the exact new/revised fact — not a topic name.
-Say "None" in one sentence if nothing changes. -->
+<!-- Required. Name only docs that need a durable update. Point to the authoritative artifact
+instead of repeating its contents. Say "None" if no living doc changes. -->
 
 - <doc> — <section>: <specific knowledge to add or revise>
 
