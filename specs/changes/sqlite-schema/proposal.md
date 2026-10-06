@@ -1,4 +1,4 @@
-# Photography SQLite persistence
+# Photography SQLite schema and startup migrations
 
 > Standard: [Agentic Engineering Standards](https://github.com/Adobe-AIFoundations/agentic-workflow-standards) v1.2.0. Lifetime: open from creation through implementation, archived per [the SDD skill's Archive PR phase](../../../.agents/skills/sdd/SKILL.md).
 
@@ -6,47 +6,47 @@
 
 **Classification:** feature
 
-**Grounded in:** The archived domain contract defines UUID identities, three spread kinds, typed slot and placement variants, and assigns cross-record and lifecycle rules to use cases. Plant-journal demonstrates configuration-driven database location and applying pending migrations before program construction. A migration can be exercised against SQLite directly, before an application data-access boundary exists.
+**Grounded in:** The active Scala model defines the records and variants, and assigns business rules to use cases. Plant-journal and ingest-controller apply Flyway migrations before constructing programs. The real migrations can be exercised against SQLite without a persistence adapter.
 
 ## What & Why
 
-The Scala backend defines the photography domain but cannot persist its records. This change establishes an initial durable representation whose structure can evolve as concrete use cases establish query and transaction needs.
+The service has no SQLite schema. This change stores the active photography model and applies pending Flyway migrations on startup before building application programs. The schema can evolve as implemented use cases reveal real read and transaction needs.
 
 ## Domain / Design Notes
 
-- Spread and template geometry uses InDesign points, with the top-left of the full two-page spread as its origin; positive x moves right and positive y moves down.
-- Identity, ownership, ordering, and other values used in relationships or lookups remain relational. JSON is reserved for values that are opaque to use cases and never queried independently.
-- Use cases own business validation and lifecycle behavior, including explicit cleanup of dependent records.
+- Use `STRICT` tables for storage types and `CHECK` constraints for enum values. Use primary and foreign keys for identity and references, and `UNIQUE` constraints for natural keys, owner-local ordering, and placements. Application connections enable foreign-key enforcement.
+- Use cases enforce path containment, template and placement compatibility, geometry bounds, cross-record rules, and lifecycle behavior. Do not use triggers or cascading cleanup.
+- Keep identity, ownership, order, and lookup fields relational; use JSON only for opaque values. Geometry uses InDesign points, with the top-left of the full two-page spread as its origin; x increases right and y increases down.
 
 ## Alternatives Considered
 
-Porting the Rust schema verbatim was rejected because its persisted identities and spread kinds do not match the current domain contract.
+Copying the Rust schema was rejected because it does not match the active Scala model's identities and variants.
 
 ## Tradeoffs Accepted
 
-Callers needing sub-millisecond timestamp ordering cannot recover that precision after persistence; current photography workflows do not require it.
+Persisted timestamps lose sub-millisecond precision.
 
 ## Acceptance Criteria
 
-- The initialization command reads a configurable database location with a local default. It requires the configured parent directory to exist, applies all pending migrations, and exits successfully. Invalid configuration, an unavailable database location, or a migration failure is reported and produces an unsuccessful exit.
-- Re-running the command against an already initialized database succeeds without losing application data or reapplying completed migrations.
-- The application schema represents the current domain's reference data, album content, gear selections, templates, spreads, slots, covers, placements, sessions, and editing locks. UUID identity columns use `TEXT`; timestamp columns use integer Unix milliseconds.
-- Database constraints reject invalid storage types and enum values, missing referenced records, duplicate reference codes within their kinds, duplicate chapter positions and source folders within an album, duplicate photo sources within a chapter, duplicate spread positions, multiple covers for an album, multiple placements for a photo across spread and cover placements, and multiple placements for each photo-spread or cover slot.
-- A migration-level test runs the real versioned migrations against SQLite, inspects the resulting application schema, explicitly enables foreign-key enforcement on its test connection and verifies orphan inserts fail, and exercises enum and uniqueness constraints.
-- The backend test gate runs the migration-level test.
+- Startup uses a configurable SQLite path with a local default and applies pending migrations before building application programs. A missing parent directory or migration failure stops startup.
+- Restarting preserves application data and does not reapply completed migrations.
+- A fresh database stores every persistent record and variant in the active Scala model. IDs use canonical UUID text and timestamps use integer Unix milliseconds.
+- Invalid storage types and enum values fail insertion. Application connections enable foreign-key enforcement, so missing references fail.
+- Reference codes are unique within their kinds.
+- Chapter positions and folders are unique within an album. Photo source paths are unique within a chapter.
+- Spread positions are unique within their owners. Each album has at most one cover.
+- A photo has at most one placement across its album's spreads and cover. Each spread or cover slot has at most one photo.
+- A migration-level test runs real Flyway migrations on SQLite, checks schema constraints with foreign-key enforcement enabled, and verifies a rerun preserves data.
+- A real startup test verifies migration ordering and failure behavior.
 
 ## Doc Sync
 
-- `specs/contracts.md` — Contract inventory: replace the no-schema statement with the current-domain SQLite persistence contract, its millisecond timestamp precision, relational ownership, and database-versus-use-case responsibilities.
-- `specs/design.md` — Domain model / geometry: record the top-left origin and x-right/y-down direction for the full two-page spread.
-- `specs/design.md` — Architecture constraints: record that the initialization command applies pending migrations before exiting and that future application composition applies them before constructing programs.
-- `specs/operational.md` — Runtime storage: document the configurable database location and local default, the requirement that its parent directory exists, and initialization failure behavior.
-- `specs/testing.md` — Strategy: document direct SQLite migration-level coverage; defer domain-value round-trip and application-connection foreign-key enforcement tests until application database access exists.
-- `CONTRIBUTING.md` — Local development: document that `cd backend && sbt run` initializes the database from configuration and exits, and that `cd backend && sbt test` runs the migration-level tests.
-- `AGENTS.md` — Gates: run backend tests, including migration-level coverage, in the backend gate.
-- `ci/specs/design.md` — Component ownership: state that backend component verification runs the backend test task.
-- `ci/specs/testing.md` — Strategy: include backend migration-level tests in the containerized backend check.
+- `specs/contracts.md` — Contract inventory: point to `backend/src/main/resources/db/` as the authoritative SQLite schema.
+- `specs/design.md` — Architecture constraints: state that the app maintains the database schema with Flyway on startup.
+- `specs/design.md` — Geometry: record the top-left origin and x-right/y-down directions for the full two-page spread.
+- `specs/testing.md` — Strategy: state that database-seam integration tests initialize the schema before exercising database access.
+- `specs/testing.md` — Test names: use the behavior vocabulary exposed by the tested boundary.
 
 ## Out of Scope
 
-- Importing data or migration history from files created by the unreleased Rust backend.
+- Importing data or migration history from the unreleased Rust backend.
