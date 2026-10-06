@@ -140,7 +140,7 @@ enum DomainRejection:
 - Each `Chapter` belongs to one `Album`; each `Photo` belongs to one `Chapter`.
 - Chapter source folders are relative to the album photo root, and photo sources are relative to their chapter folder; locations cannot escape their owning root.
 - Photo dimensions are positive pixel counts. Country codes contain two uppercase ASCII letters. Domain-specific names are nonempty.
-- An editor session is live from its last heartbeat through its derived expiry, excluding the expiry instant.
+- A persisted editor session is live from its last heartbeat through its derived expiry, excluding the expiry instant.
 
 ## Acceptance Criteria
 
@@ -158,11 +158,14 @@ enum DomainRejection:
 - Each photo has at most one placement in an album, and each slot has at most one placement; duplicate assignments are rejected as `PhotoAlreadyPlaced` or `SlotOccupied`. Chapter spread placements may use only photos from their chapter; `AlbumStart` and cover placements may use any photo in the album. A photo from another chapter in the same album is rejected as `PhotoFromDifferentChapter`; a photo from another album is rejected as `PhotoFromDifferentAlbum`. A placed photo's transform consists of two-axis point shift, mirroring, and positive zoom with no independent upper limit; transforms that fail to cover the entire slot are rejected as `PhotoDoesNotCoverSlot`.
 - `VisitPeriod` requires `start < end`. Country flags are absolute filesystem locations.
 - A Lens belongs only to an `InterchangeableLens` camera; attempting to associate one with a `FixedLens` camera is rejected as `LensRequiresInterchangeableCamera`. A `FixedLens` camera uses `CameraUse.FixedLens`; an `InterchangeableLens` camera uses a nonempty `Interchangeable` lens set containing only its own lenses. Mismatched camera use or selecting a lens from another camera is rejected as `InvalidGearSelection`.
+- An `EditorId` identifies one browser profile pseudonymously and remains stable across its tabs and reconnects. It is distinct from `User-Agent` metadata and any display alias, and does not authenticate a person. `EditorSession.id` identifies the active session; each `EditorId` has at most one live `EditorSession`.
+- When a browser profile has no live session, its active tab creates one without a takeover prompt.
+- Opening the app in another tab for the same `EditorId` while a session is live prompts the user to switch to the new tab or keep the existing tab. Keeping the existing tab leaves the new tab inactive and creates no session. Switching atomically removes the old `EditorSession`, releases its editing locks, and creates a new session for the same `EditorId`; requests using the old `SessionId` can no longer edit or renew the session.
 - Business-rule rejections are `DomainRejection` cases. Missing records, lock/session outcomes, infrastructure failures, and changed/unchanged mutation reporting belong to the use-case layer.
 
 ## Doc Sync
 
-- `specs/design.md` — Domain model: record the finalized ownership and composition relationships, including template-instantiated spreads and album-owned covers with page-count-specific Saal geometry.
+- `specs/design.md` — Domain model: record finalized ownership and composition, template-instantiated spreads, page-count-specific Saal cover geometry, and one live editor session per browser profile with explicit tab takeover.
 
 ## Out of Scope
 
