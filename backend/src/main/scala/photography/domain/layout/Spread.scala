@@ -10,7 +10,7 @@ type PositionInChapter = Int :| Positive
 
 opaque type SpreadId = UUID
 object SpreadId:
-  def apply(value: UUID): SpreadId = value
+  def apply(value: UUID): SpreadId         = value
   extension (id: SpreadId) def value: UUID = id
 
 enum SpreadOwner:

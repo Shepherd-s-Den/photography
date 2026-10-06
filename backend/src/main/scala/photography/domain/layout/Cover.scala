@@ -11,7 +11,7 @@ enum CoverPanel derives CanEqual:
 
 opaque type CoverSlotId = UUID
 object CoverSlotId:
-  def apply(value: UUID): CoverSlotId = value
+  def apply(value: UUID): CoverSlotId         = value
   extension (id: CoverSlotId) def value: UUID = id
 
 final case class CoverSlot(id: CoverSlotId)

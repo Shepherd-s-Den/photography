@@ -10,12 +10,12 @@ import java.util.UUID
 
 opaque type EditorId = UUID
 object EditorId:
-  def apply(value: UUID): EditorId = value
+  def apply(value: UUID): EditorId         = value
   extension (id: EditorId) def value: UUID = id
 
 opaque type SessionId = UUID
 object SessionId:
-  def apply(value: UUID): SessionId = value
+  def apply(value: UUID): SessionId         = value
   extension (id: SessionId) def value: UUID = id
 
 type SessionLease = Long :| Positive
