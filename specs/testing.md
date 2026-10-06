@@ -8,4 +8,4 @@ The backend gate compiles the Scala 3 source, the frontend gate validates its mi
 
 ## Test names
 
-Use the behavior vocabulary exposed by the tested boundary.
+Name tests for the behavior they verify.

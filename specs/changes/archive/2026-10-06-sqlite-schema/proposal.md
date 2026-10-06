@@ -39,4 +39,4 @@ Consumers lose sub-millisecond timestamp precision after persistence.
 - `specs/design.md` — Architecture constraints: state that the app maintains the database schema with Flyway on startup.
 - `specs/design.md` — Geometry: record the top-left origin and x-right/y-down directions for the full two-page spread.
 - `specs/testing.md` — Strategy: state that database-seam integration tests initialize the schema before exercising database access.
-- `specs/testing.md` — Test names: use the behavior vocabulary exposed by the tested boundary.
+- `specs/testing.md` — Test names: say what behavior each test verifies.
