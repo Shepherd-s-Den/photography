@@ -13,5 +13,9 @@ export function backendCheck(source: Dagger.Directory): Dagger.Container {
     .withMountedCache("/root/.ivy2", Dagger.dag.cacheVolume("photography-ivy2"))
     .withDirectory("/work", source.directory("backend"))
     .withWorkdir("/work")
-    .withExec(["sbt", "-batch", "-Dsbt.color=false", "compile"]);
+    .withExec([
+      "sh",
+      "-c",
+      "sbt -batch -Dsbt.color=false compile && sbt -batch -Dsbt.color=false 'scalafixAll --check'",
+    ]);
 }

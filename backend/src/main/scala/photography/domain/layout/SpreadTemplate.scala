@@ -1,6 +1,5 @@
 package photography.domain.layout
 
-import cats.Order
 import cats.data.NonEmptySet
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*

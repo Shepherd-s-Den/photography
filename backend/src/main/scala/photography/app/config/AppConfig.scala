@@ -5,7 +5,9 @@ import pureconfig.ConfigReader
 import pureconfig.ConfigSource
 import pureconfig.module.catseffect.syntax.*
 
-final case class SqliteConfig(path: String) derives ConfigReader
+import java.nio.file.Path
+
+final case class SqliteConfig(path: Path) derives ConfigReader
 
 final case class AppConfig(sqlite: SqliteConfig) derives ConfigReader
 

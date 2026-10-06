@@ -4,12 +4,17 @@ import cats.effect.{Async, Resource}
 import fly4s.Fly4s
 import fly4s.data.{Fly4sConfig, Location}
 
+import java.nio.file.Path
+
 object FlywayMigrator:
 
-  def make[F[_]: Async](sqlite: SqliteConnection): Resource[F, Fly4s[F]] =
+  def make[F[_]: Async](configuredPath: Path): Resource[F, Fly4s[F]] =
     Fly4s.make[F](
-      sqlite.jdbcUrl,
+      jdbcUrl(configuredPath),
       user = Option.empty[String],
       password = Option.empty[Array[Char]],
       Fly4sConfig(table = "flyway", locations = List(Location("db")), connectRetries = 3)
     )
+
+  private def jdbcUrl(configuredPath: Path): String =
+    s"jdbc:sqlite:${configuredPath.toAbsolutePath.normalize()}"
