@@ -4,4 +4,4 @@
 
 ## Contract inventory
 
-No product-facing API, persisted-data schema, or external integration contract is defined yet. Add each contract here when a reviewed change introduces it, linking to its authoritative schema or interface.
+The SQLite schema is defined by migrations in [`backend/src/main/resources/db/`](../backend/src/main/resources/db/).
