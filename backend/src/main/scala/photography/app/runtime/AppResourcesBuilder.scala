@@ -12,7 +12,7 @@ trait AppResourcesBuilder:
 
 object AppResourcesBuilder:
 
-  def make[F[_]: Async](config: AppConfig): AppResourcesBuilder =
+  def make(config: AppConfig): AppResourcesBuilder =
     new LiveAppResourcesBuilder(config)
 
   private class LiveAppResourcesBuilder(config: AppConfig) extends AppResourcesBuilder:
