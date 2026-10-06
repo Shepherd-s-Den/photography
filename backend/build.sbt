@@ -23,6 +23,10 @@ lazy val root = (project in file("."))
     semanticdbEnabled := true,
     semanticdbVersion := scalafixSemanticdb.revision,
     wartremoverErrors ++= Warts.all,
+    coverageMinimumStmtTotal   := 100,
+    coverageMinimumBranchTotal := 100,
+    coverageFailOnMinimum      := true,
+    coverageExcludedPackages   := "photography\\.app\\.runtime\\..*",
     libraryDependencies ++= Seq(
       "org.typelevel"         %% "cats-core"              % "2.13.0",
       "org.typelevel"         %% "cats-effect"            % "3.6.3",
@@ -33,6 +37,10 @@ lazy val root = (project in file("."))
       "com.github.pureconfig" %% "pureconfig-cats-effect" % "0.17.9",
       "com.github.geirolz"    %% "fly4s"                  % "1.1.1",
       "org.flywaydb"           % "flyway-core"            % "11.18.0",
-      "org.xerial"             % "sqlite-jdbc"            % "3.53.4.0"
+      "org.xerial"             % "sqlite-jdbc"            % "3.53.4.0",
+      "org.http4s"            %% "http4s-dsl"             % "0.23.33",
+      "org.http4s"            %% "http4s-ember-server"    % "0.23.33",
+      "org.http4s"            %% "http4s-ember-client"    % "0.23.33" % Test,
+      "org.typelevel"         %% "munit-cats-effect"      % "2.1.0"   % Test
     )
   )

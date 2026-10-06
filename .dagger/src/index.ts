@@ -3,6 +3,7 @@ import { argument, func, object } from "@dagger.io/dagger";
 import { WORKSPACE_IGNORE } from "./buildEnv";
 import { backendCheck } from "./hooks/backend";
 import { frontendCheck } from "./hooks/frontend";
+import { localRunnerCheck as localRunnerCheckJob } from "./hooks/localRunner";
 import { pipelineCheck } from "./hooks/pipeline";
 import * as Git from "./hooks/git";
 import * as Selection from "./selection";
@@ -36,6 +37,7 @@ export class Photography {
     const done: string[] = [];
     if (components.includes("backend")) {
       await this.backendCheck(source);
+      await this.localRunnerCheck(source);
       done.push("backend");
     }
     if (components.includes("frontend")) {
@@ -54,6 +56,13 @@ export class Photography {
     @argument({ defaultPath: "/", ignore: WORKSPACE_IGNORE }) source: Dagger.Directory,
   ): Promise<string> {
     return backendCheck(source).stdout();
+  }
+
+  @func()
+  localRunnerCheck(
+    @argument({ defaultPath: "/", ignore: WORKSPACE_IGNORE }) source: Dagger.Directory,
+  ): Promise<string> {
+    return localRunnerCheckJob(source).stdout();
   }
 
   @func()

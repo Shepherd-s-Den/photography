@@ -13,6 +13,7 @@ describe("parseChangedPaths", () => {
 describe("componentsForPath", () => {
   it("should map backend and frontend paths to their own component", () => {
     expect(Selection.componentsForPath("backend/build.sbt")).toEqual(["backend"]);
+    expect(Selection.componentsForPath("scripts/local.py")).toEqual(["backend"]);
     expect(Selection.componentsForPath("frontend/index.html")).toEqual(["frontend"]);
   });
 
