@@ -8,41 +8,48 @@ This repository is the starting point for a photography application. Product con
 
 ## Domain model
 
-The Scala domain package defines the domain records, identities, refined scalar types, and closed alternatives. Use cases must enforce cross-record, lifecycle, and geometry invariants; adapters validate external representations and route mutations through those use cases.
+```mermaid
+flowchart LR
+  Album -->|one| AlbumStart["AlbumStart spread"]
+  Album -->|one| Cover
+  Album -->|0..20| Chapter
+  Chapter -->|one| ChapterStart["ChapterStart spread"]
+  Chapter -->|many| PhotosOnly["PhotosOnly spread"]
+  Chapter -->|owns| Photo
+  Chapter --> Destination --> Country
+  Photo --> PhotoDimensions
+  AlbumStart & ChapterStart & PhotosOnly --> Spread
+  Spread --> SpreadOwner
+  SpreadOwner --> Album
+  SpreadOwner --> Chapter
+  Spread --> SpreadTemplate
+  SpreadTemplate --> TemplateSlot["Template slot: Photo or Text"] --> SlotBox
+  Spread --> SpreadSlot["Spread slot: Photo or Text"]
+  SpreadSlot --> SlotBox
+  SpreadSlot --> PhotoSlot["Photo slot"]
+  SpreadSlot --> TextSlot["Text slot"]
+  PhotoSlot --> SpreadPlacement --> Photo
+  Cover --> CoverSlot --> CoverPlacement --> Photo
+  Cover --> SpineOwner
+  Chapter --> ChapterGearSelection --> CameraUse
+  CameraUse --> Camera
+  CameraUse --> Lens
+  EditorId["Browser profile: EditorId"] -->|at most one live| EditorSession["EditorSession: SessionId"]
+  EditorSession --> EditingLock --> EditingTarget
+  EditingTarget --> Spread
+  EditingTarget --> Cover
+```
 
-### Ownership and composition
+The Scala domain package defines records, identities, refined scalar types, and closed alternatives. Use cases enforce cross-record and lifecycle rules; adapters validate external values and route mutations through use cases.
 
-- An album has exactly one album-start spread and one cover. A chapter belongs to one album and has exactly one chapter-start spread; a photo belongs to one chapter.
-- An album has at most 20 chapters with unique positions from 0 through 19. Album-start and chapter-start spreads occupy implicit position zero. Photos-only spreads have unique positions within their chapter, beginning at one. Reject an added 21st chapter as `ChapterLimitReached`, a reused chapter position as `ChapterPositionOccupied`, and a reused photos-only position as `SpreadPositionOccupied`.
-- Each spread retains its template identity, and a spread's kind must match its template kind; reject a mismatched template kind as `SpreadTemplateKindMismatch`.
-- Chapter source folders are relative to the album's photo root; photo sources are relative to their chapter's folder. Neither location may escape its owning root. Chapter source folders are unique within an album, and photo sources are unique within a chapter. Reject duplicate paths as `DuplicateChapterSourceFolder` or `DuplicatePhotoSource`.
-- Visit periods require `start < end`. Photo dimensions are positive pixel counts. Domain names are nonempty, country codes are two uppercase ASCII letters, and country flags are absolute filesystem locations.
-- Country codes, camera EXIF codes, and lens EXIF codes are unique within their respective entity kinds; reject duplicates as `DuplicateReferenceCode`.
+- **Composition:** Each album has one `AlbumStart` and cover; each chapter belongs to an album and has one `ChapterStart`; photos belong to chapters. Albums have at most 20 chapters at unique positions `0..19`; start spreads use position zero, and `PhotosOnly` positions are unique from one.
+- **Values and sources:** Visit periods require `start < end`; dimensions are positive, names nonempty, country codes two uppercase ASCII letters, and flags absolute. Paths are relative to owner roots, cannot escape them, and are unique within their owner. Country, camera, and lens reference codes are unique by kind.
+- **Templates and slots:** Start templates have exactly one text slot; `PhotosOnly` templates contain only photo slots; templates are nonempty. Spreads retain a matching template ID and kind. Instantiation copies geometry into typed slots; photo slots start without bleed, only photo slots can have bleed, and slots are spatially ordered. Text renders owner fields without a separate placement. Slot boxes fit within the Saal `2381.102 × 765.354 pt` spread, using nonnegative positions and positive InDesign-point distances.
+- **Covers:** Front and back IDs are distinct from each other and from spread-slot IDs; cover slots have no boxes or bleed. Interior pages equal twice the spread count; choose the smallest listed Saal specification that fits, or the 130-page specification above 130. Derive geometry from that specification; `SpineOwner` selects the panel extending over the spine. Completion requires both slots (`IncompleteCover`).
+- **Placements and gear:** Each photo and slot is placed at most once per album. Chapter spreads accept photos only from their chapter; album-start and cover placements accept any photo in the album. Transforms use two-axis shifts, mirroring, and positive uncapped zoom, and must cover the slot. Fixed-lens cameras use `CameraUse.FixedLens`; interchangeable-lens cameras require a nonempty set of their own lenses.
+- **Editor sessions:** `EditorId` is a persistent pseudonymous browser-profile identity, stable across tabs and reconnects, not User-Agent metadata or authentication; `SessionId` identifies the live session. The first tab creates a session. A second tab offers takeover or keep-existing; keeping leaves it inactive without a session. Takeover replaces the session, releases its locks, and creates one for the same profile; the old ID cannot edit or renew. Expiry is exclusive.
 
-### Templates, spreads, and covers
-
-- Album-start and chapter-start templates have exactly one text slot; photos-only templates contain only photo slots. Every template has at least one slot. Reject templates that violate these rules as `InvalidSpreadTemplate`.
-- Applying a template creates the corresponding typed spread slots and copies each slot's geometry. New photo slots have no bleed edges; only photo slots can have bleed edges. Slot order is spatial, with no separately stored order. Text slots render their owning album or chapter fields and have no separate text placement.
-- Photo placements accept only photo-slot identities; a text-slot identity cannot be used for a photo placement.
-- Slot boxes use nonnegative absolute positions and positive distances in InDesign points, and fit within the Saal Digital 42 × 28 cm two-page spread (`2381.102 × 765.354 pt`).
-- A cover belongs to one album and has distinct front and back cover-slot identities. Cover-slot identities are separate from spread-slot identities. Cover slots have no slot boxes or bleed edges.
-- The finished interior page count is twice the album's spread count. Select the smallest listed Saal Digital cover specification whose page count meets or exceeds that count; for counts above 130, use the 130-page specification. Derive cover geometry from the selected page-count specification, including its spine, wrap, and bleed dimensions. `SpineOwner` determines which panel's photo frame extends across the spine.
-- A cover may remain incomplete during composition. Completing it requires placements for both cover slots; an earlier completion attempt is rejected as `IncompleteCover`. Cover placements are separate entities created when a photo is assigned.
-
-### Placements and gear
-
-- A photo has at most one placement in an album, and a slot has at most one placement. Duplicate photo assignments are rejected as `PhotoAlreadyPlaced`; occupied slots are rejected as `SlotOccupied`.
-- Chapter-spread placements use photos from that chapter. Album-start and cover placements may use any photo in the album. Cross-chapter assignments are rejected as `PhotoFromDifferentChapter`; cross-album assignments are rejected as `PhotoFromDifferentAlbum`.
-- A photo transform has a two-axis shift, mirroring, and positive zoom with no independent upper limit. A transform must cover the entire slot; otherwise reject it as `PhotoDoesNotCoverSlot`.
-- A lens belongs only to an interchangeable-lens camera. Fixed-lens cameras use `CameraUse.FixedLens`; interchangeable-lens cameras use a nonempty set of their own lenses. Invalid camera/lens associations are rejected as `LensRequiresInterchangeableCamera` or `InvalidGearSelection`.
-
-### Editor sessions
-
-- `EditorId` is a persistent pseudonymous browser-profile identity, stable across that profile's tabs and reconnects. It is distinct from User-Agent metadata and display aliases, and is not authentication. `SessionId` identifies the active session. Each `EditorId` has at most one live session.
-- A profile without a live session creates one in its first active tab. Opening another tab for that profile while a session is live offers takeover or keeping the existing tab. Keeping leaves the new tab inactive and creates no session.
-- Taking over atomically removes the old session, releases its locks, and creates a new session for the same `EditorId`. The old `SessionId` can no longer edit or renew. A session is live from its last heartbeat until (but not including) its derived expiry.
-
-Business-rule rejections use `DomainRejection`. Missing records, lock/session outcomes, infrastructure failures, and changed/unchanged mutation reporting are use-case concerns.
+Use `DomainRejection` for business-rule failures. Missing records, lock/session outcomes, infrastructure failures, and changed/unchanged mutation reporting belong to use cases.
 
 ## Architecture constraints
 
