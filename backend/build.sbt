@@ -4,5 +4,10 @@ ThisBuild / version      := "0.1.0"
 
 lazy val root = (project in file("."))
   .settings(
-    name := "photography-backend"
+    name := "photography-backend",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %% "cats-core" % "2.13.0",
+      "io.github.iltotore" %% "iron" % "3.3.2",
+      "org.scalameta" %% "munit" % "1.3.6" % Test
+    )
   )
