@@ -58,6 +58,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 ## Scala composition
 
 - Express effectful application boundaries as traits parameterized by an effect type, such as `F[_]`; keep pure domain values independent of runtime effects.
+- Use Cats syntax for value construction (`.pure[F]`, `.some`, `.asRight`, `.asLeft`, and related operations) instead of explicit typeclass calls or `Some`/`Right`/`Left` constructors where syntax applies.
 - Keep business orchestration visible in the public service method. Similar workflows should have visibly similar structure; do not hide their ordering or compensation inside helpers.
 - Give each helper one responsibility and return the narrowest type that describes it. A persistence or domain-step helper must not construct the caller's public result.
 - Keep effectful sequencing linear. Avoid deeply nested `flatMap`, matches, or conditionals; extract a meaningful step or model the additional state explicitly.
