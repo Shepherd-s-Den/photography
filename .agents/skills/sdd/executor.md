@@ -12,15 +12,7 @@ Also make the complexity call here, before the spec (`DESIGN-PRINCIPLES.md` §7)
 
 ## Spike
 
-Every feature gets a spike, including one that seems understood on paper. Pin and record the stable `main` commit, then layer only the missing journey onto that real app in ignored `.agent-work/<slug>/spike/`. Keep frontend sources and dependencies in `frontend/`, optional backend route composition in `backend/`, and scratch data in `data/`.
-
-Set `.agent-work/active-prototype` to the slug and run `python3 scripts/local.py`. The launcher starts the real backend with an isolated SQLite database, starts the spike frontend, and opens its local URL. When backend behavior is needed, provide `backend/photography/spike/Main.scala`; the launcher sets `PHOTOGRAPHY_PROTOTYPE_MODE=1` only for that backend process, compiling ignored spike sources and relaxing compiler, Wartremover, and coverage enforcement for the local run. Ordinary builds and Dagger checks leave the flag unset. Without that entry point, the launcher runs the stable backend with normal checks.
-
-Keep the spike focused and disposable. No tests, coverage, code-quality checklist, or production gates apply; build only what is needed to demonstrate the journey. Keep every prototype source, config, dependency file, and scratch record under ignored `.agent-work/<slug>/`; never copy spike code into a product PR. Reuse this launcher contract for later features.
-
-When spiking: actually try to solve it — throwaway code, a prototype of the hard part, working the algorithm by hand against real APIs — until you can state, concretely, the domain types, the ports, the real edge cases, and whether the approach is tractable at all. This code is disposable: it never needs to pass `AGENTS.md`'s gates, is never the Implementation PR's diff, and is not reviewed.
-
-Show the user the running journey and iterate until they confirm it. Record the stable base revision, exact command, URL, decision, and findings in `.agent-work/<slug>/checklist.md`. In the Spec PR, `Grounded in` names observed findings; carry distinct design consequences into `Domain / Design Notes`.
+Follow the Spike workflow in [`SKILL.md`](SKILL.md). This file adds no separate spike procedure.
 
 ## Spec PR
 

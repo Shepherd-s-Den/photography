@@ -8,7 +8,7 @@ The backend gate compiles the Scala 3 source and enforces 100% statement and bra
 
 `backend/build.sbt` temporarily excludes the runtime and SQLite adapter packages plus specific currently untested domain ID/location classlikes. Remove those exclusions as behavior tests cover them.
 
-The frontend gate runs SolidJS TypeScript checking, lint, formatting, dependency-cruiser boundaries, component/seam-integration tests with 100% statement, branch, function, and line coverage, and a production build.
+The frontend gate runs its configured type, lint, format, boundary, test, coverage, and build checks.
 
 Pipeline tests prove affected-component selection.
 

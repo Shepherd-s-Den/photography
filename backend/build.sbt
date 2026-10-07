@@ -2,24 +2,9 @@ ThisBuild / scalaVersion := "3.8.4"
 ThisBuild / organization := "com.cosminci"
 ThisBuild / version      := "0.1.0"
 
-val localPrototypeMode    = sys.env.get("PHOTOGRAPHY_PROTOTYPE_MODE").contains("1")
-val localPrototypeSources =
-  if (!localPrototypeMode) Seq.empty
-  else {
-    val marker = file("../.agent-work/active-prototype")
-    if (!marker.exists) Seq.empty
-    else {
-      val slug = IO.read(marker).trim
-      if (slug.matches("[a-z0-9]+(?:-[a-z0-9]+)*"))
-        Seq(file(s"../.agent-work/$slug/spike/backend").getCanonicalFile)
-      else Seq.empty
-    }
-  }
-
 lazy val root = (project in file("."))
   .settings(
     name := "photography-backend",
-    Compile / unmanagedSourceDirectories ++= localPrototypeSources,
     scalacOptions ++= Seq(
       "-encoding",
       "utf8",
@@ -34,23 +19,13 @@ lazy val root = (project in file("."))
       "-Wsafe-init",
       "-java-output-version",
       "21"
-    ).filterNot(option =>
-      localPrototypeMode &&
-        (Set(
-          "-Werror",
-          "-Wunused:all",
-          "-Wvalue-discard",
-          "-Wnonunit-statement",
-          "-Wshadow:all",
-          "-Wsafe-init"
-        ).contains(option) || option.startsWith("-P:wartremover:traverser:"))
     ),
     semanticdbEnabled := true,
     semanticdbVersion := scalafixSemanticdb.revision,
-    wartremoverErrors ++= (if (localPrototypeMode) Seq.empty else Warts.all),
-    coverageMinimumStmtTotal   := (if (localPrototypeMode) 0 else 100),
-    coverageMinimumBranchTotal := (if (localPrototypeMode) 0 else 100),
-    coverageFailOnMinimum      := !localPrototypeMode,
+    wartremoverErrors ++= Warts.all,
+    coverageMinimumStmtTotal   := 100,
+    coverageMinimumBranchTotal := 100,
+    coverageFailOnMinimum      := true,
     coverageExcludedPackages   := Seq(
       "photography\\.app\\.runtime\\..*",
       "photography\\.adapters\\.sqlite\\..*",
@@ -75,5 +50,5 @@ lazy val root = (project in file("."))
       "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
       "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
       "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test
-    ) ++ (if (localPrototypeMode) Seq("io.circe" %% "circe-parser" % "0.14.14") else Seq.empty)
+    )
   )

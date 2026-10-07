@@ -14,7 +14,7 @@ flowchart LR
 
 ## Component ownership
 
-- `backend/` changes run the Scala compiler in a pinned JDK and sbt container.
-- `frontend/` changes run the SolidJS TypeScript, lint, format, dependency-boundary, coverage, and production-build checks in a pinned Node container.
+- `backend/` changes run the backend gate in a pinned JDK and sbt container.
+- `frontend/` changes run the frontend gate in a pinned Node container.
 - `.dagger/`, `dagger.json`, and `.github/` changes run the Dagger module's type, lint, format, and unit-test gates.
 - The pipeline module owns path selection and containerized component checks.

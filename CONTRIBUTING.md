@@ -20,7 +20,7 @@ cd backend && sbt compile
 
 Run the local backend service with `python3 scripts/local.py` from the repository root.
 
-For the frontend scaffold, run `npm ci && npm run dev` from `frontend/`. To run an ignored feature spike, set `.agent-work/active-prototype` to its slug and run `python3 scripts/local.py`; the launcher starts the spike against the real backend and isolated scratch database, then opens the UI.
+Install frontend dependencies with `npm ci` from `frontend/`, then run `python3 scripts/local.py` from the repository root to start the current checkout.
 
 | Task | Command |
 | --- | --- |
@@ -36,10 +36,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 | Path | What |
 | --- | --- |
 | `backend/` | Scala 3 backend scaffold. |
-| `frontend/src/app/` | SolidJS application shell and composition root. |
-| `frontend/src/features/` | Independently testable user workflows. |
-| `frontend/src/shared/` | Cross-feature UI and utilities. |
-| `frontend/test/` | Component and seam-integration tests mirroring `src/`. |
+| `frontend/` | SolidJS frontend and tests. |
 | `.dagger/` | TypeScript Dagger CI module. |
 | `specs/` | Living product design, contracts, testing, and operational context. |
 | `ci/specs/` | Living documentation for the CI pipeline. |

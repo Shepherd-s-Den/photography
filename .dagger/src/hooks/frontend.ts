@@ -1,7 +1,7 @@
 import { type Container, dag, type Directory } from "@dagger.io/dagger";
 import { NODE_IMAGE } from "../buildEnv";
 
-/** Runs the frontend's type, lint, format, boundary, coverage, and build gates. */
+/** Runs the frontend gate. */
 export function frontendCheck(source: Directory): Container {
   return dag
     .container()
