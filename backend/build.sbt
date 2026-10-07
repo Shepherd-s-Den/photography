@@ -33,7 +33,7 @@ lazy val root = (project in file("."))
     ).mkString(";"),
     libraryDependencies ++= Seq(
       "org.typelevel"         %% "cats-core"                 % "2.13.0",
-      "org.typelevel"         %% "cats-effect"               % "3.6.3",
+      "org.typelevel"         %% "cats-effect"               % "3.7.1",
       "io.github.iltotore"    %% "iron"                      % "3.3.2",
       "io.github.iltotore"    %% "iron-pureconfig"           % "3.0.2",
       "org.typelevel"         %% "doobie-core"               % "1.0.0-RC13",
