@@ -10,7 +10,7 @@
 
 ## What & Why
 
-The backend has no HTTP service, local launcher, or coverage gate. Establish these foundations so later API slices can be developed and exercised end to end.
+The service exposes HTTP readiness only after SQLite migrations and listener startup succeed. A local launcher and Dagger coverage gate make the backend reliable to run and verify as later API slices are added.
 
 ## Domain / Design Notes
 
