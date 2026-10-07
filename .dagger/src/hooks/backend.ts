@@ -17,6 +17,6 @@ export function backendCheck(source: Dagger.Directory): Dagger.Container {
       "sbt",
       "-batch",
       "-Dsbt.color=false",
-      "compile; test; scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck",
+      "coverage; test; coverageReport; scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck",
     ]);
 }

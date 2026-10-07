@@ -13,7 +13,12 @@ export function parseChangedPaths(raw: string): readonly string[] {
 export function componentsForPath(path: string): readonly Component[] {
   if (path.startsWith("backend/")) return ["backend"];
   if (path.startsWith("frontend/")) return ["frontend"];
-  if (path === "dagger.json" || path.startsWith(".dagger/") || path.startsWith(".github/"))
+  if (
+    path === "dagger.json" ||
+    path.startsWith(".dagger/") ||
+    path.startsWith("scripts/") ||
+    path.startsWith(".github/")
+  )
     return ["pipeline"];
   return [];
 }

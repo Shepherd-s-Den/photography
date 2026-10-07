@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+
+from dataclasses import dataclass
+import fcntl
+import json
+import os
+from pathlib import Path
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from typing import Mapping
+import urllib.error
+import urllib.request
+
+
+DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8080
+READINESS_TIMEOUT_SECONDS = 180
+PROCESS_SHUTDOWN_TIMEOUT_SECONDS = 10
+
+
+class PreflightError(RuntimeError):
+    pass
+
+
+class AlreadyRunning(PreflightError):
+    pass
+
+
+class StartupError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class LocalState:
+    directory: Path
+    database: Path
+    lock: Path
+
+
+def make_local_state(project_root: Path) -> LocalState:
+    directory = project_root / ".local"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(directory, 0o700)
+    return LocalState(
+        directory=directory,
+        database=directory / "photography.db",
+        lock=directory / "photography.lock",
+    )
+
+
+def acquire_instance_lock(lock_path: Path):
+    lock_file = lock_path.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        lock_file.close()
+        raise AlreadyRunning("Another local photography backend is already running") from error
+    return lock_file
+
+
+def port_available(host: str, port: int) -> bool:
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError:
+        return False
+    if not addresses:
+        return False
+
+    family, socket_type, protocol, _, address = addresses[0]
+    with socket.socket(family, socket_type, protocol) as listener:
+        try:
+            listener.bind(address)
+        except OSError:
+            return False
+    return True
+
+
+def preflight(host: str, port: int) -> None:
+    for executable in ("java", "sbt"):
+        if shutil.which(executable) is None:
+            raise PreflightError(f"Required executable '{executable}' was not found on PATH")
+    if not port_available(host, port):
+        raise PreflightError(f"Port {port} is unavailable on {host}")
+
+
+def service_url(host: str, port: int) -> str:
+    display_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+    if ":" in display_host and not display_host.startswith("["):
+        display_host = f"[{display_host}]"
+    return f"http://{display_host}:{port}"
+
+
+def health_url(host: str, port: int) -> str:
+    return f"{service_url(host, port)}/health"
+
+
+def health_check(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:
+            content_type = response.headers.get_content_type()
+            payload = json.loads(response.read().decode("utf-8"))
+            return response.status == 200 and content_type == "application/json" and payload == {"status": "ok"}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ConnectionError):
+        return False
+
+
+def wait_for_readiness(
+    process: subprocess.Popen[bytes],
+    url: str,
+    timeout: int = READINESS_TIMEOUT_SECONDS,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        exit_code = process.poll()
+        if exit_code is not None:
+            raise StartupError(f"Backend exited before readiness with status {exit_code}")
+        if health_check(url):
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Backend did not become ready within {timeout} seconds")
+        time.sleep(min(1, remaining))
+
+
+def stop_process_tree(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=PROCESS_SHUTDOWN_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        process.wait()
+
+
+def parse_port(environment: Mapping[str, str]) -> int:
+    raw_port = environment.get("PHOTOGRAPHY_PORT")
+    if raw_port is None:
+        return DEFAULT_PORT
+    try:
+        port = int(raw_port)
+    except ValueError as error:
+        raise PreflightError("PHOTOGRAPHY_PORT must be an integer in 1..65535") from error
+    if port < 1 or port > 65535:
+        raise PreflightError("PHOTOGRAPHY_PORT must be an integer in 1..65535")
+    return port
+
+
+def run_local_backend(project_root: Path, environment: Mapping[str, str] | None = None) -> int:
+    launch_environment = dict(os.environ if environment is None else environment)
+    state = make_local_state(project_root)
+    lock_file = acquire_instance_lock(state.lock)
+    process: subprocess.Popen[bytes] | None = None
+    try:
+        host = launch_environment.get("PHOTOGRAPHY_HOST") or DEFAULT_HOST
+        port = parse_port(launch_environment)
+        preflight(host, port)
+        launch_environment["PHOTOGRAPHY_SQLITE_PATH"] = str(state.database)
+        process = subprocess.Popen(
+            ["sbt", "-batch", "run"],
+            cwd=project_root / "backend",
+            env=launch_environment,
+            start_new_session=True,
+        )
+        endpoint = service_url(host, port)
+        wait_for_readiness(process, f"{endpoint}/health")
+        print(f"Photography backend ready at {endpoint}")
+        return process.wait()
+    finally:
+        try:
+            if process is not None:
+                stop_process_tree(process)
+        finally:
+            lock_file.close()
+
+
+def main() -> int:
+    project_root = Path(__file__).resolve().parent.parent
+    try:
+        return run_local_backend(project_root)
+    except (PreflightError, StartupError, OSError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
