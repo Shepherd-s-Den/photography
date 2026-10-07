@@ -1,33 +1,22 @@
 package photography.app
 
 import cats.effect.Async
-import cats.syntax.all.*
+import com.comcast.ip4s.{Host, Port}
 import pureconfig.ConfigReader
 import pureconfig.ConfigSource
 import pureconfig.module.catseffect.syntax.*
+import pureconfig.module.ip4s.*
 
 import java.nio.file.Path
 
-final case class SqliteConfig(
-    path: Path,
-    connectionAcquisitionThreads: Int,
-    maxSessions: Int
-) derives ConfigReader
+final case class SqliteConfig(path: Path, connectionAcquisitionThreads: Int, maxSessions: Int) derives ConfigReader
 
-final case class AppConfig(sqlite: SqliteConfig, http: HttpServerConfig)
+final case class AppConfig(sqlite: SqliteConfig, http: AppConfig.HttpServerConfig)
+    derives ConfigReader
 
 object AppConfig:
 
-  def load[F[_]: Async]: F[AppConfig] =
-    loadWithEnvironment(sys.env)
+  final case class HttpServerConfig(host: Host, port: Port) derives ConfigReader
 
-  private[app] def loadWithEnvironment[F[_]: Async](environment: Map[String, String]): F[AppConfig] =
-    for
-      sqlite <- ConfigSource.defaultApplication.at("photography.sqlite").loadF[F, SqliteConfig]()
-      http   <- Async[F].blocking(HttpServerConfig.fromEnvironment(environment)).flatMap(_.liftTo[F])
-      localPath = environment
-        .get("PHOTOGRAPHY_SQLITE_PATH")
-        .filter(_.nonEmpty)
-        .map(value => Path.of(value))
-        .getOrElse(sqlite.path)
-    yield AppConfig(sqlite.copy(path = localPath), http)
+  def load[F[_]: Async]: F[AppConfig] =
+    ConfigSource.defaultApplication.at("photography").loadF[F, AppConfig]()

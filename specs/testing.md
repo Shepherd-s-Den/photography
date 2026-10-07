@@ -8,4 +8,14 @@ The backend gate compiles the Scala 3 source, the frontend gate validates its mi
 
 ## Test names
 
-Name tests for the behavior they verify.
+Name domain and application component suites `<Boundary>ComponentTest`. Use
+them to verify behavior through the component's observable boundary.
+
+Name adapter suites `<Adapter>SeamIntegrationTest`. Exercise each adapter
+through its concrete seam: send HTTP requests through routes and inspect
+responses, or initialize a database schema before exercising SQLite access.
+Loading the real `application.conf` file is also a seam integration test.
+
+Every test case's descriptive name starts with `should` and describes the
+behavior it guarantees. Keep runner-required prefixes, such as Python's
+`test_`, before that phrase. Use the vocabulary exposed by the tested boundary.

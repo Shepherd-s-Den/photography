@@ -9,8 +9,8 @@ from unittest import mock
 import local
 
 
-class LocalStateTests(unittest.TestCase):
-    def test_state_directory_is_private_and_uses_a_local_database(self):
+class LocalStateComponentTest(unittest.TestCase):
+    def test_should_state_directory_be_private_and_use_a_local_database(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             state = local.make_local_state(Path(temporary_directory))
 
@@ -18,7 +18,7 @@ class LocalStateTests(unittest.TestCase):
             self.assertEqual(state.database, state.directory / "photography.db")
             self.assertEqual(stat.S_IMODE(state.directory.stat().st_mode), 0o700)
 
-    def test_instance_lock_rejects_a_second_launcher_and_releases_after_close(self):
+    def test_should_instance_lock_reject_a_second_launcher_and_release_after_close(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             state = local.make_local_state(Path(temporary_directory))
             first_lock = local.acquire_instance_lock(state.lock)
@@ -33,8 +33,8 @@ class LocalStateTests(unittest.TestCase):
             second_lock.close()
 
 
-class LocalRunnerTests(unittest.TestCase):
-    def test_health_url_uses_loopback_for_wildcard_bind_addresses(self):
+class LocalRunnerComponentTest(unittest.TestCase):
+    def test_should_health_url_use_loopback_for_wildcard_bind_addresses(self):
         ipv4_url = local.health_url("0.0.0.0", 8080)
         ipv6_url = local.health_url("::", 8080)
         local_url = local.health_url("127.0.0.1", 8080)
@@ -43,7 +43,7 @@ class LocalRunnerTests(unittest.TestCase):
         self.assertEqual(ipv6_url, "http://[::1]:8080/health")
         self.assertEqual(local_url, "http://127.0.0.1:8080/health")
 
-    def test_preflight_checks_required_tools_and_port_availability(self):
+    def test_should_preflight_check_required_tools_and_port_availability(self):
         with mock.patch.object(local.shutil, "which", side_effect=["/usr/bin/java", "/usr/bin/sbt"]):
             with mock.patch.object(local, "port_available", return_value=True):
                 local.preflight("127.0.0.1", 8080)
@@ -65,7 +65,7 @@ class LocalRunnerTests(unittest.TestCase):
                 with self.assertRaises(local.PreflightError):
                     local.preflight("127.0.0.1", 8080)
 
-    def test_readiness_waits_for_the_exact_health_response(self):
+    def test_should_readiness_wait_for_the_exact_health_response(self):
         process = mock.Mock()
         process.poll.return_value = None
 
@@ -75,7 +75,7 @@ class LocalRunnerTests(unittest.TestCase):
 
         process.poll.assert_called()
 
-    def test_readiness_fails_if_process_exits_or_deadline_expires(self):
+    def test_should_readiness_fail_if_process_exits_or_deadline_expires(self):
         exited_process = mock.Mock()
         exited_process.poll.return_value = 7
 
@@ -93,7 +93,7 @@ class LocalRunnerTests(unittest.TestCase):
                         timeout=180,
                     )
 
-    def test_shutdown_terminates_the_process_group_and_escalates_if_needed(self):
+    def test_should_shutdown_terminate_the_process_group_and_escalate_if_needed(self):
         process = mock.Mock()
         process.pid = 42
         process.poll.return_value = None
@@ -115,7 +115,7 @@ class LocalRunnerTests(unittest.TestCase):
 
         self.assertEqual(kill_process_group.call_args_list, expected_signals)
 
-    def test_launcher_passes_overrides_to_the_child_and_stops_it(self):
+    def test_should_launcher_pass_overrides_to_the_child_and_stop_it(self):
         process = mock.Mock()
         process.pid = 44
         process.poll.return_value = None
@@ -151,7 +151,7 @@ class LocalRunnerTests(unittest.TestCase):
         stop.assert_called_once_with(process)
         output.assert_called_once_with("Photography backend ready at http://127.0.0.1:8090")
 
-    def test_readiness_timeout_stops_the_child_and_releases_the_lock(self):
+    def test_should_readiness_timeout_stop_the_child_and_release_the_lock(self):
         process = mock.Mock()
         process.pid = 46
         process.poll.return_value = None
@@ -170,7 +170,7 @@ class LocalRunnerTests(unittest.TestCase):
             next_lock = local.acquire_instance_lock(state.lock)
             next_lock.close()
 
-    def test_preflight_failure_does_not_start_the_backend(self):
+    def test_should_preflight_failure_avoid_starting_the_backend(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             with mock.patch.object(local, "preflight", side_effect=local.PreflightError("port busy")):
                 with mock.patch.object(local.subprocess, "Popen") as start:
@@ -179,7 +179,7 @@ class LocalRunnerTests(unittest.TestCase):
 
         start.assert_not_called()
 
-    def test_interruption_stops_the_child_and_releases_the_lock(self):
+    def test_should_interruption_stop_the_child_and_release_the_lock(self):
         process = mock.Mock()
         process.pid = 45
         process.poll.return_value = None
