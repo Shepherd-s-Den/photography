@@ -14,18 +14,9 @@ Spike has no work item of its own — it produces no PR, and its scratch notes i
 
 ## Protocol
 
-1. **Round one — diagnose.** A fresh reviewer reads the work item, template, checklist,
-   SDD instructions, and relevant sources. It fills `.agent-work/<slug>/review-1/`
-   without seeing executor or prior reviews, then cites each disagreement and its fix.
-   For specs, flag slop, weak grounding, visual violations, and unjustified Doc Sync
-   or Out of Scope entries.
-2. **Adjudicate and revise.** The executor records decisions and fixes every finding.
-   The first reviewer never edits or approves the work item.
-3. **Round two — independently re-review.** A second fresh reviewer reads sources anew
-   and fills `.agent-work/<slug>/review-2/` before seeing either checklist or findings.
-   Then it compares checklists, checks round-one findings, and reports unresolved or new
-   issues with exact passages. It does not edit the spec.
-4. **Close the gate.** Resolve every round-two finding and adjudicate all disputes.
-   Merge only after both rounds; no self-approval.
+1. **Round one — diagnose.** A fresh reviewer reads the work item and governing sources, runs the spec wrapping check on the proposal and every changed Markdown file, fills `.agent-work/<slug>/review-1/` blind, and reports exact disagreements. A failed check blocks approval; for specs, also flag slop, grounding, visual-form, Doc Sync, and Out of Scope.
+2. **Adjudicate and revise.** The executor records each disposition and fixes accepted findings; round one does not edit or approve the work item.
+3. **Round two — independently re-review.** A second fresh reviewer reads sources anew, reruns the wrapping check on the proposal and every changed Markdown file, and fills `.agent-work/<slug>/review-2/` before seeing earlier reviews. It checks round-one findings and reports unresolved or new issues with exact passages; it does not edit the spec.
+4. **Close the gate.** Resolve round-two findings and adjudicate every dispute; merge only after both rounds.
 
 For Implementation and Archive PRs, use one fresh reviewer and the applicable checklist row above, unless the work item is also a Spec PR.

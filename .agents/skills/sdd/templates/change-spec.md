@@ -1,7 +1,6 @@
 # <Title>
 
-<!-- Draft diagrams/tables for relevant flows and contracts first; add only necessary prose.
-The blocking visual-form gate is in checklists/spec-quality.md. -->
+<!-- Draft diagrams/tables first; add only necessary prose. The blocking visual-form gate is in checklists/spec-quality.md. -->
 
 **Date:** <YYYY-MM-DD>
 

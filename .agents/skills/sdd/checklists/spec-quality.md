@@ -10,7 +10,8 @@ Gate for the Spec PR. First verify against `CONTRIBUTING.md` §Documentation sty
 - [ ] The active model and living docs are authoritative. Treat archived proposals as history unless a living source designates them as current.
 - [ ] `Grounded in` names concrete spike findings or a specific reason exploration was unnecessary.
 - [ ] Draft structure first (diagrams/tables for relevant flows and contracts); add only prose that clarifies it.
-- [ ] Prose paragraphs and list items are at most two rendered lines; violations block review.
+- [ ] Run `python3 .agents/skills/sdd/scripts/check_markdown_wrapping.py` on the proposal and every changed Markdown file; any source-wrapping failure blocks review.
+- [ ] Prose paragraphs and list items are at most two rendered lines; inspect the rendered proposal and block longer items.
 - [ ] Acceptance criteria are short, observable, and testable. Keep each item to one behavior and include relevant failure and boundary cases.
 - [ ] Persisted-data specs separate database-enforced constraints from use-case rules and say how each database constraint is enforced.
 - [ ] Each Doc Sync entry names one owning document, section, and changed fact; omit docs whose owned knowledge is unchanged.
