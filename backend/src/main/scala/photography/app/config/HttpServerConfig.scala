@@ -1,5 +1,6 @@
 package photography.app
 
+import cats.syntax.all.*
 import com.comcast.ip4s.IpAddress
 
 import java.net.{InetAddress, NetworkInterface, UnknownHostException}
@@ -21,7 +22,7 @@ object HttpServerConfig:
 
   private def parsePort(environment: Map[String, String]): Either[HttpServerConfigError, Int] =
     environment.get("PHOTOGRAPHY_PORT") match
-      case None        => Right[HttpServerConfigError, Int](defaultPort)
+      case None        => defaultPort.asRight[HttpServerConfigError]
       case Some(value) =>
         value.toIntOption
           .filter(port => port >= 1 && port <= 65535)
@@ -30,17 +31,14 @@ object HttpServerConfig:
   private def resolveHost(environment: Map[String, String]): Either[HttpServerConfigError, IpAddress] =
     val host = environment.get("PHOTOGRAPHY_HOST").filter(_.nonEmpty).getOrElse(defaultHost)
     if host.contains("://") then
-      Left[HttpServerConfigError, IpAddress](
-        HttpServerConfigError("PHOTOGRAPHY_HOST must be a bind address, not a URL")
-      )
+      HttpServerConfigError("PHOTOGRAPHY_HOST must be a bind address, not a URL").asLeft[IpAddress]
     else
       val resolved =
-        try Right[HttpServerConfigError, List[InetAddress]](InetAddress.getAllByName(host).toList)
+        try InetAddress.getAllByName(host).toList.asRight[HttpServerConfigError]
         catch
           case _: UnknownHostException =>
-            Left[HttpServerConfigError, List[InetAddress]](
-              HttpServerConfigError(s"PHOTOGRAPHY_HOST '$host' could not be resolved")
-            )
+            HttpServerConfigError(s"PHOTOGRAPHY_HOST '$host' could not be resolved")
+              .asLeft[List[InetAddress]]
 
       resolved.flatMap(findLocalAddress(host, _)).flatMap(asIpAddress(host, _))
 
@@ -50,12 +48,12 @@ object HttpServerConfig:
   ): Either[HttpServerConfigError, InetAddress] =
     addresses
       .foldLeft[Either[HttpServerConfigError, Option[InetAddress]]](
-        Right[HttpServerConfigError, Option[InetAddress]](None)
+        Option.empty[InetAddress].asRight[HttpServerConfigError]
       ):
         case (found, address) =>
           found.flatMap:
-            case some @ Some(_) => Right[HttpServerConfigError, Option[InetAddress]](some)
-            case None           => Right[HttpServerConfigError, Option[InetAddress]](Option.when(isLocalAddress(address))(address))
+            case some @ Some(_) => some.asRight[HttpServerConfigError]
+            case None           => Option.when(isLocalAddress(address))(address).asRight[HttpServerConfigError]
       .flatMap(_.toRight(HttpServerConfigError(s"PHOTOGRAPHY_HOST '$host' is not assigned to this machine")))
 
   private def isLocalAddress(
@@ -71,4 +69,6 @@ object HttpServerConfig:
   ): Either[HttpServerConfigError, IpAddress] =
     IpAddress
       .fromString(address.getHostAddress)
-      .toRight(HttpServerConfigError(s"PHOTOGRAPHY_HOST '$host' is not a valid IP address"))
+      .fold(
+        HttpServerConfigError(s"PHOTOGRAPHY_HOST '$host' is not a valid IP address").asLeft[IpAddress]
+      )(_.asRight[HttpServerConfigError])

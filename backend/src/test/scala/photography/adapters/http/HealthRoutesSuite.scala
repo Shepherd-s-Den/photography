@@ -1,5 +1,6 @@
 package photography.adapters.http
 
+import cats.syntax.all.*
 import cats.effect.IO
 import munit.CatsEffectSuite
 import org.http4s.{MediaType, Method, Request, Status, Uri}
@@ -16,7 +17,7 @@ final class HealthRoutesSuite extends CatsEffectSuite:
     yield
 
       assertEquals(response.status, Status.Ok)
-      assertEquals(response.contentType.map(_.mediaType), Some(MediaType.application.json))
+      assertEquals(response.contentType.map(_.mediaType), MediaType.application.json.some)
       assertEquals(body, """{"status":"ok"}""")
 
   test("unknown paths remain not found"):
