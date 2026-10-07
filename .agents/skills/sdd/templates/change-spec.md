@@ -1,6 +1,7 @@
 # <Title>
 
-<!-- Boundary clarifications or risk callouts attach inline to the section they qualify. -->
+<!-- Draft diagrams/tables for relevant flows and contracts first; add only necessary prose.
+The blocking visual-form gate is in checklists/spec-quality.md. -->
 
 **Date:** <YYYY-MM-DD>
 
