@@ -1,7 +1,5 @@
 # Backend local service foundation
 
-> Standard: Agentic Engineering Standards v1.2.0. Archived after implementation per the [SDD skill](../../../../.agents/skills/sdd/SKILL.md).
-
 **Date:** 2026-10-07
 
 **Classification:** feature
