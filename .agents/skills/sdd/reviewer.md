@@ -1,6 +1,6 @@
 # SDD reviewer
 
-Independently re-derives each applicable checklist for one work item (a Spec PR, an Implementation PR, or the Archive PR) from the spec, templates, code, and test evidence — **without reading the executor's checked copy first**. Keep your filled copy in `.agent-work/<slug>/` alongside the executor's. Solo end-to-end: dispatch a fresh, context-free agent for this — never a fork, which inherits the executor's blind spots.
+Independently re-derive each applicable checklist for one work item (a Spec PR, an Implementation PR, or the Archive PR) from its source artifacts and evidence. Spec PRs require **two sequential rounds**, each performed by a fresh, context-free agent; never reuse or fork the first reviewer.
 
 ## Which checklist, for which PR
 
@@ -10,10 +10,13 @@ Independently re-derives each applicable checklist for one work item (a Spec PR,
 | Each Implementation PR | shared `checklists/code-quality.md` + the stack leaf for each surface the PR changes (`code-quality-frontend.md` for `frontend/**`, `code-quality-backend.md` for `backend/**`, and no other) + `checklists/implementation-completeness.md`, against that PR's own slice |
 | Archive PR | `checklists/implementation-completeness.md`, re-run against the **complete merged change** — every Implementation PR together against the full spec, not just the last one |
 
-Spike has no work item of its own — it produces no PR, and its scratch notes in `.agent-work/` never reach one. Its only trace anyone else can check is the Spec PR's `Grounded in` field and the proposal's own content, so judge both independently of the executor's self-report as part of `spec-quality.md`: a `Grounded in` line asserting "already understood" beside `Domain / Design Notes` that invents a port shape, an algorithm, or a tractability claim from scratch is a failed check, not a passed phase.
+Spike has no work item of its own — it produces no PR, and its scratch notes in `.agent-work/` never reach one. Its only trace anyone else can check is the Spec PR's `Grounded in` field and the proposal's own content. Verify that grounding names concrete work actually tried and findings actually observed. Treat unsupported claims in `Grounded in` or elsewhere as ungrounded; a general assertion beside invented design details does not pass.
 
 ## Protocol
 
-1. Fill your copy of the applicable checklist(s) blind.
-2. Compare against the executor's copy and list every disagreement — never edit the artifact or soften the checklist to close one yourself.
-3. Hand the list to the orchestrator ([`SKILL.md`](SKILL.md#adjudication)) and wait. The gate is checked off only after it adjudicates every item — never self-approved by the executor, never resolved by you.
+1. **Round one — diagnose.** A fresh reviewer reads the work item and governing sources, runs the spec wrapping check on the proposal and every changed Markdown file, fills `.agent-work/<slug>/review-1/` blind, and reports exact disagreements. A failed check blocks approval; for specs, also flag slop, grounding, visual-form, Doc Sync, and Out of Scope.
+2. **Adjudicate and revise.** The executor records each disposition and fixes accepted findings; round one does not edit or approve the work item.
+3. **Round two — independently re-review.** A second fresh reviewer reads sources anew, reruns the wrapping check on the proposal and every changed Markdown file, and fills `.agent-work/<slug>/review-2/` before seeing earlier reviews. It checks round-one findings and reports unresolved or new issues with exact passages; it does not edit the spec.
+4. **Close the gate.** Resolve round-two findings and adjudicate every dispute; merge only after both rounds.
+
+For Implementation and Archive PRs, use one fresh reviewer and the applicable checklist row above, unless the work item is also a Spec PR.

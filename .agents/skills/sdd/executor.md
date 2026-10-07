@@ -23,7 +23,7 @@ Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recr
 - **Feature:** current → new behavior, acceptance criteria, invariants, tradeoffs, Doc Sync.
 - **Investigation:** hypotheses and evidence for/against each, narrowing to a proven root cause — the spec's `What & Why` ends up stating that root cause and the hypotheses it ruled out.
 
-Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then open the Spec PR — the proposal and planning artifacts only, no production code. Self-check is prep, not review — hand off to [`reviewer.md`](reviewer.md) before anyone merges. Do not start implementation until it is reviewed and merged.
+Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then open the Spec PR — the proposal and planning artifacts only, no production code. Self-check is prep, not review — complete both sequential independent review rounds in [`reviewer.md`](reviewer.md) before anyone merges. Do not start implementation until it is reviewed and merged.
 
 ## Tests
 

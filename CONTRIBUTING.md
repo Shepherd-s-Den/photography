@@ -46,6 +46,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 - Keep documentation short, technical, and concise. Maximize signal and avoid restating facts owned elsewhere.
 - Integrate new lessons into the rule that owns them. Refine or replace stale guidance instead of appending a chronology of discoveries.
 - Describe observable behavior and guarantees positively.
+- Keep each Markdown prose paragraph and list item on one source line; let the renderer wrap it.
 
 ## Naming
 
