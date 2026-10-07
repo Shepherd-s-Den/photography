@@ -23,14 +23,11 @@ object AppConfig:
 
   private[app] def loadWithEnvironment[F[_]: Async](environment: Map[String, String]): F[AppConfig] =
     for
-      sqlite    <- ConfigSource.defaultApplication.at("photography.sqlite").loadF[F, SqliteConfig]()
-      appConfig <- Async[F]
-        .blocking:
-          val localPath = environment
-            .get("PHOTOGRAPHY_SQLITE_PATH")
-            .filter(_.nonEmpty)
-            .map(value => Path.of(value))
-            .getOrElse(sqlite.path)
-          HttpServerConfig.fromEnvironment(environment).map(http => AppConfig(sqlite.copy(path = localPath), http))
-        .flatMap(_.liftTo[F])
-    yield appConfig
+      sqlite <- ConfigSource.defaultApplication.at("photography.sqlite").loadF[F, SqliteConfig]()
+      http   <- Async[F].blocking(HttpServerConfig.fromEnvironment(environment)).flatMap(_.liftTo[F])
+      localPath = environment
+        .get("PHOTOGRAPHY_SQLITE_PATH")
+        .filter(_.nonEmpty)
+        .map(value => Path.of(value))
+        .getOrElse(sqlite.path)
+    yield AppConfig(sqlite.copy(path = localPath), http)
