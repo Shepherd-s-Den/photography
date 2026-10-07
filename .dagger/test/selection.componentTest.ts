@@ -13,11 +13,11 @@ describe("parseChangedPaths", () => {
 describe("componentsForPath", () => {
   it("should map backend and frontend paths to their own component", () => {
     expect(Selection.componentsForPath("backend/build.sbt")).toEqual(["backend"]);
-    expect(Selection.componentsForPath("scripts/local.py")).toEqual(["backend"]);
     expect(Selection.componentsForPath("frontend/index.html")).toEqual(["frontend"]);
   });
 
   it("should map pipeline paths to the pipeline component", () => {
+    expect(Selection.componentsForPath("scripts/local.py")).toEqual(["pipeline"]);
     expect(Selection.componentsForPath(".dagger/src/index.ts")).toEqual(["pipeline"]);
     expect(Selection.componentsForPath("dagger.json")).toEqual(["pipeline"]);
     expect(Selection.componentsForPath(".github/workflows/build.yml")).toEqual(["pipeline"]);
