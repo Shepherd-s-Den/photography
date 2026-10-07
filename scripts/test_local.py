@@ -75,6 +75,19 @@ class LocalRunnerComponentTest(unittest.TestCase):
 
         process.poll.assert_called()
 
+    def test_should_frontend_readiness_require_successful_html(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.headers.get_content_type.return_value = "text/html"
+
+        with mock.patch.object(local.urllib.request, "urlopen", return_value=response):
+            self.assertTrue(local.page_check("http://127.0.0.1:5173"))
+
+        response.status = 503
+        with mock.patch.object(local.urllib.request, "urlopen", return_value=response):
+            self.assertFalse(local.page_check("http://127.0.0.1:5173"))
+
     def test_should_readiness_fail_if_process_exits_or_deadline_expires(self):
         exited_process = mock.Mock()
         exited_process.poll.return_value = 7
@@ -129,7 +142,11 @@ class LocalRunnerComponentTest(unittest.TestCase):
                             with mock.patch("builtins.print") as output:
                                 result = local.run_local_backend(
                                     Path(temporary_directory),
-                                    {"PHOTOGRAPHY_HOST": "0.0.0.0", "PHOTOGRAPHY_PORT": "8090"},
+                                    {
+                                        "PHOTOGRAPHY_HOST": "0.0.0.0",
+                                        "PHOTOGRAPHY_PORT": "8090",
+                                        "PHOTOGRAPHY_PROTOTYPE_MODE": "1",
+                                    },
                                 )
 
             state = local.make_local_state(Path(temporary_directory))
@@ -198,6 +215,178 @@ class LocalRunnerComponentTest(unittest.TestCase):
             state = local.make_local_state(Path(temporary_directory))
             next_lock = local.acquire_instance_lock(state.lock)
             next_lock.close()
+
+
+class LocalPrototypeRunnerComponentTest(unittest.TestCase):
+    def test_should_select_only_a_valid_active_spike(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_root = Path(temporary_directory)
+            spike = project_root / ".agent-work" / "album-spike" / "spike"
+            frontend = spike / "frontend"
+            backend = spike / "backend" / "photography" / "spike"
+            frontend.mkdir(parents=True)
+            backend.mkdir(parents=True)
+            (frontend / "package.json").write_text("{}", encoding="utf-8")
+            (backend / "Main.scala").write_text("object Main", encoding="utf-8")
+            marker = project_root / ".agent-work" / "active-prototype"
+            marker.write_text("album-spike\n", encoding="utf-8")
+
+            selected_slug = local.active_prototype_slug(project_root)
+
+        self.assertEqual(selected_slug, "album-spike")
+
+    def test_should_reject_a_malformed_active_spike_marker(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_root = Path(temporary_directory)
+            marker = project_root / ".agent-work" / "active-prototype"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("../outside", encoding="utf-8")
+
+            with self.assertRaises(local.PreflightError):
+                local.active_prototype_slug(project_root)
+
+    def test_should_install_locked_spike_frontend_dependencies_when_needed(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            frontend = Path(temporary_directory)
+            (frontend / "package.json").write_text("{}", encoding="utf-8")
+            (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
+
+            with mock.patch.object(
+                local.subprocess,
+                "run",
+                return_value=mock.Mock(returncode=0),
+            ) as install:
+                local.install_prototype_frontend(frontend, {})
+
+        self.assertEqual(install.call_args.args[0], ["npm", "ci", "--no-audit", "--no-fund"])
+        self.assertEqual(install.call_args.kwargs["cwd"], frontend)
+
+    def test_should_launch_frontend_only_spikes_with_the_stable_backend(self):
+        backend_process = mock.Mock()
+        frontend_process = mock.Mock()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_root = Path(temporary_directory)
+            frontend = project_root / ".agent-work" / "frontend-spike" / "spike" / "frontend"
+            installed = frontend / "node_modules"
+            binary_directory = installed / ".bin"
+            binary_directory.mkdir(parents=True)
+            (frontend / "package.json").write_text("{}", encoding="utf-8")
+            (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
+            (installed / ".package-lock.json").write_text("{}", encoding="utf-8")
+            (binary_directory / "vite").touch()
+
+            with mock.patch.object(local, "preflight"):
+                with mock.patch.object(local, "port_available", return_value=True):
+                    with mock.patch.object(local.shutil, "which", return_value="/usr/bin/npm"):
+                        with mock.patch.object(
+                            local.subprocess,
+                            "Popen",
+                            side_effect=[backend_process, frontend_process],
+                        ) as start:
+                            with mock.patch.object(local, "wait_for_readiness"):
+                                with mock.patch.object(local, "wait_for_services", return_value=0):
+                                    with mock.patch.object(local, "stop_process_tree"):
+                                        with mock.patch.object(local.webbrowser, "open"):
+                                            with mock.patch("builtins.print"):
+                                                result = local.run_local_backend(
+                                                    project_root,
+                                                    {},
+                                                    prototype_slug="frontend-spike",
+                                                )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(start.call_args_list[0].args[0], ["sbt", "-batch", "run"])
+        self.assertNotIn(
+            "PHOTOGRAPHY_PROTOTYPE_MODE",
+            start.call_args_list[0].kwargs["env"],
+        )
+
+    def test_should_launch_spike_backend_and_frontend_with_isolated_state(self):
+        backend_process = mock.Mock()
+        frontend_process = mock.Mock()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project_root = Path(temporary_directory)
+            frontend = project_root / ".agent-work" / "album-spike" / "spike" / "frontend"
+            installed = frontend / "node_modules"
+            binary_directory = installed / ".bin"
+            binary_directory.mkdir(parents=True)
+            (frontend / "package.json").write_text("{}", encoding="utf-8")
+            (frontend / "package-lock.json").write_text("{}", encoding="utf-8")
+            (installed / ".package-lock.json").write_text("{}", encoding="utf-8")
+            (binary_directory / "vite").touch()
+            backend = (
+                project_root
+                / ".agent-work"
+                / "album-spike"
+                / "spike"
+                / "backend"
+                / "photography"
+                / "spike"
+            )
+            backend.mkdir(parents=True)
+            (backend / "Main.scala").write_text("object Main", encoding="utf-8")
+
+            with mock.patch.object(local, "preflight") as preflight:
+                with mock.patch.object(local, "port_available", return_value=True):
+                    with mock.patch.object(local.shutil, "which", return_value="/usr/bin/npm"):
+                        with mock.patch.object(
+                            local.subprocess,
+                            "Popen",
+                            side_effect=[backend_process, frontend_process],
+                        ) as start:
+                            with mock.patch.object(local, "wait_for_readiness") as ready:
+                                with mock.patch.object(local, "wait_for_services", return_value=0):
+                                    with mock.patch.object(local, "stop_process_tree") as stop:
+                                        with mock.patch.object(local.webbrowser, "open") as open_browser:
+                                            with mock.patch("builtins.print"):
+                                                result = local.run_local_backend(
+                                                    project_root,
+                                                    {
+                                                        "PHOTOGRAPHY_HOST": "127.0.0.1",
+                                                        "PHOTOGRAPHY_PORT": "8080",
+                                                    },
+                                                    prototype_slug="album-spike",
+                                                )
+
+            state = local.make_local_state(project_root)
+            next_lock = local.acquire_instance_lock(state.lock)
+            next_lock.close()
+
+        self.assertEqual(result, 0)
+        preflight.assert_called_once_with("127.0.0.1", 8080)
+        self.assertEqual(
+            start.call_args_list[0].args[0],
+            ["sbt", "-batch", "runMain photography.spike.Main"],
+        )
+        self.assertEqual(
+            start.call_args_list[1].args[0],
+            ["npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
+        )
+        backend_environment = start.call_args_list[0].kwargs["env"]
+        frontend_environment = start.call_args_list[1].kwargs["env"]
+        expected_database = (
+            project_root
+            / ".agent-work"
+            / "album-spike"
+            / "spike"
+            / "data"
+            / "PROTOTYPE-wipe-me.sqlite"
+        )
+        self.assertEqual(backend_environment["PHOTOGRAPHY_SQLITE_PATH"], str(expected_database))
+        self.assertEqual(backend_environment["PHOTOGRAPHY_PROTOTYPE_MODE"], "1")
+        self.assertEqual(
+            frontend_environment["VITE_API_TARGET"],
+            "http://127.0.0.1:8080",
+        )
+        ready.assert_any_call(backend_process, "http://127.0.0.1:8080/health")
+        ready.assert_any_call(
+            frontend_process,
+            "http://127.0.0.1:5173",
+            readiness_check=local.page_check,
+            service_name="Prototype frontend",
+        )
+        self.assertEqual(stop.call_args_list, [mock.call(frontend_process), mock.call(backend_process)])
+        open_browser.assert_called_once_with("http://127.0.0.1:5173")
 
 
 if __name__ == "__main__":

@@ -7,4 +7,6 @@ Load only for a PR that changes `frontend/**`. `CONTRIBUTING.md` §Naming and §
 - [ ] A UI invariant mirrors the backend contract it stands for rather than a re-guessed rule, and fails closed the way the backend does (reject, not silently repair).
 - [ ] Tests reach the DOM through the accessibility tree (role + accessible name) and fire real event seams; none assert on test-ids, class names, or element structure.
 - [ ] Tests exercise states reachable through the user interface; they do not bypass disabled controls merely to manufacture an impossible state.
-- [ ] Derived values use `createMemo`/accessors and control flow uses `<Show>`/`<For>`/`<Index>` — `<Index>` for positional or primitive rows, `<For>` for keyed identity.
+- [ ] Svelte state uses `$state` and derived values use `$derived`; keyed collections use stable identity in `{#each ... (key)}`.
+- [ ] `src/app` composes the application, each `src/features` module owns one user workflow, and `src/shared` stays independent of app and feature modules; dependency-cruiser passes without cycles.
+- [ ] Frontend tests meet the configured statement, branch, function, and line coverage thresholds.

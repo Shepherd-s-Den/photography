@@ -1,16 +1,15 @@
 import { type Container, dag, type Directory } from "@dagger.io/dagger";
 import { NODE_IMAGE } from "../buildEnv";
 
-/** Checks the minimal static HTML entry point without installing frontend dependencies. */
+/** Runs the frontend's type, lint, format, boundary, coverage, and build gates. */
 export function frontendCheck(source: Directory): Container {
   return dag
     .container()
     .from(NODE_IMAGE)
+    .withMountedCache("/root/.npm", dag.cacheVolume("photography-frontend-npm"))
     .withDirectory("/app/frontend", source.directory("frontend"))
     .withWorkdir("/app/frontend")
-    .withExec([
-      "node",
-      "-e",
-      "const fs=require('node:fs'); const html=fs.readFileSync('index.html','utf8'); if(!html.includes('<html') || !html.includes('<title>Photography</title>')) process.exit(1);",
-    ]);
+    .withExec(["npm", "ci", "--no-audit", "--no-fund"])
+    .withExec(["npm", "run", "verify"])
+    .withExec(["npm", "run", "build"]);
 }

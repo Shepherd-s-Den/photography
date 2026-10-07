@@ -8,7 +8,7 @@ The backend gate compiles the Scala 3 source and enforces 100% statement and bra
 
 `backend/build.sbt` temporarily excludes the runtime and SQLite adapter packages plus specific currently untested domain ID/location classlikes. Remove those exclusions as behavior tests cover them.
 
-The frontend gate validates its minimal HTML entry point.
+The frontend gate runs Svelte type checking, lint, formatting, dependency-cruiser boundaries, component/seam-integration tests with 100% statement, branch, function, and line coverage, and a production build.
 
 Pipeline tests prove affected-component selection.
 
