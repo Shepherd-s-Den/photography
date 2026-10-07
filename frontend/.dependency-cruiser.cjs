@@ -26,7 +26,7 @@ module.exports = {
       name: "no-orphans",
       comment: "No orphan modules (the entrypoint is exempt).",
       severity: "warn",
-      from: { orphan: true, pathNot: ["\\.d\\.ts$", "(^|/)main\\.ts$"] },
+      from: { orphan: true, pathNot: ["\\.d\\.ts$", "(^|/)main\\.tsx?$"] },
       to: {},
     },
   ],
@@ -34,6 +34,6 @@ module.exports = {
     doNotFollow: { path: "node_modules" },
     tsConfig: { fileName: "tsconfig.json" },
     tsPreCompilationDeps: true,
-    enhancedResolveOptions: { extensions: [".ts", ".svelte"] },
+    enhancedResolveOptions: { extensions: [".ts", ".tsx"] },
   },
 };

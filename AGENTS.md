@@ -11,7 +11,7 @@ Classify each change through the SDD skill before implementation. A reviewed cha
 ## Gates
 
 - A backend change passes `dagger call backend-check` (`sbt compile`).
-- A frontend change passes `dagger call frontend-check` (Svelte typecheck, lint, format, dependency boundaries, 100% statement/branch/function/line coverage, and production build).
+- A frontend change passes `dagger call frontend-check` (SolidJS TypeScript checking, lint, format, dependency boundaries, 100% statement/branch/function/line coverage, and production build).
 - A pipeline change passes the module's type, lint, format, and test checks (`npm ci --prefix .dagger && dagger develop && npm --prefix .dagger run verify`) and `dagger call pipeline-check`.
 - Every change passes `dagger call verify`; use `dagger call verify --all` when the change affects shared behavior or affected-component selection is uncertain.
 

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -15,27 +15,25 @@
     "test:watch": "vitest",
     "verify": "npm run typecheck && npm run lint && npm run format:check && npm run boundaries && npm run test"
   },
-  "dependencies": {
-    "svelte": "^5.57.2"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@solidjs/testing-library": "^0.8.10",
     "@testing-library/jest-dom": "^7.0.1",
-    "@testing-library/svelte": "^5.2.8",
     "@types/node": "^24.10.1",
     "@vitest/coverage-v8": "^5.0.2",
     "dependency-cruiser": "^18.4.0",
     "eslint": "^10.11.0",
-    "eslint-plugin-svelte": "^3.23.0",
+    "eslint-plugin-solid": "^0.18.1",
     "globals": "^16.4.0",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.9",
-    "prettier-plugin-svelte": "^3.4.0",
-    "svelte-check": "^4.7.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",
     "vite": "^8.3.0",
+    "vite-plugin-solid": "^2.11.14",
     "vitest": "^5.0.2"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.17"
   }
 }

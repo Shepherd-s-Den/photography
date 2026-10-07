@@ -1,6 +1,6 @@
 // @ts-check
 import eslint from "@eslint/js";
-import svelte from "eslint-plugin-svelte";
+import solid from "eslint-plugin-solid";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
@@ -9,14 +9,13 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
-  ...svelte.configs["flat/recommended"],
+  solid.configs["flat/recommended"],
   {
-    files: ["src/**/*.{ts,svelte}", "test/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}", "test/**/*.{ts,tsx}"],
     languageOptions: {
       globals: globals.browser,
       parserOptions: {
         projectService: true,
-        extraFileExtensions: [".svelte"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -35,14 +34,6 @@ export default tseslint.config(
       "@typescript-eslint/no-shadow": "error",
       "no-console": "error",
       eqeqeq: ["error", "always"],
-    },
-  },
-  {
-    files: ["**/*.svelte"],
-    languageOptions: {
-      parserOptions: {
-        parser: tseslint.parser,
-      },
     },
   },
   {

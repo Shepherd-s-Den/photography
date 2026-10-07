@@ -7,6 +7,6 @@ Load only for a PR that changes `frontend/**`. `CONTRIBUTING.md` §Naming and §
 - [ ] A UI invariant mirrors the backend contract it stands for rather than a re-guessed rule, and fails closed the way the backend does (reject, not silently repair).
 - [ ] Tests reach the DOM through the accessibility tree (role + accessible name) and fire real event seams; none assert on test-ids, class names, or element structure.
 - [ ] Tests exercise states reachable through the user interface; they do not bypass disabled controls merely to manufacture an impossible state.
-- [ ] Svelte state uses `$state` and derived values use `$derived`; keyed collections use stable identity in `{#each ... (key)}`.
+- [ ] SolidJS components keep reactive reads in tracked expressions and render identity-keyed collections with stable item identity.
 - [ ] `src/app` composes the application, each `src/features` module owns one user workflow, and `src/shared` stays independent of app and feature modules; dependency-cruiser passes without cycles.
 - [ ] Frontend tests meet the configured statement, branch, function, and line coverage thresholds.

@@ -1,10 +1,10 @@
-import { render, screen } from "@testing-library/svelte";
+import { render, screen } from "@solidjs/testing-library";
 import { describe, expect, it } from "vitest";
-import App from "../../src/app/App.svelte";
+import { App } from "../../src/app/App";
 
 describe("empty app shell", () => {
   it("should render an empty main landmark", () => {
-    render(App);
+    render(() => <App />);
 
     expect(screen.getByRole("main")).toBeInTheDocument();
   });

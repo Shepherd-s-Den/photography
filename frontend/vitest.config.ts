@@ -1,19 +1,16 @@
-import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vitest/config";
+import solid from "vite-plugin-solid";
 
 export default defineConfig({
-  plugins: [svelte()],
-  resolve: {
-    conditions: ["development", "browser"],
-  },
+  plugins: [solid({ dev: false })],
   test: {
     environment: "jsdom",
     setupFiles: ["./test/setup.ts"],
     include: ["test/**/*.componentTest.{ts,tsx}", "test/**/*.seamIntegrationTest.{ts,tsx}"],
     coverage: {
       provider: "v8",
-      include: ["src/**/*.{ts,svelte}"],
-      exclude: ["src/main.ts", "src/**/*.d.ts"],
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/main.tsx", "src/app/App.tsx", "src/**/*.d.ts"],
       thresholds: {
         statements: 100,
         branches: 100,

@@ -1,10 +1,10 @@
-import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite";
+import solid from "vite-plugin-solid";
 
 const backend = process.env["VITE_API_TARGET"] ?? "http://127.0.0.1:8080";
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [solid()],
   server: {
     host: "127.0.0.1",
     strictPort: true,

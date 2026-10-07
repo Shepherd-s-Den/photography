@@ -6,7 +6,7 @@ Architecture and design rationale live in [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPL
 
 ## Stack and setup
 
-The backend is Scala 3 and follows Typelevel and Tagless Final principles for effectful application boundaries. The frontend uses Svelte 5 and TypeScript. Dagger runs affected-component CI.
+The backend is Scala 3 and follows Typelevel and Tagless Final principles for effectful application boundaries. The frontend uses SolidJS and TypeScript. Dagger runs affected-component CI.
 
 Install the pinned Java 25, Scala 3.8, and Node 24 toolchain with [mise](https://mise.jdx.dev): `mise install`. Docker is required for Dagger's containerized checks.
 
@@ -36,7 +36,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 | Path | What |
 | --- | --- |
 | `backend/` | Scala 3 backend scaffold. |
-| `frontend/src/app/` | Svelte application shell and composition root. |
+| `frontend/src/app/` | SolidJS application shell and composition root. |
 | `frontend/src/features/` | Independently testable user workflows. |
 | `frontend/src/shared/` | Cross-feature UI and utilities. |
 | `frontend/test/` | Component and seam-integration tests mirroring `src/`. |
