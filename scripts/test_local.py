@@ -75,6 +75,19 @@ class LocalRunnerComponentTest(unittest.TestCase):
 
         process.poll.assert_called()
 
+    def test_should_page_check_require_successful_html(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        response.headers.get_content_type.return_value = "text/html"
+
+        with mock.patch.object(local.urllib.request, "urlopen", return_value=response):
+            self.assertTrue(local.page_check("http://127.0.0.1:5173"))
+
+        response.status = 503
+        with mock.patch.object(local.urllib.request, "urlopen", return_value=response):
+            self.assertFalse(local.page_check("http://127.0.0.1:5173"))
+
     def test_should_readiness_fail_if_process_exits_or_deadline_expires(self):
         exited_process = mock.Mock()
         exited_process.poll.return_value = 7
@@ -137,7 +150,7 @@ class LocalRunnerComponentTest(unittest.TestCase):
             next_lock.close()
 
         self.assertEqual(result, 0)
-        preflight.assert_called_once_with("0.0.0.0", 8090)
+        preflight.assert_called_once_with("0.0.0.0", 8090, None)
         self.assertEqual(start.call_args.args[0], ["sbt", "-batch", "run"])
         self.assertEqual(start.call_args.kwargs["cwd"], Path(temporary_directory) / "backend")
         self.assertTrue(start.call_args.kwargs["start_new_session"])
@@ -178,6 +191,46 @@ class LocalRunnerComponentTest(unittest.TestCase):
                         local.run_local_backend(Path(temporary_directory), {})
 
         start.assert_not_called()
+
+    def test_should_start_the_checked_out_frontend_alongside_the_backend(self):
+        backend_process = mock.Mock()
+        backend_process.pid = 47
+        backend_process.poll.return_value = None
+        frontend_process = mock.Mock()
+        frontend_process.pid = 48
+        frontend_process.poll.return_value = None
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            frontend = Path(temporary_directory) / "frontend"
+            (frontend / "node_modules" / ".bin").mkdir(parents=True)
+            (frontend / "package.json").touch()
+            (frontend / "node_modules" / ".bin" / "vite").touch()
+            with mock.patch.object(local, "preflight") as preflight:
+                with mock.patch.object(
+                    local.subprocess,
+                    "Popen",
+                    side_effect=[backend_process, frontend_process],
+                ) as start:
+                    with mock.patch.object(local, "wait_for_readiness") as ready:
+                        with mock.patch.object(local, "wait_for_services", return_value=0):
+                            with mock.patch.object(local, "stop_process_tree"):
+                                with mock.patch("builtins.print"):
+                                    result = local.run_local_backend(
+                                        Path(temporary_directory),
+                                        {"PHOTOGRAPHY_FRONTEND_PORT": "5174"},
+                                    )
+
+        self.assertEqual(result, 0)
+        preflight.assert_called_once_with("127.0.0.1", 8080, 5174)
+        self.assertEqual(start.call_count, 2)
+        self.assertEqual(start.call_args_list[1].args[0][0:3], ["npm", "run", "dev"])
+        self.assertEqual(start.call_args_list[1].kwargs["cwd"], frontend)
+        self.assertEqual(
+            start.call_args_list[1].kwargs["env"]["VITE_API_TARGET"],
+            "http://127.0.0.1:8080",
+        )
+        self.assertEqual(ready.call_count, 2)
+        self.assertEqual(ready.call_args_list[1].kwargs["service_name"], "Frontend")
 
     def test_should_interruption_stop_the_child_and_release_the_lock(self):
         process = mock.Mock()

@@ -12,15 +12,11 @@ Also make the complexity call here, before the spec (`DESIGN-PRINCIPLES.md` §7)
 
 ## Spike
 
-This is the load-bearing decision in this skill, not busywork before the "real" phase. A spec is a proposal for how to solve an understood problem — diagrams, domain types, ports, pseudocode where the design is algorithmic or efficiency-sensitive. Writing one before that understanding exists is exactly why specs go bad: it is an intricate floorplan drawn without ever having walked the site, and the building turns out untractable once someone tries to construct it. Understanding a problem space often requires trying to solve it, not just thinking hard about it in the abstract.
-
-So decide, explicitly: is the problem and its solution already understood well enough to write the spec directly — you know exactly what to solve, how, and its acceptance criteria? Then skip straight to Spec PR. Otherwise — an unclear problem, a design of uncertain tractability, an algorithm, or any proposal you can't yet state in concrete domain types and ports — spike first.
-
-When spiking: actually try to solve it — throwaway code, a prototype of the hard part, working the algorithm by hand against real APIs — until you can state, concretely, the domain types, the ports, the real edge cases, and whether the approach is tractable at all. This code is disposable: it never needs to pass `AGENTS.md`'s gates, is never the Implementation PR's diff, and is not reviewed.
-
-Either way, the decision must show up somewhere it can be checked. `.agent-work/<slug>/checklist.md` is scratch and never reaches the PR, so the real record is the Spec PR's own `Grounded in` field: name the actual finding, or the actual reason none was needed — never a bare "already understood." Carry a spike's findings into `Domain / Design Notes` and `Alternatives Considered` too — never the same sentence twice — grounded in what you actually found rather than renewed first-principles guessing.
+Follow the Spike workflow in [`SKILL.md`](SKILL.md). This file adds no separate spike procedure.
 
 ## Spec PR
+
+For a feature, wait until the user has run the local spike and confirmed the intended behavior before preparing or finalizing the proposal. Carry that confirmed behavior into the spec; a review pass over an unconfirmed draft does not satisfy the Spec PR gate.
 
 Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec when one exists; otherwise use the template and `spec-quality.md` for altitude and density. When a spike preceded this phase, ground `Domain / Design Notes` and `Alternatives Considered` in its findings.
 
@@ -40,6 +36,8 @@ Implement the approved behavior. Split into multiple PRs on separable seams, or 
 Make the tests pass, then run the gates `AGENTS.md` already defines (backend/frontend/pipeline commands and `dagger call verify`) — do not repeat those commands here, and never weaken a gate to pass one. Self-check against the shared [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes ([`code-quality-frontend.md`](checklists/code-quality-frontend.md) for `frontend/**`, [`code-quality-backend.md`](checklists/code-quality-backend.md) for `backend/**`, and no other), and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (against this PR's own slice) before requesting review.
 
 ## Archive PR
+
+Before archiving, run the implemented journey locally and compare it with the approved spec and the user's spike confirmation. Resolve any mismatch first.
 
 After every Implementation PR has merged: apply each `Doc Sync` entry verbatim to the named living doc and section (`specs/*.md`, or `ci/specs/*.md` for pipeline changes) — prune obsolete or duplicated content rather than appending. Move the spec to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
 
