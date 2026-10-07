@@ -4,7 +4,7 @@
 
 ## Strategy
 
-The backend gate compiles the Scala 3 source, the frontend gate validates its minimal HTML entry point, and pipeline tests prove affected-component selection. Database-seam integration tests initialize the schema before exercising database access. Add behavior-focused tests at domain, application, UI, and adapter boundaries as product behavior is introduced.
+The backend gate compiles the Scala 3 source and enforces 100% statement and branch coverage for measured production code. `backend/build.sbt` temporarily excludes the runtime and SQLite adapter packages plus specific currently untested domain ID/location classlikes; remove those exclusions as behavior tests cover them. Use `dagger call backend-check` as the enforcing gate. The frontend gate validates its minimal HTML entry point, and pipeline tests prove affected-component selection. Database-seam integration tests initialize the schema before exercising database access. Add behavior-focused tests at domain, application, UI, and adapter boundaries as product behavior is introduced.
 
 ## Test names
 

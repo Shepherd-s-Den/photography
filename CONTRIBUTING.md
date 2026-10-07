@@ -18,6 +18,8 @@ Compile the backend:
 cd backend && sbt compile
 ```
 
+Run the local backend service with `python3 scripts/local.py` from the repository root.
+
 | Task | Command |
 | --- | --- |
 | Backend gate | `dagger call backend-check` |

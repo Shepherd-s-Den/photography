@@ -80,4 +80,5 @@ Missing records, lock/session outcomes, infrastructure failures, and changed/unc
 
 - The backend is Scala 3 and follows Typelevel and Tagless Final principles.
 - The application maintains the SQLite schema with Flyway on startup.
+- HTTP is the service driving boundary; readiness is available only after SQLite migration succeeds and the HTTP listener starts.
 - The frontend is intended to use SolidJS and TypeScript.
