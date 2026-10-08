@@ -26,3 +26,10 @@ enum Spread:
       position: PositionInChapter,
       template: SpreadTemplateId
   )
+
+final case class SpreadComposition(
+    id: SpreadId,
+    templateId: SpreadTemplateId,
+    slots: Vector[SpreadSlot],
+    placements: Vector[SpreadPlacement]
+)

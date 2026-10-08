@@ -23,6 +23,14 @@ final case class Cover(
     back: CoverSlot
 )
 
+final case class CoverComposition(
+    spineOwner: SpineOwner,
+    front: CoverSlot,
+    frontPlacement: Option[CoverPlacement],
+    back: CoverSlot,
+    backPlacement: Option[CoverPlacement]
+)
+
 final case class SaalCoverSpecification(
     pageCount: PageCount,
     totalWidthPx: CoverPixels,

@@ -2,9 +2,9 @@ package photography.domain.album
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import java.time.Instant
 import java.util.UUID
-import photography.domain.layout.Cover
-import photography.domain.layout.Spread.*
+import photography.domain.layout.{CoverComposition, SpreadComposition}
 
 opaque type AlbumId = UUID
 object AlbumId:
@@ -13,18 +13,18 @@ object AlbumId:
 
 type AlbumName = String :| Not[Empty]
 
-final case class Album(id: AlbumId, title: AlbumName, synopsis: String)
+final case class Album(id: AlbumId, title: AlbumName, synopsis: String, createdAt: Instant)
 
 final case class ChapterComposition(
     chapter: Chapter,
-    start: ChapterStart,
+    start: SpreadComposition,
     photos: Vector[Photo],
-    spreads: Vector[PhotosOnly]
+    spreads: Vector[SpreadComposition]
 )
 
 final case class AlbumComposition(
     album: Album,
-    start: AlbumStart,
-    cover: Cover,
+    start: SpreadComposition,
+    cover: CoverComposition,
     chapters: Vector[ChapterComposition]
 )

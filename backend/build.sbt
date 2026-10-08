@@ -5,6 +5,7 @@ ThisBuild / version      := "0.1.0"
 lazy val root = (project in file("."))
   .settings(
     name := "photography-backend",
+    Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "frontend" / "dist",
     scalacOptions ++= Seq(
       "-encoding",
       "utf8",
@@ -44,10 +45,11 @@ lazy val root = (project in file("."))
       "com.github.pureconfig" %% "pureconfig-http4s"         % "0.17.9",
       "com.github.pureconfig" %% "pureconfig-ip4s"           % "0.17.9",
       "com.github.geirolz"    %% "fly4s"                     % "1.1.1",
-      "org.flywaydb"           % "flyway-core"               % "13.9.0",
+      "org.flywaydb"           % "flyway-core"               % "11.18.0",
       "org.xerial"             % "sqlite-jdbc"               % "3.53.4.0",
       "org.http4s"            %% "http4s-dsl"                % "0.23.33",
       "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
+      "io.circe"              %% "circe-parser"              % "0.14.14",
       "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
       "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test
     )
