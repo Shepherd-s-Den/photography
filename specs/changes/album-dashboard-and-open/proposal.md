@@ -7,7 +7,8 @@
 **Grounded in:**
 
 - UI spike: six-album pages, centered add/edit popups, directional paging, and card-to-read-only-open.
-- Persistence spike: create/read, blank-title rejection, missing vs. incomplete, rollback; V1 has no built-in template.
+- Persistence spike: transactional creation, blank-title rejection, and rollback; V1 has no built-in template.
+- User decision: defer composition viewing; Slice 1 reads only the album.
 
 ## What & Why
 
@@ -22,28 +23,17 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 | `GET /api/albums?page={page}` | `page` defaults to `1`; six per page | `200 {albums, page, pageSize, totalAlbums, totalPages}` |
 | `POST /api/albums` | `{title}` | `201 {id, title, createdAt}` |
 | `PATCH /api/albums/{id}` | `{title}` | `200 {id, title, createdAt}` |
-| `GET /api/albums/{id}` | — | `200` full persisted composition |
+| `GET /api/albums/{id}` | — | `200 {id, title, synopsis}` for that album only |
 | `DELETE /api/albums/{id}` | — | `204` no body |
 
 - An out-of-range page returns the last page; an empty collection returns page `1` with `totalPages: 0`.
 - Generate a stable UUID and immutable UTC `createdAt` for each album; list newest-first.
-- Seed one built-in `AlbumStart` template for new databases and V1 upgrades; clients supply no template ID.
+- Seed one built-in `AlbumStart` template in V1; clients supply no template ID.
 - Album titles are nonempty after trimming; create and rename trim input before validation.
 - SQLite enforces declared primary/foreign keys and unique chapter positions, with foreign-key checks enabled on every connection.
-- The use case checks chapter positions are `0..19`.
-- V1 does not enforce template-kind, required-slot, or cover-side shape; create/open use cases validate these composition rules.
-- Creation validates and writes the complete initial shape in one transaction; open rejects incomplete persisted shape.
-- Incomplete persisted state fails as `service_failure`, without exposing an internal composition code.
-
-**Composition response**
-
-| Member | Shape |
-|---|---|
-| `album` | `{id, title, synopsis}` |
-| `start` | `{id, templateId, slots, placements}`; slots preserve template order and kind. |
-| `cover` | `{spineOwner, front, back}`; each side is `{id, placement}`, with `null` for an empty placement. |
-| `chapters` | Position-ordered `{chapter, start, photos, spreads}` entries; `[]` when absent. |
-| Values | IDs are canonical UUID strings; absent optional values are `null`; empty collections are `[]`. |
+- V1 does not enforce template-kind, required-slot, or cover-side shape; creation validates these composition rules.
+- Creation validates and writes the complete initial shape in one transaction.
+- The album endpoint returns only album fields; associated composition data is not part of its response.
 
 New albums have one full-spread text slot, empty cover placements, and no chapters; slot and placement associations use stable IDs and arrays preserve domain order.
 
@@ -81,12 +71,12 @@ Album --> Chapters["No chapters on creation"]
 ### Open and persist
 
 - Selecting, directly opening, or reloading `/albums/{id}` loads that album read-only.
-- `GET` returns the complete composition shape defined above, including empty arrays and slot associations.
-- Show loading until complete composition arrives; failed loads never render partial success.
+- `GET /api/albums/{id}` returns only `{id, title, synopsis}` for the requested album.
+- Show loading until the album arrives; failed loads never render partial success.
 - New albums have no chapters and empty start/cover placements.
 - Create the valid initial composition atomically using the seeded built-in template.
 - Malformed or unknown IDs on read, rename, or delete share `404 album_not_found`.
-- Service/incomplete-state failures use `500 service_failure`.
+- Service failures use `500 service_failure`.
 - Service failures offer Retry; missing albums offer a route back to the dashboard.
 - The backend serves app assets and API on one origin; `/api/*` remains JSON.
 - A browser journey creates, lists, opens, reloads, renames, and deletes using real persistence.
