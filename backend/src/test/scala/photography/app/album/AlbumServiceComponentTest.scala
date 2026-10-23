@@ -6,6 +6,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
+import photography.app.spread.{SpreadRepository, SpreadRepositoryFailure}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
@@ -58,10 +59,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     yield assertEquals(result, ListAlbumsResult.Failed)
 
   test("should trim a title and create an Album, album-start Spread, and empty Cover"):
-    val fixture = RepositoryFixture.empty.copy(template = AlbumRepository.FindAlbumStartTemplateResult.Found(buildAlbumStartTemplate))
-
     for
-      repository <- FakeAlbumRepository.make(fixture)
+      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
       result     <- buildService(repository).create("  Northern Coast  ")
       state      <- repository.state.get
     yield
@@ -71,7 +70,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(album.synopsis, "")
       assertEquals(album.createdAt, createdAt)
       assertEquals(start.album, album.id)
-      assertEquals(start.template, buildAlbumStartTemplate.id)
+      assertEquals(start.template, buildTemplateId(20))
       assertEquals(start.slots, Vector(SpreadSlot.Text(TextSpreadSlotId(buildUuid(12)), start.id, buildFullSpreadBox)))
       assertEquals(start.placements, Vector.empty[SpreadPlacement])
       assertEquals(cover.album, album.id)
@@ -82,47 +81,23 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should truncate creation time to the precision persisted by SQLite"):
     val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
     val expectedTime = Instant.ofEpochMilli(suppliedTime.toEpochMilli)
-    val fixture      = RepositoryFixture.empty.copy(template = AlbumRepository.FindAlbumStartTemplateResult.Found(buildAlbumStartTemplate))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildServiceAt(_, suppliedTime).create("Album"))
+    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildServiceAt(_, suppliedTime).create("Album"))
     yield result match
       case CreateAlbumResult.Created(album) => assertEquals(album.createdAt, expectedTime)
       case other                            => fail(s"unexpected result: $other")
 
-  test("should reject blank titles before reading a template or writing"):
+  test("should reject blank titles before writing"):
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
       result     <- buildService(repository).create("   ")
       state      <- repository.state.get
     yield
       assertEquals(result, CreateAlbumResult.InvalidTitle)
-      assertEquals(state.templateReads, 0)
       assertEquals(state.created, None)
 
-  test("should report failure when no built-in template exists"):
-    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).create("New album"))
-    yield assertEquals(result, CreateAlbumResult.Failed)
-
-  test("should report failure without writing when the template has a photo slot, wrong kind, or non-full box"):
-    val photoTemplate     = buildAlbumStartTemplate.copy(slots = NonEmptySet.one(SpreadTemplateSlot.Photo(buildFullSpreadBox)))
-    val wrongKindTemplate = buildAlbumStartTemplate.copy(kind = SpreadTemplateKind.PhotosOnly)
-    val offsetTemplate    = buildAlbumStartTemplate.copy(slots = NonEmptySet.one(SpreadTemplateSlot.Text(buildOffsetSpreadBox)))
-    val invalidTemplates  = Vector(photoTemplate, wrongKindTemplate, offsetTemplate)
-
-    for results <- invalidTemplates.traverse(buildRejectedCreate)
-    yield assertEquals(results, invalidTemplates.map(_ => (CreateAlbumResult.Failed, true)))
-
-  test("should report failure when the built-in template cannot be read"):
-    val fixture = RepositoryFixture.empty.copy(template = AlbumRepository.FindAlbumStartTemplateResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
-
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).create("New album"))
-    yield assertEquals(result, CreateAlbumResult.Failed)
-
   test("should report failure when atomic creation fails"):
-    val fixture = RepositoryFixture.empty.copy(
-      template = AlbumRepository.FindAlbumStartTemplateResult.Found(buildAlbumStartTemplate),
-      createResult = AlbumRepository.CreateResult.Failed(AlbumRepositoryFailure.DatabaseFailure)
-    )
+    val fixture = RepositoryFixture.empty.copy(createResult = AlbumRepository.CreateResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
 
     for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).create("New album"))
     yield assertEquals(result, CreateAlbumResult.Failed)
@@ -196,6 +171,38 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).delete(buildAlbumId(1)))
     yield assertEquals(result, DeleteAlbumResult.Failed)
 
+  test("should use the first AlbumStart template in database order when creating"):
+    val spreads =
+      SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(Vector(buildAlbumStartTemplate(21), buildAlbumStartTemplate(20))))
+
+    for
+      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
+      _          <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      state      <- repository.state.get
+    yield assertEquals(state.created.map(_._2.template), buildTemplateId(21).some)
+
+  test("should fail creation without writing when no AlbumStart template is seeded"):
+    val spreads = SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(Vector.empty[SpreadTemplate]))
+
+    for
+      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
+      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      state      <- repository.state.get
+    yield
+      assertEquals(result, CreateAlbumResult.Failed)
+      assertEquals(state.created, None)
+
+  test("should fail creation without writing when the template lookup fails"):
+    val spreads = SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure))
+
+    for
+      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
+      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      state      <- repository.state.get
+    yield
+      assertEquals(result, CreateAlbumResult.Failed)
+      assertEquals(state.created, None)
+
   test("should provide unique UUIDs and a current UTC instant from live ports"):
     for
       first  <- UUIDGenerator.make[IO].nextUUID
@@ -205,47 +212,45 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertNotEquals(first, second)
       assert(now.isAfter(Instant.parse("2020-01-01T00:00:00Z")))
 
-  private def buildRejectedCreate(template: SpreadTemplate): IO[(CreateAlbumResult, Boolean)] =
-    for
-      repository <- FakeAlbumRepository.make(RepositoryFixture.empty.copy(template = AlbumRepository.FindAlbumStartTemplateResult.Found(template)))
-      result     <- buildService(repository).create("New album")
-      state      <- repository.state.get
-    yield (result, state.created.isEmpty)
-
   private def buildService(repository: FakeAlbumRepository): AlbumService[IO] =
     buildServiceAt(repository, createdAt)
 
   private def buildServiceAt(repository: FakeAlbumRepository, currentTime: Instant): AlbumService[IO] =
+    buildServiceWith(repository, SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(seededAlbumStartTemplates)), currentTime)
+
+  private def buildServiceWith(
+      repository: FakeAlbumRepository,
+      spreads: SpreadTemplateCatalog,
+      currentTime: Instant
+  ): AlbumService[IO] =
     val identifiers = new UUIDGenerator[IO]:
       private val nextValue           = Ref.unsafe[IO, Int](10)
       override def nextUUID: IO[UUID] = nextValue.getAndUpdate(_ + 1).map(buildUuid)
     val clock = new UtcClock[IO]:
       override def now: IO[Instant] = IO.pure(currentTime)
-    AlbumService.make(repository, identifiers, clock, buildPageSize)
+    AlbumService.make(repository, spreads, identifiers, clock, buildPageSize)
 
   private def buildPageSize: AlbumPageSize = 6.refineUnsafe[Positive]
-
-  private def buildAlbumStartTemplate: SpreadTemplate =
-    SpreadTemplate(
-      id = SpreadTemplateId(buildUuid(1)),
-      name = "Built-in AlbumStart".refineUnsafe[Not[Empty]],
-      kind = SpreadTemplateKind.AlbumStart,
-      slots = NonEmptySet.one(SpreadTemplateSlot.Text(buildFullSpreadBox))
-    )
 
   private def buildFullSpreadBox: SlotBox =
     SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
 
-  private def buildOffsetSpreadBox: SlotBox =
-    SlotBox(0.5.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
+  private def buildAlbumStartTemplate(index: Int): SpreadTemplate =
+    SpreadTemplate(
+      buildTemplateId(index),
+      s"Template $index".refineUnsafe[Not[Empty]],
+      SpreadTemplateKind.AlbumStart,
+      NonEmptySet.one(SpreadTemplateSlot.Text(buildFullSpreadBox))
+    )
+
+  private def seededAlbumStartTemplates: Vector[SpreadTemplate] =
+    Vector(buildAlbumStartTemplate(20), buildAlbumStartTemplate(21))
+
+  private def buildTemplateId(index: Int): SpreadTemplateId =
+    SpreadTemplateId(buildUuid(index))
 
   private def buildAlbum(index: Int): Album =
-    Album(
-      id = buildAlbumId(index),
-      title = s"Album $index".refineUnsafe[Not[Empty]],
-      synopsis = s"Synopsis $index",
-      createdAt = createdAt.plusSeconds(index.toLong)
-    )
+    Album(buildAlbumId(index), s"Album $index".refineUnsafe[Not[Empty]], s"Synopsis $index", createdAt.plusSeconds(index.toLong))
 
   private def buildAlbumId(index: Int): AlbumId =
     AlbumId(buildUuid(index))
@@ -256,7 +261,6 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
   final private case class RepositoryFixture(
       albums: Vector[Album],
-      template: AlbumRepository.FindAlbumStartTemplateResult,
       listFailureOffset: Option[Int],
       createResult: AlbumRepository.CreateResult,
       getResult: AlbumRepository.GetResult,
@@ -267,7 +271,6 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   private object RepositoryFixture:
     val empty: RepositoryFixture = RepositoryFixture(
       albums = Vector.empty[Album],
-      template = AlbumRepository.FindAlbumStartTemplateResult.Missing,
       listFailureOffset = None,
       createResult = AlbumRepository.CreateResult.Created,
       getResult = AlbumRepository.GetResult.NotFound,
@@ -277,11 +280,13 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
   final private case class RepositoryState(
       listCalls: Vector[(Int, Int)],
-      templateReads: Int,
       created: Option[(Album, Spread.AlbumStart, Cover)],
       lastReadId: Option[AlbumId],
       renamed: Option[(AlbumId, AlbumName)]
   )
+
+  final private case class SpreadTemplateCatalog(listResult: SpreadRepository.ListAlbumStartTemplatesResult) extends SpreadRepository[IO]:
+    override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = IO.pure(listResult)
 
   final private class FakeAlbumRepository(
       fixture: RepositoryFixture,
@@ -290,9 +295,6 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
       state.update(current => current.copy(listCalls = current.listCalls :+ (offset -> limit))).as(buildListResult(offset, limit))
-
-    override def findAlbumStartTemplate: IO[AlbumRepository.FindAlbumStartTemplateResult] =
-      state.update(current => current.copy(templateReads = current.templateReads + 1)).as(fixture.template)
 
     override def create(album: Album, start: Spread.AlbumStart, cover: Cover): IO[AlbumRepository.CreateResult] =
       state.update(_.copy(created = (album, start, cover).some)).as(fixture.createResult)
@@ -315,4 +317,4 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
   private object FakeAlbumRepository:
     def make(fixture: RepositoryFixture): IO[FakeAlbumRepository] =
-      Ref.of[IO, RepositoryState](RepositoryState(Vector.empty[(Int, Int)], 0, None, None, None)).map(new FakeAlbumRepository(fixture, _))
+      Ref.of[IO, RepositoryState](RepositoryState(Vector.empty[(Int, Int)], None, None, None)).map(new FakeAlbumRepository(fixture, _))

@@ -5,6 +5,7 @@ import cats.effect.{Clock, Sync}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import photography.app.spread.SpreadRepository
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
@@ -19,7 +20,7 @@ final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, tota
 final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
 
 enum AlbumRepositoryFailure derives CanEqual:
-  case InvalidAlbumData, InvalidTemplate, DatabaseFailure
+  case InvalidAlbumData, DatabaseFailure
 
 enum ListAlbumsResult derives CanEqual:
   case Listed(page: AlbumPage)
@@ -66,7 +67,6 @@ object UtcClock:
 
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
-  def findAlbumStartTemplate: F[AlbumRepository.FindAlbumStartTemplateResult]
   def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[AlbumRepository.CreateResult]
   def getAlbum(id: AlbumId): F[AlbumRepository.GetResult]
   def rename(id: AlbumId, title: AlbumName): F[AlbumRepository.RenameResult]
@@ -75,11 +75,6 @@ trait AlbumRepository[F[_]]:
 object AlbumRepository:
   enum ListResult derives CanEqual:
     case Listed(slice: AlbumPageSlice)
-    case Failed(reason: AlbumRepositoryFailure)
-
-  enum FindAlbumStartTemplateResult derives CanEqual:
-    case Found(template: SpreadTemplate)
-    case Missing
     case Failed(reason: AlbumRepositoryFailure)
 
   enum CreateResult derives CanEqual:
@@ -109,11 +104,18 @@ trait AlbumService[F[_]]:
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
 object AlbumService:
-  def make[F[_]: Monad](repository: AlbumRepository[F], identifiers: UUIDGenerator[F], clock: UtcClock[F], pageSize: AlbumPageSize): AlbumService[F] =
-    new LiveAlbumService(repository, identifiers, clock, pageSize)
+  def make[F[_]: Monad](
+      repository: AlbumRepository[F],
+      spreads: SpreadRepository[F],
+      identifiers: UUIDGenerator[F],
+      clock: UtcClock[F],
+      pageSize: AlbumPageSize
+  ): AlbumService[F] =
+    new LiveAlbumService(repository, spreads, identifiers, clock, pageSize)
 
   final private class LiveAlbumService[F[_]: Monad](
       repository: AlbumRepository[F],
+      spreads: SpreadRepository[F],
       identifiers: UUIDGenerator[F],
       clock: UtcClock[F],
       pageSize: AlbumPageSize
@@ -161,15 +163,14 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     private def createAlbum(title: AlbumName): F[CreateAlbumResult] =
-      repository.findAlbumStartTemplate.flatMap:
-        case AlbumRepository.FindAlbumStartTemplateResult.Found(template) if isAlbumStartTemplate(template) =>
+      spreads.listAlbumStartTemplates.flatMap:
+        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(template +: _) =>
           buildInitialComposition(title, template).flatMap: (album, start, cover) =>
             repository.create(album, start, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
-        case AlbumRepository.FindAlbumStartTemplateResult.Found(_)  => CreateAlbumResult.Failed.pure[F]
-        case AlbumRepository.FindAlbumStartTemplateResult.Missing   => CreateAlbumResult.Failed.pure[F]
-        case AlbumRepository.FindAlbumStartTemplateResult.Failed(_) => CreateAlbumResult.Failed.pure[F]
+        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
+        case SpreadRepository.ListAlbumStartTemplatesResult.Failed(_) => CreateAlbumResult.Failed.pure[F]
 
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate): F[(Album, Spread.AlbumStart, Cover)] =
       val textSlotBoxes = template.slots.toSortedSet.toVector.collect:
@@ -188,16 +189,3 @@ object AlbumService:
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots, Vector.empty[SpreadPlacement])
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, start, cover)
-
-    private def isAlbumStartTemplate(template: SpreadTemplate): Boolean =
-      template.kind match
-        case SpreadTemplateKind.AlbumStart => hasOnlyFullSpreadText(template.slots.toSortedSet.toVector)
-        case _                             => false
-
-    private def hasOnlyFullSpreadText(slots: Vector[SpreadTemplateSlot]): Boolean =
-      slots match
-        case Vector(SpreadTemplateSlot.Text(box)) => isFullSpreadBox(box)
-        case _                                    => false
-
-    private def isFullSpreadBox(box: SlotBox): Boolean =
-      (box.x: Double) === 0.0 && (box.y: Double) === 0.0 && (box.width: Double) === 1.0 && (box.height: Double) === 1.0
