@@ -42,11 +42,7 @@ final class FrontendRoutesSeamIntegrationTest extends CatsEffectSuite:
 
   test("should not expose backend classpath resources"):
     val app   = FrontendRoutes.routes[IO].orNotFound
-    val paths = Vector(
-      "/application.conf",
-      "/db/V1__create_photography_schema.sql",
-      "/META-INF/MANIFEST.MF"
-    )
+    val paths = Vector("/application.conf", "/db/V1__create_photography_schema.sql", "/META-INF/MANIFEST.MF")
 
     paths.traverse_ { path =>
       app.run(Request[IO](Method.GET, Uri.unsafeFromString(path))).map: response =>

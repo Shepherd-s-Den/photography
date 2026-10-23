@@ -10,7 +10,7 @@ import photography.app.album.AlbumRepositoryFailure
 import photography.domain.album.{Album, AlbumId, AlbumName, PhotoId}
 import photography.domain.layout.*
 
-import java.nio.file.Files
+import java.nio.file.{Files, Path}
 import java.time.Instant
 import java.util.UUID
 
@@ -34,15 +34,13 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should reject initial resources that do not belong together or contain existing placements"):
     val (album, start, cover) = buildInitialState(albumNumber = 4)
-    val unrelatedSlot         = start.slots.headOption.fold(fail("expected a text slot")):
-      case SpreadSlot.Text(id, _, box) => SpreadSlot.Text(id, SpreadId(buildUuid(99)), box)
-      case _                           => fail("expected a text slot")
-    val invalidStates = Vector(
-      (album, start.copy(album = AlbumId(buildUuid(98))), cover),
-      (album, start.copy(placements = Vector(buildSampleSpreadPlacement)), cover),
-      (album, start.copy(slots = Vector(unrelatedSlot)), cover),
-      (album, start, cover.copy(album = AlbumId(buildUuid(97))))
-    )
+    val unrelatedSlots        = start.slots.collect { case SpreadSlot.Text(id, _, box) => SpreadSlot.Text(id, SpreadId(buildUuid(99)), box) }
+    val unrelatedSlot         = unrelatedSlots.headOption.getOrElse(fail("expected a text slot"))
+    val invalidAlbumId        = (album, start.copy(album = AlbumId(buildUuid(98))), cover)
+    val invalidPlacements     = (album, start.copy(placements = Vector(buildSampleSpreadPlacement)), cover)
+    val invalidSlots          = (album, start.copy(slots = Vector(unrelatedSlot)), cover)
+    val invalidCoverAlbum     = (album, start, cover.copy(album = AlbumId(buildUuid(97))))
+    val invalidStates         = Vector(invalidAlbumId, invalidPlacements, invalidSlots, invalidCoverAlbum)
 
     buildMigratedDatabase.use: transactor =>
       val repository = SqliteAlbumRepository.make[IO](transactor)
@@ -110,14 +108,9 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     val title: AlbumName = s"Album $albumNumber".refineUnsafe[Not[Empty]]
     val box              = buildFullSpreadBox
     val album            = Album(albumId, title, "A synopsis", createdAt)
-    val start            = Spread.AlbumStart(
-      spreadId,
-      albumId,
-      SpreadTemplateId(buildUuid(1)),
-      Vector(SpreadSlot.Text(slotId, spreadId, box)),
-      Vector.empty[SpreadPlacement]
-    )
-    val cover = Cover(albumId, SpineOwner.Front, frontSlot, backSlot)
+    val slots            = Vector(SpreadSlot.Text(slotId, spreadId, box))
+    val start            = Spread.AlbumStart(spreadId, albumId, SpreadTemplateId(buildUuid(1)), slots, Vector.empty[SpreadPlacement])
+    val cover            = Cover(albumId, SpineOwner.Front, frontSlot, backSlot)
     (album, start, cover)
 
   private def buildFullSpreadBox =
@@ -128,26 +121,22 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     SlotBox(x, y, width, height)
 
   private def buildSampleSpreadPlacement =
-    val shiftedZero: InDesignPoints =
-      0.0.refineUnsafe[Greater[-1.7976931348623157e308] & Less[1.7976931348623157e308]]
-    val noZoom: Zoom = 1.0.refineUnsafe[Positive & Less[1.7976931348623157e308]]
-    SpreadPlacement(
-      SpreadPlacementId(buildUuid(50)),
-      PhotoSpreadSlotId(buildUuid(51)),
-      PhotoId(buildUuid(52)),
-      PhotoTransform(Shift(shiftedZero, shiftedZero), mirrored = false, noZoom),
-      CaptionCorner.BottomLeft
-    )
+    val shiftedZero: InDesignPoints = 0.0.refineUnsafe[Greater[-1.7976931348623157e308] & Less[1.7976931348623157e308]]
+    val noZoom: Zoom                = 1.0.refineUnsafe[Positive & Less[1.7976931348623157e308]]
+    val transform                   = PhotoTransform(Shift(shiftedZero, shiftedZero), mirrored = false, noZoom)
+    SpreadPlacement(SpreadPlacementId(buildUuid(50)), PhotoSpreadSlotId(buildUuid(51)), PhotoId(buildUuid(52)), transform, CaptionCorner.BottomLeft)
 
   private def buildUuid(index: Int) =
     val suffix = index.toString.reverse.padTo(12, '0').reverse
     UUID.fromString(s"00000000-0000-4000-8000-$suffix")
 
+  private def buildTempDatabasePath = IO.blocking(Files.createTempFile("photography-album-repository", ".sqlite"))
+
+  private def deleteDatabaseFile(path: Path) = IO.blocking(Files.deleteIfExists(path)).void
+
   private def buildMigratedDatabase =
     for
-      path <- Resource.make(
-        IO.blocking(Files.createTempFile("photography-album-repository", ".sqlite"))
-      )(path => IO.blocking(Files.deleteIfExists(path)).void)
+      path       <- Resource.make(buildTempDatabasePath)(deleteDatabaseFile)
       transactor <- SqliteConnection.make[IO](SqliteConfig(path, 1, 1)).transactor
       flyway     <- FlywayMigrator.make[IO](path)
       _          <- Resource.eval(flyway.migrate)

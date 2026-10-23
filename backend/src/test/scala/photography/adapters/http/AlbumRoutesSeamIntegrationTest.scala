@@ -41,8 +41,7 @@ final class AlbumRoutesSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(body, expectedBody)
 
   test("should encode Album fields in a populated page"):
-    val expectedBody =
-      s"""{"albums":[$coastAlbumBody],"page":2,"pageSize":6,"totalAlbums":7,"totalPages":2}"""
+    val expectedBody = s"""{"albums":[$coastAlbumBody],"page":2,"pageSize":6,"totalAlbums":7,"totalPages":2}"""
 
     for
       response <- runRequest(Request[IO](Method.GET, buildUri(s"$albumsPath?page=2")))
@@ -129,8 +128,7 @@ final class AlbumRoutesSeamIntegrationTest extends CatsEffectSuite:
 
   test("should rename an album and return its Album resource"):
     val request      = Request[IO](Method.PATCH, buildUri(existingPath)).withEntity("""{"title":"Retitled"}""")
-    val expectedBody =
-      s"""{"id":"${existingId.value}","title":"Retitled","synopsis":"","createdAt":"$createdAt"}"""
+    val expectedBody = s"""{"id":"${existingId.value}","title":"Retitled","synopsis":"","createdAt":"$createdAt"}"""
 
     for
       response <- runRequest(request)

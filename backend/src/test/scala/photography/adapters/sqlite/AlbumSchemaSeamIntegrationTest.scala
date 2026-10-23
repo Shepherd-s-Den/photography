@@ -34,8 +34,8 @@ final class AlbumSchemaSeamIntegrationTest extends CatsEffectSuite:
         album = created.fold(failure => fail(s"expected Album creation, got $failure"), identity)
         loaded <- repository.getAlbum(album.id)
       yield
-        val loadedTemplate = template.fold(failure => fail(s"expected template, got $failure"), identity)
-          .fold(fail("expected the seeded AlbumStart template"))(identity)
+        val seededTemplate = template.fold(failure => fail(s"expected template, got $failure"), identity)
+        val loadedTemplate = seededTemplate.fold(fail("expected the seeded AlbumStart template"))(identity)
         assertEquals(loadedTemplate.kind, SpreadTemplateKind.AlbumStart)
         assertEquals(loadedTemplate.slots.toSortedSet.toVector, Vector(SpreadTemplateSlot.Text(buildFullSpreadBox)))
         assertEquals(album.createdAt, createdAt)
@@ -53,10 +53,9 @@ final class AlbumSchemaSeamIntegrationTest extends CatsEffectSuite:
     UUID.fromString(s"00000000-0000-4000-8000-$suffix")
 
   private def buildMigratedDatabase =
+    val createTempFile = IO.blocking(Files.createTempFile("photography-album-schema", ".sqlite"))
     for
-      path <- Resource.make(
-        IO.blocking(Files.createTempFile("photography-album-schema", ".sqlite"))
-      )(path => IO.blocking(Files.deleteIfExists(path)).void)
+      path       <- Resource.make(createTempFile)(path => IO.blocking(Files.deleteIfExists(path)).void)
       transactor <- SqliteConnection.make[IO](SqliteConfig(path, 1, 1)).transactor
       flyway     <- FlywayMigrator.make[IO](path)
       _          <- Resource.eval(flyway.migrate)
