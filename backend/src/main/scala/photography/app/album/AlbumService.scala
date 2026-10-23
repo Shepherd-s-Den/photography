@@ -76,7 +76,7 @@ object AlbumService:
         case Some(validTitle) => createAlbum(validTitle)
 
     override def get(id: AlbumId): F[GetAlbumResult] =
-      repository.getAlbum(id).map:
+      repository.get(id).map:
         case AlbumRepository.GetResult.Found(album) => GetAlbumResult.Found(album)
         case AlbumRepository.GetResult.NotFound     => GetAlbumResult.NotFound
         case AlbumRepository.GetResult.Failed(_)    => GetAlbumResult.Failed

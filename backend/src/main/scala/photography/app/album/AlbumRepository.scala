@@ -11,7 +11,7 @@ enum AlbumRepositoryFailure derives CanEqual:
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
   def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[AlbumRepository.CreateResult]
-  def getAlbum(id: AlbumId): F[AlbumRepository.GetResult]
+  def get(id: AlbumId): F[AlbumRepository.GetResult]
   def rename(id: AlbumId, title: AlbumName): F[AlbumRepository.RenameResult]
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
 

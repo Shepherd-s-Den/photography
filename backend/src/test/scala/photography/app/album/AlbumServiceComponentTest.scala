@@ -318,7 +318,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     override def create(album: Album, start: Spread.AlbumStart, cover: Cover): IO[AlbumRepository.CreateResult] =
       state.update(_.copy(created = (album, start, cover).some)).as(fixture.createResult)
 
-    override def getAlbum(id: AlbumId): IO[AlbumRepository.GetResult] =
+    override def get(id: AlbumId): IO[AlbumRepository.GetResult] =
       state.update(_.copy(lastReadId = id.some)).as(fixture.getResult)
 
     override def rename(id: AlbumId, title: AlbumName): IO[AlbumRepository.RenameResult] =
