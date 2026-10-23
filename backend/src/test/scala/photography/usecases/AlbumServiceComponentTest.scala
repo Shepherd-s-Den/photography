@@ -13,7 +13,6 @@ import photography.ports.{AlbumPageSlice, AlbumRepository, AlbumRepositoryFailur
 
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicReference
 
 final class AlbumServiceComponentTest extends CatsEffectSuite:
 
@@ -24,9 +23,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val albums   = Vector.tabulate(13)(index => buildAlbum(12 - index))
     val expected = AlbumPage(Vector(buildAlbum(0)), 3, 6, 13, 3)
 
-    buildService(refs, RepositoryFixture.empty.copy(albums = albums)).list(page = 99).map: result =>
+    for
+      result <- buildService(refs, RepositoryFixture.empty.copy(albums = albums)).list(page = 99)
+      calls  <- refs.listCalls.get
+    yield
       assertEquals(result, ListAlbumsResult.Listed(expected))
-      assertEquals(refs.listCalls.get(), Vector(0 -> 6, 12 -> 6))
+      assertEquals(calls, Vector(0 -> 6, 12 -> 6))
 
   test("should return page one with empty results and zero pages"):
     val expected = AlbumPage(Vector.empty[Album], 1, 6, 0, 0)
@@ -36,8 +38,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should not repeat the first query when the first page is selected"):
     val refs = Refs()
 
-    buildService(refs, RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum))).list(page = 1).map: _ =>
-      assertEquals(refs.listCalls.get(), Vector(0 -> 6))
+    for
+      _     <- buildService(refs, RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum))).list(page = 1)
+      calls <- refs.listCalls.get
+    yield assertEquals(calls, Vector(0 -> 6))
 
   test("should report failure when the first album page query fails"):
     buildService(Refs(), RepositoryFixture.empty.copy(listFailureOffset = 0.some)).list(page = 1).map(assertEquals(_, ListAlbumsResult.Failed))
@@ -50,8 +54,11 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should create an Album, album-start Spread, and empty Cover"):
     val refs = Refs()
 
-    buildService(refs, RepositoryFixture.empty).create("Northern Coast".refineUnsafe[Not[Empty]]).map: result =>
-      val (album, start, cover) = refs.created.get().getOrElse(fail("expected a created composition"))
+    for
+      result  <- buildService(refs, RepositoryFixture.empty).create("Northern Coast".refineUnsafe[Not[Empty]])
+      created <- refs.created.get
+    yield
+      val (album, start, cover) = created.getOrElse(fail("expected a created composition"))
       assertEquals(result, CreateAlbumResult.Created(album))
       assertEquals(album.title, "Northern Coast".refineUnsafe[Not[Empty]])
       assertEquals(album.synopsis, "")
@@ -88,9 +95,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val refs    = Refs()
     val fixture = RepositoryFixture.empty.copy(getResult = AlbumRepository.GetResult.NotFound)
 
-    buildService(refs, fixture).get(buildAlbumId(1)).map: result =>
+    for
+      result   <- buildService(refs, fixture).get(buildAlbumId(1))
+      lastRead <- refs.lastReadId.get
+    yield
       assertEquals(result, GetAlbumResult.NotFound)
-      assertEquals(refs.lastReadId.get(), buildAlbumId(1).some)
+      assertEquals(lastRead, buildAlbumId(1).some)
 
   test("should return the Album when it exists"):
     val expected = buildAlbum(2)
@@ -109,9 +119,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val renamed = buildAlbum(1).copy(title = "Renamed".refineUnsafe[Not[Empty]])
     val fixture = RepositoryFixture.empty.copy(renameResult = AlbumRepository.RenameResult.Renamed(renamed))
 
-    buildService(refs, fixture).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]).map: result =>
+    for
+      result    <- buildService(refs, fixture).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]])
+      renamedTo <- refs.renamed.get
+    yield
       assertEquals(result, RenameAlbumResult.Renamed(renamed))
-      assertEquals(refs.renamed.get(), (buildAlbumId(1) -> "Renamed".refineUnsafe[Not[Empty]]).some)
+      assertEquals(renamedTo, (buildAlbumId(1) -> "Renamed".refineUnsafe[Not[Empty]]).some)
 
   test("should report failure when rename persistence fails"):
     val fixture = RepositoryFixture.empty.copy(renameResult = AlbumRepository.RenameResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
@@ -135,8 +148,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val refs    = Refs()
     val spreads = buildSpreadTemplates(ListAlbumStartTemplatesResult.Listed(Vector(buildAlbumStartTemplate(21), buildAlbumStartTemplate(20))))
 
-    buildServiceWith(refs, RepositoryFixture.empty, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]]).map: _ =>
-      assertEquals(refs.created.get().map(_._2.template), buildTemplateId(21).some)
+    for
+      _       <- buildServiceWith(refs, RepositoryFixture.empty, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]])
+      created <- refs.created.get
+    yield assertEquals(created.map(_._2.template), buildTemplateId(21).some)
 
   test("should fail creation without writing when no AlbumStart template is seeded"):
     assertCreationRejectedWithoutWriting(buildSpreadTemplates(ListAlbumStartTemplatesResult.Listed(Vector.empty[SpreadTemplate])))
@@ -163,9 +178,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   private def assertCreationRejectedWithoutWriting(spreads: SpreadTemplateService[IO]): IO[Unit] =
     val refs = Refs()
 
-    buildServiceWith(refs, RepositoryFixture.empty, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]]).map: result =>
+    for
+      result  <- buildServiceWith(refs, RepositoryFixture.empty, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]])
+      created <- refs.created.get
+    yield
       assertEquals(result, CreateAlbumResult.Failed)
-      assertEquals(refs.created.get(), None)
+      assertEquals(created, None)
 
   private def singleTemplate(template: SpreadTemplate): SpreadTemplateService[IO] =
     buildSpreadTemplates(ListAlbumStartTemplatesResult.Listed(Vector(template)))
@@ -190,16 +208,16 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
   private def buildRepository(refs: Refs, fixture: RepositoryFixture): AlbumRepository[IO] = new AlbumRepository[IO]:
     override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
-      IO.delay(refs.listCalls.updateAndGet(_ :+ (offset -> limit))).as(buildListResult(fixture, offset, limit))
+      refs.listCalls.update(_ :+ (offset -> limit)).as(buildListResult(fixture, offset, limit))
 
     override def create(album: Album, start: Spread.AlbumStart, cover: Cover): IO[AlbumRepository.CreateResult] =
-      IO.delay(refs.created.set((album, start, cover).some)).as(fixture.createResult)
+      refs.created.set((album, start, cover).some).as(fixture.createResult)
 
     override def get(id: AlbumId): IO[AlbumRepository.GetResult] =
-      IO.delay(refs.lastReadId.set(id.some)).as(fixture.getResult)
+      refs.lastReadId.set(id.some).as(fixture.getResult)
 
     override def rename(id: AlbumId, title: AlbumName): IO[AlbumRepository.RenameResult] =
-      IO.delay(refs.renamed.set((id -> title).some)).as(fixture.renameResult)
+      refs.renamed.set((id -> title).some).as(fixture.renameResult)
 
     override def delete(id: AlbumId): IO[AlbumRepository.DeleteResult] =
       IO.pure(fixture.deleteResult)
@@ -238,10 +256,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     UUID.fromString(s"00000000-0000-4000-8000-$suffix")
 
   final private case class Refs():
-    val listCalls: AtomicReference[Vector[(Int, Int)]]                      = AtomicReference(Vector.empty)
-    val created: AtomicReference[Option[(Album, Spread.AlbumStart, Cover)]] = AtomicReference(None)
-    val lastReadId: AtomicReference[Option[AlbumId]]                        = AtomicReference(None)
-    val renamed: AtomicReference[Option[(AlbumId, AlbumName)]]              = AtomicReference(None)
+    val listCalls: Ref[IO, Vector[(Int, Int)]]                      = Ref.unsafe(Vector.empty)
+    val created: Ref[IO, Option[(Album, Spread.AlbumStart, Cover)]] = Ref.unsafe(None)
+    val lastReadId: Ref[IO, Option[AlbumId]]                        = Ref.unsafe(None)
+    val renamed: Ref[IO, Option[(AlbumId, AlbumName)]]              = Ref.unsafe(None)
 
   final private case class RepositoryFixture(
       albums: Vector[Album],
