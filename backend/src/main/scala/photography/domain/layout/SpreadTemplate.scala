@@ -19,12 +19,7 @@ object SpreadTemplateId:
 enum SpreadTemplateKind derives CanEqual:
   case AlbumStart, ChapterStart, PhotosOnly
 
-final case class SlotBox(
-    x: PositionOnSpread,
-    y: PositionOnSpread,
-    width: DistanceWithinSpread,
-    height: DistanceWithinSpread
-) derives CanEqual
+final case class SlotBox(x: PositionOnSpread, y: PositionOnSpread, width: DistanceWithinSpread, height: DistanceWithinSpread) derives CanEqual
 
 enum SpreadTemplateSlot derives CanEqual:
   case Photo(box: SlotBox)
@@ -46,9 +41,4 @@ object SpreadTemplateSlot:
     val height: Double = box.height
     (kind, x, y, width, height)
 
-final case class SpreadTemplate(
-    id: SpreadTemplateId,
-    name: SpreadTemplateName,
-    kind: SpreadTemplateKind,
-    slots: NonEmptySet[SpreadTemplateSlot]
-)
+final case class SpreadTemplate(id: SpreadTemplateId, name: SpreadTemplateName, kind: SpreadTemplateKind, slots: NonEmptySet[SpreadTemplateSlot])

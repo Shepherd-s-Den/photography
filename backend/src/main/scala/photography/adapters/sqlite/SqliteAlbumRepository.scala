@@ -55,11 +55,7 @@ object SqliteAlbumRepository:
         yield maybeTemplate -> slots
       captureTemplate(query.transact(transactor))
 
-    override def create(
-        album: Album,
-        start: Spread.AlbumStart,
-        cover: Cover
-    ): F[Either[AlbumRepositoryFailure, Unit]] =
+    override def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[Either[AlbumRepositoryFailure, Unit]] =
       val slotsBelongToSpread    = start.slots.forall(slot => slotBelongsToSpread(slot, start.id))
       val resourcesBelongToAlbum =
         start.album.value === album.id.value && cover.album.value === album.id.value
@@ -113,10 +109,7 @@ object SqliteAlbumRepository:
         """.query[(String, String, String, Long)].option
       capture(query.transact(transactor)).map(_.flatMap(_.traverse(decodeAlbum)))
 
-    override def rename(
-        id: AlbumId,
-        title: AlbumName
-    ): F[Either[AlbumRepositoryFailure, Option[Album]]] =
+    override def rename(id: AlbumId, title: AlbumName): F[Either[AlbumRepositoryFailure, Option[Album]]] =
       val titleValue: String = title
       val query              =
         for
@@ -227,10 +220,7 @@ object SqliteAlbumRepository:
           VALUES (${slot.id.value.toString}, ${albumId.value.toString}, $side)
         """.update.run.void
 
-    private def decodeTemplate(
-        row: (String, String, String),
-        slots: Vector[(String, Double, Double, Double, Double)]
-    ) =
+    private def decodeTemplate(row: (String, String, String), slots: Vector[(String, Double, Double, Double, Double)]) =
       val templateSlots = slots.traverse: (kind, x, y, width, height) =>
         for
           refinedX      <- refinePosition(x)
@@ -252,23 +242,13 @@ object SqliteAlbumRepository:
           case _               => AlbumRepositoryFailure.InvalidTemplate.asLeft[SpreadTemplateKind]
         parsedSlots <- templateSlots
         head        <- parsedSlots.headOption.toRight(AlbumRepositoryFailure.InvalidTemplate)
-      yield SpreadTemplate(
-        SpreadTemplateId(templateId),
-        refinedName,
-        kind,
-        cats.data.NonEmptySet.of(head, parsedSlots.drop(1)*)
-      )
+      yield SpreadTemplate(SpreadTemplateId(templateId), refinedName, kind, cats.data.NonEmptySet.of(head, parsedSlots.drop(1)*))
 
     private def decodeAlbum(row: (String, String, String, Long)) =
       for
         albumUuid <- parseUuid(row._1).leftMap(_ => AlbumRepositoryFailure.InvalidAlbumData)
         title     <- row._2.refineEither[Not[Empty]].leftMap(_ => AlbumRepositoryFailure.InvalidAlbumData)
-      yield Album(
-        id = AlbumId(albumUuid),
-        title = title,
-        synopsis = row._3,
-        createdAt = Instant.ofEpochMilli(row._4)
-      )
+      yield Album(id = AlbumId(albumUuid), title = title, synopsis = row._3, createdAt = Instant.ofEpochMilli(row._4))
 
     private def capture[A](action: F[A]) =
       action.attempt.map(_.leftMap(_ => AlbumRepositoryFailure.DatabaseFailure))

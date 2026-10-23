@@ -16,13 +16,7 @@ import photography.domain.album.{Album, AlbumId}
 
 final private case class TitleRequest(title: String)
 final private case class AlbumResource(id: String, title: String, synopsis: String, createdAt: String)
-final private case class AlbumPageResource(
-    albums: Vector[AlbumResource],
-    page: Int,
-    pageSize: Int,
-    totalAlbums: Long,
-    totalPages: Int
-)
+final private case class AlbumPageResource(albums: Vector[AlbumResource], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
 final private case class ValidationError(message: String)
 final private case class ServiceError(code: String, message: String)
 
@@ -92,18 +86,11 @@ object AlbumRoutes:
       case Left(_: DecodeFailure) => Async[F].pure(().asLeft[String])
       case Left(failure)          => Async[F].raiseError[Either[Unit, String]](failure)
       case Right(body)            =>
-        Async[F].pure(
-          parse(body).flatMap(_.as[TitleRequest]).map(_.title).leftMap(_ => ())
-        )
+        Async[F].pure(parse(body).flatMap(_.as[TitleRequest]).map(_.title).leftMap(_ => ()))
 
   private def buildAlbumResource(album: Album) =
     val title: String = album.title
-    AlbumResource(
-      id = album.id.value.toString,
-      title = title,
-      synopsis = album.synopsis,
-      createdAt = album.createdAt.toString
-    )
+    AlbumResource(id = album.id.value.toString, title = title, synopsis = album.synopsis, createdAt = album.createdAt.toString)
 
   private def buildAlbumPageResource(page: AlbumPage) =
     AlbumPageResource(

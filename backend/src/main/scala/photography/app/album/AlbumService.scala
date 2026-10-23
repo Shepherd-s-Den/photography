@@ -12,13 +12,7 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-final case class AlbumPage(
-    albums: Vector[Album],
-    page: Int,
-    pageSize: Int,
-    totalAlbums: Long,
-    totalPages: Int
-)
+final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
 
 final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
 
@@ -53,11 +47,7 @@ object UtcClock:
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[Either[AlbumRepositoryFailure, AlbumPageSlice]]
   def builtInAlbumStartTemplate: F[Either[AlbumRepositoryFailure, Option[SpreadTemplate]]]
-  def create(
-      album: Album,
-      start: Spread.AlbumStart,
-      cover: Cover
-  ): F[Either[AlbumRepositoryFailure, Unit]]
+  def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[Either[AlbumRepositoryFailure, Unit]]
   def getAlbum(id: AlbumId): F[Either[AlbumRepositoryFailure, Option[Album]]]
   def rename(id: AlbumId, title: AlbumName): F[Either[AlbumRepositoryFailure, Option[Album]]]
   def delete(id: AlbumId): F[Either[AlbumRepositoryFailure, Boolean]]
@@ -72,11 +62,7 @@ trait AlbumService[F[_]]:
 object AlbumService:
   private val pageSize = 6
 
-  def make[F[_]: Monad](
-      repository: AlbumRepository[F],
-      identifiers: UUIDGenerator[F],
-      clock: UtcClock[F]
-  ): AlbumService[F] =
+  def make[F[_]: Monad](repository: AlbumRepository[F], identifiers: UUIDGenerator[F], clock: UtcClock[F]): AlbumService[F] =
     new LiveAlbumService(repository, identifiers, clock)
 
   final private class LiveAlbumService[F[_]: Monad](
@@ -175,12 +161,7 @@ object AlbumService:
           slots = actualSlots,
           placements = Vector.empty[SpreadPlacement]
         )
-        val cover = Cover(
-          album = albumId,
-          spineOwner = SpineOwner.Front,
-          front = CoverSlot(frontId),
-          back = CoverSlot(backId)
-        )
+        val cover = Cover(album = albumId, spineOwner = SpineOwner.Front, front = CoverSlot(frontId), back = CoverSlot(backId))
         (album, start, cover)
 
     private def isValidAlbumStartTemplate(template: SpreadTemplate) =

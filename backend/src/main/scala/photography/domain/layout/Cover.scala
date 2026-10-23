@@ -16,12 +16,7 @@ object CoverSlotId:
 
 final case class CoverSlot(id: CoverSlotId)
 
-final case class Cover(
-    album: AlbumId,
-    spineOwner: SpineOwner,
-    front: CoverSlot,
-    back: CoverSlot
-)
+final case class Cover(album: AlbumId, spineOwner: SpineOwner, front: CoverSlot, back: CoverSlot)
 
 final case class SaalCoverSpecification(
     pageCount: PageCount,
@@ -46,9 +41,4 @@ final case class CoverGeometry(
     frontStartPt: InDesignPoints
 )
 
-final case class CoverPhotoFrame(
-    xPt: InDesignPoints,
-    yPt: InDesignPoints,
-    widthPt: InDesignPoints,
-    heightPt: InDesignPoints
-)
+final case class CoverPhotoFrame(xPt: InDesignPoints, yPt: InDesignPoints, widthPt: InDesignPoints, heightPt: InDesignPoints)

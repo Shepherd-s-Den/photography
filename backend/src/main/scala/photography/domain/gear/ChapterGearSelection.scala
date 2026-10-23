@@ -9,9 +9,6 @@ enum CameraUse:
 
 type GearSelection = NonEmptyMap[CameraId, CameraUse]
 
-final case class GearCatalog(
-    cameras: Vector[Camera],
-    lenses: Vector[Lens]
-)
+final case class GearCatalog(cameras: Vector[Camera], lenses: Vector[Lens])
 
 final case class ChapterGearSelection(chapter: ChapterId, selection: GearSelection)
