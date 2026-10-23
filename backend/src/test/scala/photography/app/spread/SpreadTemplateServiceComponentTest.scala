@@ -17,9 +17,11 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
       buildTemplate(22, SpreadTemplateKind.PhotosOnly),
       buildTemplate(20, SpreadTemplateKind.AlbumStart)
     )
-    val service = SpreadTemplateService.make(SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed)))
+    val repository = new SpreadRepository[IO]:
+      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] =
+        IO.pure(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed))
 
-    service.listAlbumStartTemplates.map(result =>
+    SpreadTemplateService.make(repository).listAlbumStartTemplates.map(result =>
       assertEquals(
         result,
         ListAlbumStartTemplatesResult.Listed(Vector(
@@ -30,11 +32,11 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
     )
 
   test("should report failure when the repository cannot list templates"):
-    val service = SpreadTemplateService.make(
-      SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure))
-    )
+    val repository = new SpreadRepository[IO]:
+      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] =
+        IO.pure(SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure))
 
-    service.listAlbumStartTemplates.map(assertEquals(_, ListAlbumStartTemplatesResult.Failed))
+    SpreadTemplateService.make(repository).listAlbumStartTemplates.map(assertEquals(_, ListAlbumStartTemplatesResult.Failed))
 
   private def buildTemplate(index: Int, kind: SpreadTemplateKind): SpreadTemplate =
     SpreadTemplate(
@@ -43,6 +45,3 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
       kind,
       NonEmptySet.one(SpreadTemplateSlot.Text(SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)))
     )
-
-  final private case class SpreadTemplateCatalog(listResult: SpreadRepository.ListAlbumStartTemplatesResult) extends SpreadRepository[IO]:
-    override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = IO.pure(listResult)
