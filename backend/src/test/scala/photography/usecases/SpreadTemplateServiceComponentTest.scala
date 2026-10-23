@@ -1,6 +1,6 @@
 package photography.usecases
 
-import cats.data.NonEmptySet
+import cats.data.NonEmptyList
 import cats.effect.IO
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -44,5 +44,5 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
       SpreadTemplateId(new UUID(0L, index.toLong)),
       s"Template $index".refineUnsafe[Not[Empty]],
       kind,
-      NonEmptySet.one(SpreadTemplateSlot.Text(SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)))
+      NonEmptyList.one(SpreadTemplateSlot.Text(SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)))
     )

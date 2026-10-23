@@ -1,6 +1,6 @@
 package photography.usecases
 
-import cats.data.NonEmptySet
+import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
@@ -150,13 +150,13 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     assertCreationRejectedWithoutWriting(singleTemplate(template))
 
   test("should fail creation without writing when the first template has a photo slot"):
-    val template = buildAlbumStartTemplate(20).copy(slots = NonEmptySet.one(SpreadTemplateSlot.Photo(buildFullSpreadBox)))
+    val template = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Photo(buildFullSpreadBox)))
 
     assertCreationRejectedWithoutWriting(singleTemplate(template))
 
   test("should fail creation without writing when the text slot does not cover the full spread"):
     val partialBox = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 0.5.refineUnsafe, 1.0.refineUnsafe)
-    val template   = buildAlbumStartTemplate(20).copy(slots = NonEmptySet.one(SpreadTemplateSlot.Text(partialBox)))
+    val template   = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Text(partialBox)))
 
     assertCreationRejectedWithoutWriting(singleTemplate(template))
 
@@ -218,7 +218,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       buildTemplateId(index),
       s"Template $index".refineUnsafe[Not[Empty]],
       SpreadTemplateKind.AlbumStart,
-      NonEmptySet.one(SpreadTemplateSlot.Text(buildFullSpreadBox))
+      NonEmptyList.one(SpreadTemplateSlot.Text(buildFullSpreadBox))
     )
 
   private def seededAlbumStartTemplates: Vector[SpreadTemplate] =

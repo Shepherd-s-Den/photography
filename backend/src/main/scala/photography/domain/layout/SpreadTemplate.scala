@@ -1,6 +1,6 @@
 package photography.domain.layout
 
-import cats.data.NonEmptySet
+import cats.data.NonEmptyList
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.util.UUID
@@ -25,20 +25,4 @@ enum SpreadTemplateSlot derives CanEqual:
   case Photo(box: SlotBox)
   case Text(box: SlotBox)
 
-object SpreadTemplateSlot:
-  given cats.Order[SpreadTemplateSlot] = cats.Order.from: (left, right) =>
-    val leftKey  = buildOrderingKey(left)
-    val rightKey = buildOrderingKey(right)
-    summon[Ordering[(Int, Double, Double, Double, Double)]].compare(leftKey, rightKey)
-
-  private def buildOrderingKey(slot: SpreadTemplateSlot) =
-    val (kind, box) = slot match
-      case SpreadTemplateSlot.Photo(value) => (0, value)
-      case SpreadTemplateSlot.Text(value)  => (1, value)
-    val x: Double      = box.x
-    val y: Double      = box.y
-    val width: Double  = box.width
-    val height: Double = box.height
-    (kind, x, y, width, height)
-
-final case class SpreadTemplate(id: SpreadTemplateId, name: SpreadTemplateName, kind: SpreadTemplateKind, slots: NonEmptySet[SpreadTemplateSlot])
+final case class SpreadTemplate(id: SpreadTemplateId, name: SpreadTemplateName, kind: SpreadTemplateKind, slots: NonEmptyList[SpreadTemplateSlot])

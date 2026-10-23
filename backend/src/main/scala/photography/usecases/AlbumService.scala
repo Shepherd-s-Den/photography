@@ -109,8 +109,8 @@ object AlbumService:
         case ListAlbumStartTemplatesResult.Failed    => CreateAlbumResult.Failed.pure[F]
 
     private def isAlbumStartComposition(template: SpreadTemplate): Boolean =
-      val isFullSpreadText = template.slots.toSortedSet.toVector match
-        case Vector(SpreadTemplateSlot.Text(SlotBox(x, y, width, height))) =>
+      val isFullSpreadText = template.slots.toList match
+        case List(SpreadTemplateSlot.Text(SlotBox(x, y, width, height))) =>
           (x: Double) === 0.0 && (y: Double) === 0.0 && (width: Double) === 1.0 && (height: Double) === 1.0
         case _ => false
       template.kind match
@@ -118,8 +118,10 @@ object AlbumService:
         case _                             => false
 
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate): F[(Album, Spread.AlbumStart, Cover)] =
-      val textSlotBoxes = template.slots.toSortedSet.toVector.collect:
-        case SpreadTemplateSlot.Text(box) => box
+      val textSlotBoxes =
+        template.slots.toList
+          .collect:
+            case SpreadTemplateSlot.Text(box) => box
       for
         albumId   <- identifiers.nextId.map(AlbumId(_))
         spreadId  <- identifiers.nextId.map(SpreadId(_))
@@ -131,6 +133,6 @@ object AlbumService:
         val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
           SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
         val album = Album(albumId, title, synopsis = "", createdAt)
-        val start = Spread.AlbumStart(spreadId, albumId, template.id, slots, Vector.empty[SpreadPlacement])
+        val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, Vector.empty[SpreadPlacement])
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, start, cover)
