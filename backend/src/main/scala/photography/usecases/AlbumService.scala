@@ -98,7 +98,7 @@ object AlbumService:
       yield
         val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
           SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
-        val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, Vector.empty[SpreadPlacement])
+        val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, placements = Vector.empty[SpreadPlacement])
         val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
