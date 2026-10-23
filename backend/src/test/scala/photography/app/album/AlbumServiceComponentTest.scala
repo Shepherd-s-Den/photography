@@ -35,8 +35,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val repository = FakeAlbumRepository.make(RepositoryFixture.empty)
     val expected   = AlbumPage(Vector.empty[Album], 1, 6, 0, 0)
 
-    for result <- repository.flatMap(buildService(_).list(page = 1))
-    yield assertEquals(result, ListAlbumsResult.Listed(expected))
+    repository.flatMap(buildService(_).list(page = 1)).map(assertEquals(_, ListAlbumsResult.Listed(expected)))
 
   test("should not repeat the first query when the first page is selected"):
     val repository = FakeAlbumRepository.make(RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum)))
@@ -50,14 +49,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should report failure when the first album page query fails"):
     val repository = FakeAlbumRepository.make(RepositoryFixture.empty.copy(listFailureOffset = 0.some))
 
-    for result <- repository.flatMap(buildService(_).list(page = 1))
-    yield assertEquals(result, ListAlbumsResult.Failed)
+    repository.flatMap(buildService(_).list(page = 1)).map(assertEquals(_, ListAlbumsResult.Failed))
 
   test("should report failure when the selected album page query fails"):
     val fixture = RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum), listFailureOffset = 12.some)
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).list(page = 99))
-    yield assertEquals(result, ListAlbumsResult.Failed)
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).list(page = 99)).map(assertEquals(_, ListAlbumsResult.Failed))
 
   test("should create an Album, album-start Spread, and empty Cover"):
     for
@@ -83,22 +80,23 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
     val expectedTime = Instant.ofEpochMilli(suppliedTime.toEpochMilli)
 
-    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildServiceAt(_, suppliedTime).create("Album".refineUnsafe[Not[Empty]]))
-    yield result match
+    FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildServiceAt(_, suppliedTime).create("Album".refineUnsafe[Not[Empty]])).map {
       case CreateAlbumResult.Created(album) => assertEquals(album.createdAt, expectedTime)
       case other                            => fail(s"unexpected result: $other")
+    }
 
   test("should report failure when atomic creation fails"):
     val fixture = RepositoryFixture.empty.copy(createResult = AlbumRepository.CreateResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).create("New album".refineUnsafe[Not[Empty]]))
-    yield assertEquals(result, CreateAlbumResult.Failed)
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).create("New album".refineUnsafe[Not[Empty]])).map(assertEquals(
+      _,
+      CreateAlbumResult.Failed
+    ))
 
   test("should report failure when album lookup fails"):
     val fixture = RepositoryFixture.empty.copy(getResult = AlbumRepository.GetResult.Failed(AlbumRepositoryFailure.InvalidAlbumData))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).get(buildAlbumId(1)))
-    yield assertEquals(result, GetAlbumResult.Failed)
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).get(buildAlbumId(1))).map(assertEquals(_, GetAlbumResult.Failed))
 
   test("should report not found when the requested album is missing"):
     for
@@ -113,13 +111,13 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val expected = buildAlbum(2)
     val fixture  = RepositoryFixture.empty.copy(getResult = AlbumRepository.GetResult.Found(expected))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).get(buildAlbumId(2)))
-    yield assertEquals(result, GetAlbumResult.Found(expected))
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).get(buildAlbumId(2))).map(assertEquals(_, GetAlbumResult.Found(expected)))
 
   test("should report not found when rename targets a missing album"):
-    for result <-
-        FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]))
-    yield assertEquals(result, RenameAlbumResult.NotFound)
+    FakeAlbumRepository
+      .make(RepositoryFixture.empty)
+      .flatMap(buildService(_).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]))
+      .map(assertEquals(_, RenameAlbumResult.NotFound))
 
   test("should return the renamed Album"):
     val renamed = buildAlbum(1).copy(title = "Renamed".refineUnsafe[Not[Empty]])
@@ -136,24 +134,26 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should report failure when rename persistence fails"):
     val fixture = RepositoryFixture.empty.copy(renameResult = AlbumRepository.RenameResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]))
-    yield assertEquals(result, RenameAlbumResult.Failed)
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]])).map(assertEquals(
+      _,
+      RenameAlbumResult.Failed
+    ))
 
   test("should report not found when deletion finds no row"):
-    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).delete(buildAlbumId(1)))
-    yield assertEquals(result, DeleteAlbumResult.NotFound)
+    FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).delete(buildAlbumId(1))).map(assertEquals(
+      _,
+      DeleteAlbumResult.NotFound
+    ))
 
   test("should delete an existing album"):
     val fixture = RepositoryFixture.empty.copy(deleteResult = AlbumRepository.DeleteResult.Deleted)
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).delete(buildAlbumId(1)))
-    yield assertEquals(result, DeleteAlbumResult.Deleted)
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).delete(buildAlbumId(1))).map(assertEquals(_, DeleteAlbumResult.Deleted))
 
   test("should report failure when deletion persistence fails"):
     val fixture = RepositoryFixture.empty.copy(deleteResult = AlbumRepository.DeleteResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).delete(buildAlbumId(1)))
-    yield assertEquals(result, DeleteAlbumResult.Failed)
+    FakeAlbumRepository.make(fixture).flatMap(buildService(_).delete(buildAlbumId(1))).map(assertEquals(_, DeleteAlbumResult.Failed))
 
   test("should use the first AlbumStart template the spread service lists when creating"):
     val spreads =
