@@ -220,11 +220,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   private def buildServiceAt(repository: FakeAlbumRepository, currentTime: Instant): AlbumService[IO] =
     buildServiceWith(repository, SpreadTemplateCatalog(ListAlbumStartTemplatesResult.Listed(seededAlbumStartTemplates)), currentTime)
 
-  private def buildServiceWith(
-      repository: FakeAlbumRepository,
-      spreads: SpreadTemplateCatalog,
-      currentTime: Instant
-  ): AlbumService[IO] =
+  private def buildServiceWith(repository: FakeAlbumRepository, spreads: SpreadTemplateCatalog, currentTime: Instant): AlbumService[IO] =
     val identifiers = new IdGenerator[IO]:
       private val nextValue         = Ref.unsafe[IO, Int](10)
       override def nextId: IO[UUID] = nextValue.getAndUpdate(_ + 1).map(buildUuid)
@@ -290,10 +286,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   final private case class SpreadTemplateCatalog(listResult: ListAlbumStartTemplatesResult) extends SpreadTemplateService[IO]:
     override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = IO.pure(listResult)
 
-  final private class FakeAlbumRepository(
-      fixture: RepositoryFixture,
-      val state: Ref[IO, RepositoryState]
-  ) extends AlbumRepository[IO]:
+  final private class FakeAlbumRepository(fixture: RepositoryFixture, val state: Ref[IO, RepositoryState]) extends AlbumRepository[IO]:
 
     override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
       state.update(current => current.copy(listCalls = current.listCalls :+ (offset -> limit))).as(buildListResult(offset, limit))
