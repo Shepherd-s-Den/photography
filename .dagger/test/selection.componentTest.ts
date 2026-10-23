@@ -11,9 +11,9 @@ describe("parseChangedPaths", () => {
 });
 
 describe("componentsForPath", () => {
-  it("should map backend and frontend paths to their own component", () => {
+  it("should include the backend when frontend assets are rebuilt into it", () => {
     expect(Selection.componentsForPath("backend/build.sbt")).toEqual(["backend"]);
-    expect(Selection.componentsForPath("frontend/index.html")).toEqual(["frontend"]);
+    expect(Selection.componentsForPath("frontend/index.html")).toEqual(["backend", "frontend"]);
   });
 
   it("should map pipeline paths to the pipeline component", () => {
@@ -34,10 +34,10 @@ describe("selectAffected", () => {
     expect(Selection.selectAffected(["README.md"])).toEqual({ kind: "none" });
   });
 
-  it("should return one component when one surface changed", () => {
+  it("should return all checks affected by one changed surface", () => {
     expect(Selection.selectAffected(["frontend/index.html"])).toEqual({
       kind: "some",
-      components: ["frontend"],
+      components: ["backend", "frontend"],
     });
   });
 
