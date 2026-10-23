@@ -23,6 +23,7 @@ lazy val root = (project in file("."))
     semanticdbEnabled := true,
     semanticdbVersion := scalafixSemanticdb.revision,
     wartremoverErrors ++= Warts.all,
+    Test / scalacOptions ~= (_.filterNot(_ == "-P:wartremover:traverser:org.wartremover.warts.DefaultArguments")),
     coverageMinimumStmtTotal   := 100,
     coverageMinimumBranchTotal := 100,
     coverageFailOnMinimum      := true,
