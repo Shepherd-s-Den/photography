@@ -6,6 +6,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
+import photography.app.capabilities.{Clock, IdGenerator}
 import photography.app.spread.{SpreadRepository, SpreadRepositoryFailure}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
@@ -203,14 +204,32 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(result, CreateAlbumResult.Failed)
       assertEquals(state.created, None)
 
-  test("should provide unique UUIDs and a current UTC instant from live ports"):
+  test("should fail creation without writing when the first template is not an AlbumStart kind"):
+    val template = buildAlbumStartTemplate(20).copy(kind = SpreadTemplateKind.PhotosOnly)
+
+    assertCreationRejectedWithoutWriting(template)
+
+  test("should fail creation without writing when the first template has a photo slot"):
+    val template = buildAlbumStartTemplate(20).copy(slots = NonEmptySet.one(SpreadTemplateSlot.Photo(buildFullSpreadBox)))
+
+    assertCreationRejectedWithoutWriting(template)
+
+  test("should fail creation without writing when the text slot does not cover the full spread"):
+    val partialBox = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 0.5.refineUnsafe, 1.0.refineUnsafe)
+    val template   = buildAlbumStartTemplate(20).copy(slots = NonEmptySet.one(SpreadTemplateSlot.Text(partialBox)))
+
+    assertCreationRejectedWithoutWriting(template)
+
+  private def assertCreationRejectedWithoutWriting(template: SpreadTemplate): IO[Unit] =
+    val spreads = SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(Vector(template)))
+
     for
-      first  <- UUIDGenerator.make[IO].nextUUID
-      second <- UUIDGenerator.make[IO].nextUUID
-      now    <- UtcClock.make[IO].now
+      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
+      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      state      <- repository.state.get
     yield
-      assertNotEquals(first, second)
-      assert(now.isAfter(Instant.parse("2020-01-01T00:00:00Z")))
+      assertEquals(result, CreateAlbumResult.Failed)
+      assertEquals(state.created, None)
 
   private def buildService(repository: FakeAlbumRepository): AlbumService[IO] =
     buildServiceAt(repository, createdAt)
@@ -223,10 +242,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       spreads: SpreadTemplateCatalog,
       currentTime: Instant
   ): AlbumService[IO] =
-    val identifiers = new UUIDGenerator[IO]:
-      private val nextValue           = Ref.unsafe[IO, Int](10)
-      override def nextUUID: IO[UUID] = nextValue.getAndUpdate(_ + 1).map(buildUuid)
-    val clock = new UtcClock[IO]:
+    val identifiers = new IdGenerator[IO]:
+      private val nextValue         = Ref.unsafe[IO, Int](10)
+      override def nextId: IO[UUID] = nextValue.getAndUpdate(_ + 1).map(buildUuid)
+    val clock = new Clock[IO]:
       override def now: IO[Instant] = IO.pure(currentTime)
     AlbumService.make(repository, spreads, identifiers, clock, buildPageSize)
 

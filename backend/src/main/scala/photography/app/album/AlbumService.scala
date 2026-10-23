@@ -1,26 +1,19 @@
 package photography.app.album
 
 import cats.Monad
-import cats.effect.{Clock, Sync}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import photography.app.capabilities.{Clock, IdGenerator}
 import photography.app.spread.SpreadRepository
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
-import java.time.Instant
 import java.time.temporal.ChronoUnit
-import java.util.UUID
 
 type AlbumPageSize = Int :| Positive
 
 final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
-
-final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
-
-enum AlbumRepositoryFailure derives CanEqual:
-  case InvalidAlbumData, DatabaseFailure
 
 enum ListAlbumsResult derives CanEqual:
   case Listed(page: AlbumPage)
@@ -47,55 +40,6 @@ enum DeleteAlbumResult derives CanEqual:
   case NotFound
   case Failed
 
-trait UUIDGenerator[F[_]]:
-  def nextUUID: F[UUID]
-
-object UUIDGenerator:
-  def make[F[_]: Sync]: UUIDGenerator[F] = new LiveUUIDGenerator[F]
-
-  final private class LiveUUIDGenerator[F[_]: Sync] extends UUIDGenerator[F]:
-    override def nextUUID: F[UUID] = Sync[F].delay(UUID.randomUUID())
-
-trait UtcClock[F[_]]:
-  def now: F[Instant]
-
-object UtcClock:
-  def make[F[_]: Clock]: UtcClock[F] = new LiveUtcClock[F]
-
-  final private class LiveUtcClock[F[_]: Clock] extends UtcClock[F]:
-    override def now: F[Instant] = Clock[F].realTimeInstant
-
-trait AlbumRepository[F[_]]:
-  def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
-  def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[AlbumRepository.CreateResult]
-  def getAlbum(id: AlbumId): F[AlbumRepository.GetResult]
-  def rename(id: AlbumId, title: AlbumName): F[AlbumRepository.RenameResult]
-  def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
-
-object AlbumRepository:
-  enum ListResult derives CanEqual:
-    case Listed(slice: AlbumPageSlice)
-    case Failed(reason: AlbumRepositoryFailure)
-
-  enum CreateResult derives CanEqual:
-    case Created
-    case Failed(reason: AlbumRepositoryFailure)
-
-  enum GetResult derives CanEqual:
-    case Found(album: Album)
-    case NotFound
-    case Failed(reason: AlbumRepositoryFailure)
-
-  enum RenameResult derives CanEqual:
-    case Renamed(album: Album)
-    case NotFound
-    case Failed(reason: AlbumRepositoryFailure)
-
-  enum DeleteResult derives CanEqual:
-    case Deleted
-    case NotFound
-    case Failed(reason: AlbumRepositoryFailure)
-
 trait AlbumService[F[_]]:
   def list(page: Int): F[ListAlbumsResult]
   def create(title: String): F[CreateAlbumResult]
@@ -107,8 +51,8 @@ object AlbumService:
   def make[F[_]: Monad](
       repository: AlbumRepository[F],
       spreads: SpreadRepository[F],
-      identifiers: UUIDGenerator[F],
-      clock: UtcClock[F],
+      identifiers: IdGenerator[F],
+      clock: Clock[F],
       pageSize: AlbumPageSize
   ): AlbumService[F] =
     new LiveAlbumService(repository, spreads, identifiers, clock, pageSize)
@@ -116,8 +60,8 @@ object AlbumService:
   final private class LiveAlbumService[F[_]: Monad](
       repository: AlbumRepository[F],
       spreads: SpreadRepository[F],
-      identifiers: UUIDGenerator[F],
-      clock: UtcClock[F],
+      identifiers: IdGenerator[F],
+      clock: Clock[F],
       pageSize: AlbumPageSize
   ) extends AlbumService[F]:
 
@@ -164,7 +108,7 @@ object AlbumService:
 
     private def createAlbum(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
-        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(template +: _) =>
+        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
           buildInitialComposition(title, template).flatMap: (album, start, cover) =>
             repository.create(album, start, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
@@ -172,15 +116,24 @@ object AlbumService:
         case SpreadRepository.ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
         case SpreadRepository.ListAlbumStartTemplatesResult.Failed(_) => CreateAlbumResult.Failed.pure[F]
 
+    private def isAlbumStartComposition(template: SpreadTemplate): Boolean =
+      val isFullSpreadText = template.slots.toSortedSet.toVector match
+        case Vector(SpreadTemplateSlot.Text(SlotBox(x, y, width, height))) =>
+          (x: Double) === 0.0 && (y: Double) === 0.0 && (width: Double) === 1.0 && (height: Double) === 1.0
+        case _ => false
+      template.kind match
+        case SpreadTemplateKind.AlbumStart => isFullSpreadText
+        case _                             => false
+
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate): F[(Album, Spread.AlbumStart, Cover)] =
       val textSlotBoxes = template.slots.toSortedSet.toVector.collect:
         case SpreadTemplateSlot.Text(box) => box
       for
-        albumId   <- identifiers.nextUUID.map(AlbumId(_))
-        spreadId  <- identifiers.nextUUID.map(SpreadId(_))
-        slotIds   <- textSlotBoxes.traverse(_ => identifiers.nextUUID)
-        frontId   <- identifiers.nextUUID.map(CoverSlotId(_))
-        backId    <- identifiers.nextUUID.map(CoverSlotId(_))
+        albumId   <- identifiers.nextId.map(AlbumId(_))
+        spreadId  <- identifiers.nextId.map(SpreadId(_))
+        slotIds   <- textSlotBoxes.traverse(_ => identifiers.nextId)
+        frontId   <- identifiers.nextId.map(CoverSlotId(_))
+        backId    <- identifiers.nextId.map(CoverSlotId(_))
         createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
         val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
