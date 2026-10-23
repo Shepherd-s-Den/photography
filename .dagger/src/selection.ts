@@ -12,7 +12,7 @@ export function parseChangedPaths(raw: string): readonly string[] {
 /** Maps source and pipeline paths to the checks they affect. */
 export function componentsForPath(path: string): readonly Component[] {
   if (path.startsWith("backend/")) return ["backend"];
-  if (path.startsWith("frontend/")) return ["frontend"];
+  if (path.startsWith("frontend/")) return ["backend", "frontend"];
   if (
     path === "dagger.json" ||
     path.startsWith(".dagger/") ||

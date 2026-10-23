@@ -1,8 +1,18 @@
 import * as Dagger from "@dagger.io/dagger";
-import { JDK_IMAGE } from "../buildEnv";
+import { JDK_IMAGE, NODE_IMAGE } from "../buildEnv";
 
 /** Runs compilation, tests, and static checks in one pinned sbt invocation. */
 export function backendCheck(source: Dagger.Directory): Dagger.Container {
+  const frontendAssets = Dagger.dag
+    .container()
+    .from(NODE_IMAGE)
+    .withMountedCache("/root/.npm", Dagger.dag.cacheVolume("photography-frontend-npm"))
+    .withDirectory("/app/frontend", source.directory("frontend"))
+    .withWorkdir("/app/frontend")
+    .withExec(["npm", "ci", "--no-audit", "--no-fund"])
+    .withExec(["npm", "run", "build"])
+    .directory("/app/frontend/dist");
+
   return Dagger.dag
     .container()
     .from(JDK_IMAGE)
@@ -11,6 +21,7 @@ export function backendCheck(source: Dagger.Directory): Dagger.Container {
     .withMountedCache("/root/.cache/coursier", Dagger.dag.cacheVolume("photography-coursier"))
     .withMountedCache("/root/.sbt", Dagger.dag.cacheVolume("photography-sbt"))
     .withMountedCache("/root/.ivy2", Dagger.dag.cacheVolume("photography-ivy2"))
+    .withDirectory("/frontend/dist", frontendAssets)
     .withDirectory("/work", source.directory("backend"))
     .withWorkdir("/work")
     .withExec([
