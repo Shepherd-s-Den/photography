@@ -59,10 +59,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).list(page = 99))
     yield assertEquals(result, ListAlbumsResult.Failed)
 
-  test("should trim a title and create an Album, album-start Spread, and empty Cover"):
+  test("should create an Album, album-start Spread, and empty Cover"):
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      result     <- buildService(repository).create("  Northern Coast  ")
+      result     <- buildService(repository).create("Northern Coast".refineUnsafe[Not[Empty]])
       state      <- repository.state.get
     yield
       val (album, start, cover) = state.created.getOrElse(fail("expected a created composition"))
@@ -83,24 +83,15 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
     val expectedTime = Instant.ofEpochMilli(suppliedTime.toEpochMilli)
 
-    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildServiceAt(_, suppliedTime).create("Album"))
+    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildServiceAt(_, suppliedTime).create("Album".refineUnsafe[Not[Empty]]))
     yield result match
       case CreateAlbumResult.Created(album) => assertEquals(album.createdAt, expectedTime)
       case other                            => fail(s"unexpected result: $other")
 
-  test("should reject blank titles before writing"):
-    for
-      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      result     <- buildService(repository).create("   ")
-      state      <- repository.state.get
-    yield
-      assertEquals(result, CreateAlbumResult.InvalidTitle)
-      assertEquals(state.created, None)
-
   test("should report failure when atomic creation fails"):
     val fixture = RepositoryFixture.empty.copy(createResult = AlbumRepository.CreateResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).create("New album"))
+    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).create("New album".refineUnsafe[Not[Empty]]))
     yield assertEquals(result, CreateAlbumResult.Failed)
 
   test("should report failure when album lookup fails"):
@@ -125,26 +116,18 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).get(buildAlbumId(2)))
     yield assertEquals(result, GetAlbumResult.Found(expected))
 
-  test("should reject a blank renamed title without writing"):
-    for
-      repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      result     <- buildService(repository).rename(buildAlbumId(1), " ")
-      state      <- repository.state.get
-    yield
-      assertEquals(result, RenameAlbumResult.InvalidTitle)
-      assertEquals(state.renamed, None)
-
   test("should report not found when rename targets a missing album"):
-    for result <- FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed"))
+    for result <-
+        FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]))
     yield assertEquals(result, RenameAlbumResult.NotFound)
 
-  test("should return the renamed Album with a trimmed title"):
+  test("should return the renamed Album"):
     val renamed = buildAlbum(1).copy(title = "Renamed".refineUnsafe[Not[Empty]])
     val fixture = RepositoryFixture.empty.copy(renameResult = AlbumRepository.RenameResult.Renamed(renamed))
 
     for
       repository <- FakeAlbumRepository.make(fixture)
-      result     <- buildService(repository).rename(buildAlbumId(1), " Renamed ")
+      result     <- buildService(repository).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]])
       state      <- repository.state.get
     yield
       assertEquals(result, RenameAlbumResult.Renamed(renamed))
@@ -153,7 +136,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should report failure when rename persistence fails"):
     val fixture = RepositoryFixture.empty.copy(renameResult = AlbumRepository.RenameResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
 
-    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed"))
+    for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]))
     yield assertEquals(result, RenameAlbumResult.Failed)
 
   test("should report not found when deletion finds no row"):
@@ -178,7 +161,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      _          <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      _          <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]])
       state      <- repository.state.get
     yield assertEquals(state.created.map(_._2.template), buildTemplateId(21).some)
 
@@ -187,7 +170,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]])
       state      <- repository.state.get
     yield
       assertEquals(result, CreateAlbumResult.Failed)
@@ -198,7 +181,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]])
       state      <- repository.state.get
     yield
       assertEquals(result, CreateAlbumResult.Failed)
@@ -225,7 +208,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
-      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast")
+      result     <- buildServiceWith(repository, spreads, createdAt).create("Northern Coast".refineUnsafe[Not[Empty]])
       state      <- repository.state.get
     yield
       assertEquals(result, CreateAlbumResult.Failed)

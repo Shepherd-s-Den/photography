@@ -21,7 +21,6 @@ enum ListAlbumsResult derives CanEqual:
 
 enum CreateAlbumResult derives CanEqual:
   case Created(album: Album)
-  case InvalidTitle
   case Failed
 
 enum GetAlbumResult derives CanEqual:
@@ -31,7 +30,6 @@ enum GetAlbumResult derives CanEqual:
 
 enum RenameAlbumResult derives CanEqual:
   case Renamed(album: Album)
-  case InvalidTitle
   case NotFound
   case Failed
 
@@ -42,9 +40,9 @@ enum DeleteAlbumResult derives CanEqual:
 
 trait AlbumService[F[_]]:
   def list(page: Int): F[ListAlbumsResult]
-  def create(title: String): F[CreateAlbumResult]
+  def create(title: AlbumName): F[CreateAlbumResult]
   def get(id: AlbumId): F[GetAlbumResult]
-  def rename(id: AlbumId, title: String): F[RenameAlbumResult]
+  def rename(id: AlbumId, title: AlbumName): F[RenameAlbumResult]
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
 object AlbumService:
@@ -70,10 +68,7 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_)                 => ListAlbumsResult.Failed.pure[F]
         case firstPage @ AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice.totalAlbums, firstPage)
 
-    override def create(title: String): F[CreateAlbumResult] =
-      title.trim.refineOption[Not[Empty]] match
-        case None             => CreateAlbumResult.InvalidTitle.pure[F]
-        case Some(validTitle) => createAlbum(validTitle)
+    override def create(title: AlbumName): F[CreateAlbumResult] = createAlbum(title)
 
     override def get(id: AlbumId): F[GetAlbumResult] =
       repository.get(id).map:
@@ -81,14 +76,11 @@ object AlbumService:
         case AlbumRepository.GetResult.NotFound     => GetAlbumResult.NotFound
         case AlbumRepository.GetResult.Failed(_)    => GetAlbumResult.Failed
 
-    override def rename(id: AlbumId, title: String): F[RenameAlbumResult] =
-      title.trim.refineOption[Not[Empty]] match
-        case None             => RenameAlbumResult.InvalidTitle.pure[F]
-        case Some(validTitle) =>
-          repository.rename(id, validTitle).map:
-            case AlbumRepository.RenameResult.Renamed(album) => RenameAlbumResult.Renamed(album)
-            case AlbumRepository.RenameResult.NotFound       => RenameAlbumResult.NotFound
-            case AlbumRepository.RenameResult.Failed(_)      => RenameAlbumResult.Failed
+    override def rename(id: AlbumId, title: AlbumName): F[RenameAlbumResult] =
+      repository.rename(id, title).map:
+        case AlbumRepository.RenameResult.Renamed(album) => RenameAlbumResult.Renamed(album)
+        case AlbumRepository.RenameResult.NotFound       => RenameAlbumResult.NotFound
+        case AlbumRepository.RenameResult.Failed(_)      => RenameAlbumResult.Failed
 
     override def delete(id: AlbumId): F[DeleteAlbumResult] =
       repository.delete(id).map:
