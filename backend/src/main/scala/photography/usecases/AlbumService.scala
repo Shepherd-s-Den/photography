@@ -1,6 +1,7 @@
 package photography.usecases
 
 import cats.Monad
+import cats.data.NonEmptyList
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -91,6 +92,9 @@ object AlbumService:
         case SpreadTemplateKind.AlbumStart => isFullSpreadText
         case _                             => false
 
+    // The album spread invariant (first spread is an AlbumStart, then chapter blocks of a ChapterStart
+    // followed by its PhotosOnly spreads) holds by construction: a new album starts with a single AlbumStart.
+    // Any future spread edit must validate the invariant here before writing.
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate) =
       val textSlotBoxes =
         template.slots.toList
@@ -107,7 +111,7 @@ object AlbumService:
         val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
           SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, Vector.empty[SpreadPlacement])
-        val album = Album(albumId, title, synopsis = "", createdAt, AlbumSpreads.initial(start))
+        val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
 

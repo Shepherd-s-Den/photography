@@ -1,12 +1,13 @@
 package photography.domain.album
 
-import photography.domain.layout.AlbumSpreads
+import cats.data.NonEmptyList
+import photography.domain.layout.Spread
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.time.Instant
 import java.util.UUID
 
-final case class Album(id: AlbumId, title: AlbumName, synopsis: String, createdAt: Instant, spreads: AlbumSpreads)
+final case class Album(id: AlbumId, title: AlbumName, synopsis: String, createdAt: Instant, spreads: NonEmptyList[Spread])
 
 opaque type AlbumId = UUID
 object AlbumId:

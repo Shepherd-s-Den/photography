@@ -67,7 +67,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       Vector.empty[SpreadPlacement]
     )
     val expectedAlbum =
-      Album(AlbumId(buildUuid(10)), newTitle, synopsis = "", Instant.parse("2026-10-07T12:00:00.123Z"), AlbumSpreads.initial(expectedStart))
+      Album(AlbumId(buildUuid(10)), newTitle, synopsis = "", Instant.parse("2026-10-07T12:00:00.123Z"), NonEmptyList.one(expectedStart: Spread))
     val expectedCover =
       Cover(AlbumId(buildUuid(10)), SpineOwner.Front, CoverSlot(CoverSlotId(buildUuid(13))), CoverSlot(CoverSlotId(buildUuid(14))))
 
@@ -214,7 +214,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       s"Album $index".refineUnsafe[Not[Empty] & Not[Blank]],
       s"Synopsis $index",
       createdAt.plusSeconds(index.toLong),
-      AlbumSpreads.initial(start)
+      NonEmptyList.one(start: Spread)
     )
 
   private def buildUuid(index: Int) =
