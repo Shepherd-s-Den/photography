@@ -3,7 +3,7 @@ package photography.app
 import cats.effect.Async
 import com.comcast.ip4s.{Host, Port}
 import io.github.iltotore.iron.pureconfig.given
-import photography.app.album.AlbumPageSize
+import photography.usecases.AlbumPageSize
 import pureconfig.ConfigReader
 import pureconfig.ConfigSource
 import pureconfig.module.catseffect.syntax.*

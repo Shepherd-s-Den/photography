@@ -1,8 +1,9 @@
-package photography.app.spread
+package photography.usecases
 
 import cats.Functor
 import cats.syntax.all.*
 import photography.domain.layout.{SpreadTemplate, SpreadTemplateKind}
+import photography.ports.SpreadRepository
 
 enum ListAlbumStartTemplatesResult derives CanEqual:
   case Listed(templates: Vector[SpreadTemplate])

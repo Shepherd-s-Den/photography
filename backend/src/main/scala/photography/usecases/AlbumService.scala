@@ -1,13 +1,13 @@
-package photography.app.album
+package photography.usecases
 
 import cats.Monad
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import photography.app.capabilities.{Clock, IdGenerator}
-import photography.app.spread.{ListAlbumStartTemplatesResult, SpreadTemplateService}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
+import photography.ports.AlbumRepository
 
 import java.time.temporal.ChronoUnit
 

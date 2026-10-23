@@ -1,4 +1,4 @@
-package photography.app.album
+package photography.usecases
 
 import cats.data.NonEmptySet
 import cats.effect.{IO, Ref}
@@ -7,9 +7,9 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.app.capabilities.{Clock, IdGenerator}
-import photography.app.spread.{ListAlbumStartTemplatesResult, SpreadTemplateService}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
+import photography.ports.{AlbumPageSlice, AlbumRepository, AlbumRepositoryFailure}
 
 import java.time.Instant
 import java.util.UUID

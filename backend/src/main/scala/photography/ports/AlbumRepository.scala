@@ -1,4 +1,4 @@
-package photography.app.album
+package photography.ports
 
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.{Cover, Spread}

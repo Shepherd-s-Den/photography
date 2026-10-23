@@ -1,4 +1,4 @@
-package photography.app.spread
+package photography.ports
 
 import photography.domain.layout.SpreadTemplate
 

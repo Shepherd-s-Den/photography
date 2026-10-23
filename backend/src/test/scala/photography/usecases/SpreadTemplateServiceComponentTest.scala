@@ -1,4 +1,4 @@
-package photography.app.spread
+package photography.usecases
 
 import cats.data.NonEmptySet
 import cats.effect.IO
@@ -6,6 +6,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.domain.layout.*
+import photography.ports.{SpreadRepository, SpreadRepositoryFailure}
 
 import java.util.UUID
 
