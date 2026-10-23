@@ -1,12 +1,11 @@
-package photography.adapters.system
+package photography.capabilities
 
 import cats.effect.IO
 import munit.CatsEffectSuite
-import photography.capabilities.Clock
 
 import java.time.Instant
 
-final class LiveClockSeamIntegrationTest extends CatsEffectSuite:
+final class ClockSeamIntegrationTest extends CatsEffectSuite:
 
   test("should read the current instant from the live clock"):
     val before = Instant.now()

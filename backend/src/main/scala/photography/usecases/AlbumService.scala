@@ -83,9 +83,6 @@ object AlbumService:
           ListAlbumsResult.Listed(AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
-    // The album spread invariant (first spread is an AlbumStart, then chapter blocks of a ChapterStart
-    // followed by its PhotosOnly spreads) holds by construction: a new album starts with a single AlbumStart.
-    // Any future spread edit must validate the invariant here before writing.
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate) =
       val textSlotBoxes =
         template.slots.toList

@@ -16,7 +16,7 @@ What we don't chase: gold-plating — polish past the point where it benefits th
 
 ## 1. Ports & Adapters
 
-The core is isolated from the outside world. Pure types live in the domain; orchestration lives in application services. A business-external dependency is named by an **algebra** — a `trait` expressed in domain terms, not a vendor's — while generic infrastructure any service could need regardless of business logic (time, identity, logging, mutual exclusion) is a **capability**. Concrete **adapters** implement these contracts and live apart from the core, grouped by the external dependency they own. The composition root is the only place that binds concrete adapters to application algebras.
+The core is isolated from the outside world. Pure types live in the domain; orchestration and business logic live in the application service's implementation class, while companions hold construction and result types only. A business-external dependency is named by an **algebra** — a `trait` expressed in domain terms, not a vendor's — while generic infrastructure any service could need regardless of business logic (time, identity, logging, mutual exclusion) is a **capability**. Concrete **adapters** implement these contracts and live apart from the core, grouped by the external dependency they own. The composition root is the only place that binds concrete adapters to application algebras.
 
 Static configuration flows the same way. The composition root loads and parses it, converting each setting into the domain type it feeds — `domain` and `usecases` do no config parsing or conversion of their own. A static value never varies between calls, so it is captured once at construction (a `make`/constructor parameter), never threaded through a port's method or any per-call API.
 
@@ -30,6 +30,7 @@ The domain is modelled explicitly and made hard to misuse:
 - **Invalid states are unrepresentable.** Prefer a type that cannot hold a bad value over a check that might be forgotten; prefer a total `enum` and exhaustive matches over open-ended strings. Avoid nullable/optional fields where a value is always present.
 - **Domain values hold no capabilities.** Values carry self-contained, independently testable data and rules only — no clock, database, or I/O. Domain services orchestrate capability ports around those pure values.
 - **Give event time an explicit owner.** When an event can be recorded after it happened, its timestamp is caller input, not an implicit server clock read. Convert local entry to an absolute instant at the boundary, validate it, and preserve it as part of the event's history.
+- **Use cases own cross-value invariants.** A rule spanning several values of one aggregate (for example, an album's first spread must be its start spread) is enforced where the aggregate is built, in the use case. Value types expose no construction path that can produce an invalid aggregate.
 - **Ubiquitous language.** Code, docs, and the UI use one consistent vocabulary. Translate external terminology at the boundary (see §4), never carry foreign semantics inward.
 
 ## 3. Fractal Design
@@ -50,7 +51,7 @@ The system reads the same at every zoom level: `main` is the most zoomed-out vie
 
 External models are translated into internal ones at the edge, so no foreign shape or semantics leak into the domain. This boundary absorbs external model changes without forcing changes to business logic.
 
-Keep **wire representations** and **domain models** distinct. Adapters translate between them, and validators reject malformed input before it crosses inward.
+Keep **wire representations** and **domain models** distinct. Adapters translate between them, and validators reject malformed input before it crosses inward. Driven ports return data already valid for the domain: adapters enforce the port's contract (for example, non-empty lists, allowed kinds, ordering), and use cases and domain types trust it rather than re-checking or handling invalid input.
 
 Boundary encodings must preserve domain semantics used outside the core. If storage compares encoded values, their canonical representation must preserve domain ordering, including across migrated data.
 
