@@ -34,7 +34,4 @@ enum EditorTabState:
   case KeptExisting
   case StaleSession
 
-final case class EditorSessionState(
-    sessions: Map[EditorId, EditorSession],
-    locks: Set[EditingLock]
-)
+final case class EditorSessionState(sessions: Map[EditorId, EditorSession], locks: Set[EditingLock])

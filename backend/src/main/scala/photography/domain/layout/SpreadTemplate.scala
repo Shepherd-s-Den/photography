@@ -19,20 +19,26 @@ object SpreadTemplateId:
 enum SpreadTemplateKind derives CanEqual:
   case AlbumStart, ChapterStart, PhotosOnly
 
-final case class SlotBox(
-    x: PositionOnSpread,
-    y: PositionOnSpread,
-    width: DistanceWithinSpread,
-    height: DistanceWithinSpread
-)
+final case class SlotBox(x: PositionOnSpread, y: PositionOnSpread, width: DistanceWithinSpread, height: DistanceWithinSpread) derives CanEqual
 
 enum SpreadTemplateSlot derives CanEqual:
   case Photo(box: SlotBox)
   case Text(box: SlotBox)
 
-final case class SpreadTemplate(
-    id: SpreadTemplateId,
-    name: SpreadTemplateName,
-    kind: SpreadTemplateKind,
-    slots: NonEmptySet[SpreadTemplateSlot]
-)
+object SpreadTemplateSlot:
+  given cats.Order[SpreadTemplateSlot] = cats.Order.from: (left, right) =>
+    val leftKey  = buildOrderingKey(left)
+    val rightKey = buildOrderingKey(right)
+    summon[Ordering[(Int, Double, Double, Double, Double)]].compare(leftKey, rightKey)
+
+  private def buildOrderingKey(slot: SpreadTemplateSlot) =
+    val (kind, box) = slot match
+      case SpreadTemplateSlot.Photo(value) => (0, value)
+      case SpreadTemplateSlot.Text(value)  => (1, value)
+    val x: Double      = box.x
+    val y: Double      = box.y
+    val width: Double  = box.width
+    val height: Double = box.height
+    (kind, x, y, width, height)
+
+final case class SpreadTemplate(id: SpreadTemplateId, name: SpreadTemplateName, kind: SpreadTemplateKind, slots: NonEmptySet[SpreadTemplateSlot])
