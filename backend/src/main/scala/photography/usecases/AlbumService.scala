@@ -47,13 +47,12 @@ object AlbumService:
 
     override def create(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
-        case ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
-          buildInitialComposition(title, template).flatMap: (album, start, cover) =>
+        case ListAlbumStartTemplatesResult.Listed(templates) if isAlbumStartComposition(templates.head) =>
+          buildInitialComposition(title, templates.head).flatMap: (album, start, cover) =>
             repository.create(album, start, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
-        case ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
-        case ListAlbumStartTemplatesResult.Failed    => CreateAlbumResult.Failed.pure[F]
+        case _ => CreateAlbumResult.Failed.pure[F]
 
     override def get(id: AlbumId): F[GetAlbumResult] =
       repository.get(id).map:

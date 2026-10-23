@@ -4,6 +4,7 @@ import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.{Cover, Spread}
 
 trait AlbumRepository[F[_]]:
+  /** Returns one page of albums ordered newest-first by `createdAt`. */
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
   def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[AlbumRepository.CreateResult]
   def get(id: AlbumId): F[AlbumRepository.GetResult]

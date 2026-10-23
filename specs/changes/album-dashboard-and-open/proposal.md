@@ -22,7 +22,7 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 | `GET /api/albums?page={page}` | `page` defaults to `1`; six per page | `200 {albums, page, pageSize, totalAlbums, totalPages}` |
 | `POST /api/albums` | `{title}` | `201 {id, title, createdAt}` |
 | `PATCH /api/albums/{id}` | `{title}` | `200 {id, title, createdAt}` |
-| `GET /api/albums/{id}` | — | `200` full persisted composition |
+| `GET /api/albums/{id}` | — | `200 {id, title, synopsis, createdAt}` |
 | `DELETE /api/albums/{id}` | — | `204` no body |
 
 - An out-of-range page returns the last page; an empty collection returns page `1` with `totalPages: 0`.
@@ -33,10 +33,9 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 - SQLite enforces declared primary/foreign keys and unique chapter positions, with foreign-key checks enabled on every connection.
 - The use case checks chapter positions are `0..19`.
 - V1 does not enforce template-kind, required-slot, or cover-side shape; create/open use cases validate these composition rules.
-- Creation validates and writes the complete initial shape in one transaction; open rejects incomplete persisted shape.
-- Incomplete persisted state fails as `service_failure`, without exposing an internal composition code.
+- Creation validates and writes the complete initial shape in one transaction.
 
-**Composition response**
+**Composition shape**
 
 | Member | Shape |
 |---|---|
@@ -82,8 +81,8 @@ Album --> Chapters["No chapters on creation"]
 ### Open and persist
 
 - Selecting, directly opening, or reloading `/albums/{id}` loads that album read-only.
-- `GET` returns the complete composition shape defined above, including empty arrays and slot associations.
-- Show loading until complete composition arrives; failed loads never render partial success.
+- `GET` returns the album metadata `{id, title, synopsis, createdAt}`; it does not return the composition.
+- Show loading until album metadata arrives; failed loads never render partial success.
 - New albums have no chapters and empty start/cover placements.
 - Create the valid initial composition atomically using the `AlbumStart` template with the lowest ID.
 - The dashboard fetches all `AlbumStart` templates for display; loading and failure states follow the same rules as albums.

@@ -20,5 +20,3 @@ object AbsoluteLocation:
   extension (location: AbsoluteLocation) def value: Path = location
 
 final case class Country(id: CountryId, code: CountryCode, name: CountryName, flag: AbsoluteLocation)
-
-final case class CountryCatalog(countries: Vector[Country])

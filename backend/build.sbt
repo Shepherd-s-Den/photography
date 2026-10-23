@@ -28,9 +28,9 @@ lazy val root = (project in file("."))
     coverageMinimumBranchTotal := 100,
     coverageFailOnMinimum      := true,
     coverageExcludedPackages   := Seq(
-      "photography\\.app\\..*",
+      "photography\\.app\\..*", // composition root; exercised by the packaged runtime, not unit tests
       "photography\\.adapters\\.sqlite\\..*",
-      ".*photography\\.domain\\..*(AbsoluteLocation|AlbumId|ChapterId|CountryId|DestinationId|PhotoId|RelativeLocation|EditorId|SessionId|CameraId|LensId|CoverPlacementId|CoverSlotId|PhotoSpreadSlotId|SpreadId|SpreadPlacementId|SpreadTemplateId|TextSpreadSlotId).*"
+      ".*photography\\.domain\\..*(AbsoluteLocation|AlbumId|ChapterId|CountryId|DestinationId|PhotoId|RelativeLocation|EditorId|SessionId|CameraId|LensId|CoverSlotId|PhotoSpreadSlotId|SpreadId|SpreadPlacementId|SpreadTemplateId|TextSpreadSlotId).*"
     ).mkString(";"),
     libraryDependencies ++= Seq(
       "org.typelevel"         %% "cats-core"                 % "2.13.0",

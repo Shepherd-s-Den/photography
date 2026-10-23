@@ -1,29 +1,24 @@
 package photography.usecases
 
 import cats.Functor
+import cats.data.NonEmptyList
 import cats.syntax.all.*
-import photography.domain.layout.{SpreadTemplate, SpreadTemplateKind}
-import photography.ports.SpreadRepository
+import photography.domain.layout.SpreadTemplate
+import photography.ports.SpreadTemplateRepository
 
 trait SpreadTemplateService[F[_]]:
   def listAlbumStartTemplates: F[SpreadTemplateService.ListAlbumStartTemplatesResult]
 
 object SpreadTemplateService:
-  def make[F[_]: Functor](repository: SpreadRepository[F]): SpreadTemplateService[F] =
+  def make[F[_]: Functor](repository: SpreadTemplateRepository[F]): SpreadTemplateService[F] =
     new LiveSpreadTemplateService(repository)
 
-  final private class LiveSpreadTemplateService[F[_]: Functor](repository: SpreadRepository[F]) extends SpreadTemplateService[F]:
+  final private class LiveSpreadTemplateService[F[_]: Functor](repository: SpreadTemplateRepository[F]) extends SpreadTemplateService[F]:
     override def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult] =
       repository.listAlbumStartTemplates.map:
-        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(templates) =>
-          ListAlbumStartTemplatesResult.Listed(templates.filter(isAlbumStart).sortBy(_.id.value))
-        case SpreadRepository.ListAlbumStartTemplatesResult.Failed(_) => ListAlbumStartTemplatesResult.Failed
-
-    private def isAlbumStart(template: SpreadTemplate) =
-      template.kind match
-        case SpreadTemplateKind.AlbumStart => true
-        case _                             => false
+        case SpreadTemplateRepository.ListAlbumStartTemplatesResult.Listed(templates) => ListAlbumStartTemplatesResult.Listed(templates)
+        case SpreadTemplateRepository.ListAlbumStartTemplatesResult.Failed(_)         => ListAlbumStartTemplatesResult.Failed
 
   enum ListAlbumStartTemplatesResult derives CanEqual:
-    case Listed(templates: Vector[SpreadTemplate])
+    case Listed(templates: NonEmptyList[SpreadTemplate])
     case Failed

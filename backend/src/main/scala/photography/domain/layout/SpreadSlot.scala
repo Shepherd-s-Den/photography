@@ -5,11 +5,7 @@ import java.util.UUID
 enum SpreadEdge derives CanEqual:
   case Top, Bottom, Left, Right
 
-enum SpreadSlotIdentity:
-  case Photo(id: PhotoSpreadSlotId)
-  case Text(id: TextSpreadSlotId)
-
-enum SpreadSlot:
+enum SpreadSlot derives CanEqual:
   case Photo(id: PhotoSpreadSlotId, spread: SpreadId, box: SlotBox, bleed: Set[SpreadEdge])
   case Text(id: TextSpreadSlotId, spread: SpreadId, box: SlotBox)
 

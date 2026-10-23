@@ -7,40 +7,34 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.domain.layout.*
-import photography.ports.SpreadRepository
-import photography.ports.SpreadRepository.Failure
+import photography.ports.SpreadTemplateRepository
+import photography.ports.SpreadTemplateRepository.Failure
 import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.util.UUID
 
-class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
+final class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
 
-  test("should list only AlbumStart templates by lowest ID and report failure when the repository cannot list them"):
-    val listed = Vector(
-      buildTemplate(21, SpreadTemplateKind.AlbumStart),
-      buildTemplate(22, SpreadTemplateKind.PhotosOnly),
-      buildTemplate(20, SpreadTemplateKind.AlbumStart)
-    )
-    val expectedTemplates = Vector(buildTemplate(20, SpreadTemplateKind.AlbumStart), buildTemplate(21, SpreadTemplateKind.AlbumStart))
-    val expected          = ListAlbumStartTemplatesResult.Listed(expectedTemplates)
-    val failedRepository  = SpreadRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure)
+  test("should pass AlbumStart templates through from the repository"):
+    val listed = NonEmptyList.of(buildTemplate(20), buildTemplate(21))
 
-    for
-      found  <- buildService(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed)).listAlbumStartTemplates
-      failed <- buildService(failedRepository).listAlbumStartTemplates
-    yield
-      assertEquals(found, expected)
-      assertEquals(failed, ListAlbumStartTemplatesResult.Failed)
+    buildService(SpreadTemplateRepository.ListAlbumStartTemplatesResult.Listed(listed)).listAlbumStartTemplates
+      .map(found => assertEquals(found, ListAlbumStartTemplatesResult.Listed(listed)))
 
-  private def buildService(listResult: SpreadRepository.ListAlbumStartTemplatesResult): SpreadTemplateService[IO] =
-    val repository = new SpreadRepository[IO]:
-      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = listResult.pure[IO]
+  test("should report failure when the repository cannot list AlbumStart templates"):
+    val failedResult = SpreadTemplateRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure)
+
+    buildService(failedResult).listAlbumStartTemplates.map(failed => assertEquals(failed, ListAlbumStartTemplatesResult.Failed))
+
+  private def buildService(listResult: SpreadTemplateRepository.ListAlbumStartTemplatesResult) =
+    val repository = new SpreadTemplateRepository[IO]:
+      override def listAlbumStartTemplates: IO[SpreadTemplateRepository.ListAlbumStartTemplatesResult] = listResult.pure[IO]
     SpreadTemplateService.make(repository)
 
-  private def buildTemplate(index: Int, kind: SpreadTemplateKind) =
+  private def buildTemplate(index: Int) =
     SpreadTemplate(
-      SpreadTemplateId(new UUID(0L, index.toLong)),
+      SpreadTemplateId(UUID.fromString(s"00000000-0000-4000-8000-${index.toString.reverse.padTo(12, '0').reverse}")),
       s"Template $index".refineUnsafe[Not[Empty]],
-      kind,
+      SpreadTemplateKind.AlbumStart,
       NonEmptyList.one(SpreadTemplateSlot.Text(SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)))
     )
