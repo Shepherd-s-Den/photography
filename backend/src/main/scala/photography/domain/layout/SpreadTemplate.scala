@@ -24,7 +24,7 @@ final case class SlotBox(
     y: PositionOnSpread,
     width: DistanceWithinSpread,
     height: DistanceWithinSpread
-)
+) derives CanEqual
 
 enum SpreadTemplateSlot derives CanEqual:
   case Photo(box: SlotBox)
@@ -32,11 +32,11 @@ enum SpreadTemplateSlot derives CanEqual:
 
 object SpreadTemplateSlot:
   given cats.Order[SpreadTemplateSlot] = cats.Order.from: (left, right) =>
-    val leftKey  = orderingKey(left)
-    val rightKey = orderingKey(right)
+    val leftKey  = buildOrderingKey(left)
+    val rightKey = buildOrderingKey(right)
     summon[Ordering[(Int, Double, Double, Double, Double)]].compare(leftKey, rightKey)
 
-  private def orderingKey(slot: SpreadTemplateSlot): (Int, Double, Double, Double, Double) =
+  private def buildOrderingKey(slot: SpreadTemplateSlot) =
     val (kind, box) = slot match
       case SpreadTemplateSlot.Photo(value) => (0, value)
       case SpreadTemplateSlot.Text(value)  => (1, value)

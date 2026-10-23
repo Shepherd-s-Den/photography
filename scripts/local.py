@@ -215,6 +215,8 @@ def run_local_backend(project_root: Path, environment: Mapping[str, str] | None 
         if has_frontend and not (frontend / "node_modules" / ".bin" / "vite").is_file():
             raise PreflightError("Run 'npm ci --prefix frontend' before starting the local app")
         preflight(host, port, frontend_port)
+        if has_frontend:
+            subprocess.run(["npm", "run", "build"], cwd=frontend, env=launch_environment, check=True)
         launch_environment["PHOTOGRAPHY_SQLITE_PATH"] = str(state.database)
         process = subprocess.Popen(
             ["sbt", "-batch", "run"],

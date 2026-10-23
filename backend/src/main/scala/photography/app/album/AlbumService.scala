@@ -5,26 +5,26 @@ import cats.effect.{Clock, Sync}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import photography.domain.album.{Album, AlbumComposition, AlbumId, AlbumName}
+import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
-final case class AlbumSummary(id: AlbumId, title: AlbumName, createdAt: Instant)
-
 final case class AlbumPage(
-    albums: Vector[AlbumSummary],
+    albums: Vector[Album],
     page: Int,
     pageSize: Int,
     totalAlbums: Long,
     totalPages: Int
 )
 
-final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[AlbumSummary])
+final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
 
 enum AlbumRepositoryFailure derives CanEqual:
-  case IncompleteComposition
+  case InvalidAlbumData
+  case InvalidTemplate
   case DatabaseFailure
 
 enum AlbumServiceFailure derives CanEqual:
@@ -53,16 +53,20 @@ object UtcClock:
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[Either[AlbumRepositoryFailure, AlbumPageSlice]]
   def builtInAlbumStartTemplate: F[Either[AlbumRepositoryFailure, Option[SpreadTemplate]]]
-  def create(composition: AlbumComposition): F[Either[AlbumRepositoryFailure, Unit]]
-  def getComposition(id: AlbumId): F[Either[AlbumRepositoryFailure, Option[AlbumComposition]]]
-  def rename(id: AlbumId, title: AlbumName): F[Either[AlbumRepositoryFailure, Option[AlbumSummary]]]
+  def create(
+      album: Album,
+      start: Spread.AlbumStart,
+      cover: Cover
+  ): F[Either[AlbumRepositoryFailure, Unit]]
+  def getAlbum(id: AlbumId): F[Either[AlbumRepositoryFailure, Option[Album]]]
+  def rename(id: AlbumId, title: AlbumName): F[Either[AlbumRepositoryFailure, Option[Album]]]
   def delete(id: AlbumId): F[Either[AlbumRepositoryFailure, Boolean]]
 
 trait AlbumService[F[_]]:
   def list(page: Int): F[Either[AlbumServiceFailure, AlbumPage]]
-  def create(title: String): F[Either[AlbumServiceFailure, AlbumSummary]]
-  def get(id: AlbumId): F[Either[AlbumServiceFailure, AlbumComposition]]
-  def rename(id: AlbumId, title: String): F[Either[AlbumServiceFailure, AlbumSummary]]
+  def create(title: String): F[Either[AlbumServiceFailure, Album]]
+  def get(id: AlbumId): F[Either[AlbumServiceFailure, Album]]
+  def rename(id: AlbumId, title: String): F[Either[AlbumServiceFailure, Album]]
   def delete(id: AlbumId): F[Either[AlbumServiceFailure, Unit]]
 
 object AlbumService:
@@ -108,40 +112,36 @@ object AlbumService:
                   totalPages = totalPages
                 ).asRight[AlbumServiceFailure]
 
-    override def create(title: String): F[Either[AlbumServiceFailure, AlbumSummary]] =
+    override def create(title: String): F[Either[AlbumServiceFailure, Album]] =
       val trimmedTitle = title.trim
-      if trimmedTitle.isEmpty then AlbumServiceFailure.InvalidTitle.asLeft[AlbumSummary].pure[F]
+      if trimmedTitle.isEmpty then AlbumServiceFailure.InvalidTitle.asLeft[Album].pure[F]
       else
         repository.builtInAlbumStartTemplate.flatMap:
-          case Left(_)                                                     => AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary].pure[F]
-          case Right(None)                                                 => AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary].pure[F]
-          case Right(Some(template)) if !validAlbumStartTemplate(template) =>
-            AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary].pure[F]
+          case Left(_)                                                       => AlbumServiceFailure.ServiceFailure.asLeft[Album].pure[F]
+          case Right(None)                                                   => AlbumServiceFailure.ServiceFailure.asLeft[Album].pure[F]
+          case Right(Some(template)) if !isValidAlbumStartTemplate(template) =>
+            AlbumServiceFailure.ServiceFailure.asLeft[Album].pure[F]
           case Right(Some(template)) =>
-            createComposition(trimmedTitle, template).flatMap: composition =>
-              repository.create(composition).map:
-                case Left(_)  => AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary]
-                case Right(_) =>
-                  AlbumSummary(
-                    id = composition.album.id,
-                    title = composition.album.title,
-                    createdAt = composition.album.createdAt
-                  ).asRight[AlbumServiceFailure]
+            buildInitialState(trimmedTitle, template).flatMap: initialState =>
+              val (album, start, cover) = initialState
+              repository.create(album, start, cover).map:
+                case Left(_)  => AlbumServiceFailure.ServiceFailure.asLeft[Album]
+                case Right(_) => album.asRight[AlbumServiceFailure]
 
-    override def get(id: AlbumId): F[Either[AlbumServiceFailure, AlbumComposition]] =
-      repository.getComposition(id).map:
-        case Left(_)                  => AlbumServiceFailure.ServiceFailure.asLeft[AlbumComposition]
-        case Right(None)              => AlbumServiceFailure.AlbumNotFound.asLeft[AlbumComposition]
-        case Right(Some(composition)) => composition.asRight[AlbumServiceFailure]
+    override def get(id: AlbumId): F[Either[AlbumServiceFailure, Album]] =
+      repository.getAlbum(id).map:
+        case Left(_)            => AlbumServiceFailure.ServiceFailure.asLeft[Album]
+        case Right(None)        => AlbumServiceFailure.AlbumNotFound.asLeft[Album]
+        case Right(Some(album)) => album.asRight[AlbumServiceFailure]
 
-    override def rename(id: AlbumId, title: String): F[Either[AlbumServiceFailure, AlbumSummary]] =
+    override def rename(id: AlbumId, title: String): F[Either[AlbumServiceFailure, Album]] =
       val trimmedTitle = title.trim
-      if trimmedTitle.isEmpty then AlbumServiceFailure.InvalidTitle.asLeft[AlbumSummary].pure[F]
+      if trimmedTitle.isEmpty then AlbumServiceFailure.InvalidTitle.asLeft[Album].pure[F]
       else
         repository.rename(id, trimmedTitle.refineUnsafe[io.github.iltotore.iron.constraint.all.Not[Empty]]).map:
-          case Left(_)              => AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary]
-          case Right(None)          => AlbumServiceFailure.AlbumNotFound.asLeft[AlbumSummary]
-          case Right(Some(summary)) => summary.asRight[AlbumServiceFailure]
+          case Left(_)            => AlbumServiceFailure.ServiceFailure.asLeft[Album]
+          case Right(None)        => AlbumServiceFailure.AlbumNotFound.asLeft[Album]
+          case Right(Some(album)) => album.asRight[AlbumServiceFailure]
 
     override def delete(id: AlbumId): F[Either[AlbumServiceFailure, Unit]] =
       repository.delete(id).map:
@@ -149,7 +149,7 @@ object AlbumService:
         case Right(false) => AlbumServiceFailure.AlbumNotFound.asLeft[Unit]
         case Right(true)  => ().asRight[AlbumServiceFailure]
 
-    private def createComposition(title: String, template: SpreadTemplate): F[AlbumComposition] =
+    private def buildInitialState(title: String, template: SpreadTemplate) =
       val textSlotBoxes = template.slots.toSortedSet.toVector.collect:
         case SpreadTemplateSlot.Text(box) => box
       for
@@ -158,7 +158,7 @@ object AlbumService:
         slotIds   <- textSlotBoxes.traverse(_ => identifiers.nextUUID)
         frontId   <- identifiers.nextUUID.map(CoverSlotId(_))
         backId    <- identifiers.nextUUID.map(CoverSlotId(_))
-        createdAt <- clock.now
+        createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
         val actualSlots = textSlotBoxes.zip(slotIds).map:
           case (box, id) => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
@@ -168,25 +168,22 @@ object AlbumService:
           synopsis = "",
           createdAt = createdAt
         )
-        AlbumComposition(
-          album = album,
-          start = SpreadComposition(
-            id = spreadId,
-            templateId = template.id,
-            slots = actualSlots,
-            placements = Vector.empty[SpreadPlacement]
-          ),
-          cover = CoverComposition(
-            spineOwner = SpineOwner.Front,
-            front = CoverSlot(frontId),
-            frontPlacement = None,
-            back = CoverSlot(backId),
-            backPlacement = None
-          ),
-          chapters = Vector.empty[photography.domain.album.ChapterComposition]
+        val start = Spread.AlbumStart(
+          id = spreadId,
+          album = albumId,
+          template = template.id,
+          slots = actualSlots,
+          placements = Vector.empty[SpreadPlacement]
         )
+        val cover = Cover(
+          album = albumId,
+          spineOwner = SpineOwner.Front,
+          front = CoverSlot(frontId),
+          back = CoverSlot(backId)
+        )
+        (album, start, cover)
 
-    private def validAlbumStartTemplate(template: SpreadTemplate): Boolean =
+    private def isValidAlbumStartTemplate(template: SpreadTemplate) =
       template.kind match
         case SpreadTemplateKind.AlbumStart =>
           template.slots.toSortedSet.toVector match

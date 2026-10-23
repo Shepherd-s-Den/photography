@@ -206,22 +206,25 @@ class LocalRunnerComponentTest(unittest.TestCase):
             (frontend / "package.json").touch()
             (frontend / "node_modules" / ".bin" / "vite").touch()
             with mock.patch.object(local, "preflight") as preflight:
-                with mock.patch.object(
-                    local.subprocess,
-                    "Popen",
-                    side_effect=[backend_process, frontend_process],
-                ) as start:
-                    with mock.patch.object(local, "wait_for_readiness") as ready:
-                        with mock.patch.object(local, "wait_for_services", return_value=0):
-                            with mock.patch.object(local, "stop_process_tree"):
-                                with mock.patch("builtins.print"):
-                                    result = local.run_local_backend(
-                                        Path(temporary_directory),
-                                        {"PHOTOGRAPHY_FRONTEND_PORT": "5174"},
-                                    )
+                with mock.patch.object(local.subprocess, "run") as build:
+                    with mock.patch.object(
+                        local.subprocess,
+                        "Popen",
+                        side_effect=[backend_process, frontend_process],
+                    ) as start:
+                        with mock.patch.object(local, "wait_for_readiness") as ready:
+                            with mock.patch.object(local, "wait_for_services", return_value=0):
+                                with mock.patch.object(local, "stop_process_tree"):
+                                    with mock.patch("builtins.print"):
+                                        result = local.run_local_backend(
+                                            Path(temporary_directory),
+                                            {"PHOTOGRAPHY_FRONTEND_PORT": "5174"},
+                                        )
 
         self.assertEqual(result, 0)
         preflight.assert_called_once_with("127.0.0.1", 8080, 5174)
+        self.assertEqual(build.call_args.args[0], ["npm", "run", "build"])
+        self.assertEqual(build.call_args.kwargs["cwd"], frontend)
         self.assertEqual(start.call_count, 2)
         self.assertEqual(start.call_args_list[1].args[0][0:3], ["npm", "run", "dev"])
         self.assertEqual(start.call_args_list[1].kwargs["cwd"], frontend)

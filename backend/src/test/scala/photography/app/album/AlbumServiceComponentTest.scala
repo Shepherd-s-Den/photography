@@ -6,7 +6,7 @@ import cats.effect.{IO, Ref}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
-import photography.domain.album.{AlbumComposition, AlbumId, AlbumName}
+import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
 import java.time.Instant
@@ -16,16 +16,16 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
   private val createdAt            = Instant.parse("2026-10-07T12:00:00Z")
   private val emptyRepositoryState = RepositoryState(
-    albums = Vector.empty[AlbumSummary],
+    albums = Vector.empty[Album],
     template = Option.empty[SpreadTemplate],
     templateFailure = Option.empty[AlbumRepositoryFailure],
-    createdComposition = Option.empty[AlbumComposition],
+    createdInitialState = Option.empty[(Album, Spread.AlbumStart, Cover)],
     createFailure = Option.empty[AlbumRepositoryFailure],
-    readComposition = Option.empty[AlbumComposition],
+    readAlbum = Option.empty[Album],
     readFailure = Option.empty[AlbumRepositoryFailure],
     lastReadId = Option.empty[AlbumId],
     lastRenamed = Option.empty[(AlbumId, AlbumName)],
-    renameResult = Option.empty[AlbumSummary],
+    renameResult = Option.empty[Album],
     lastDeletedId = Option.empty[AlbumId],
     deleteResult = false,
     listFailureOffset = Option.empty[Int],
@@ -37,8 +37,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     lastLimit = 0
   )
 
-  test("should return the last page and newest-first metadata for an out-of-range request"):
-    val albums       = Vector.tabulate(13)(index => summary(12 - index))
+  test("should return the last Album page in newest-first order for an out-of-range request"):
+    val albums       = Vector.tabulate(13)(index => buildAlbum(12 - index))
     val initialState = emptyRepositoryState.copy(albums = albums)
 
     for
@@ -47,8 +47,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       result <- service.list(page = 99)
       state  <- repository.state.get
     yield
-      val expectedPage =
-        AlbumPage(Vector(summary(0)), 3, 6, 13, 3)
+      val expectedPage = AlbumPage(Vector(buildAlbum(0)), 3, 6, 13, 3)
       assertEquals(result, expectedPage.asRight[AlbumServiceFailure])
       assertEquals(state.lastOffset, 12)
       assertEquals(state.lastLimit, 6)
@@ -57,10 +56,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     for
       repository <- FakeAlbumRepository.make(emptyRepositoryState)
       result     <- makeService(repository).list(page = 1)
-    yield assertEquals(result, AlbumPage(Vector.empty[AlbumSummary], 1, 6, 0, 0).asRight[AlbumServiceFailure])
+    yield assertEquals(result, AlbumPage(Vector.empty[Album], 1, 6, 0, 0).asRight[AlbumServiceFailure])
 
   test("should report service failure when either album page query fails"):
-    val albums         = Vector.tabulate(13)(index => summary(12 - index))
+    val albums         = Vector.tabulate(13)(index => buildAlbum(12 - index))
     val initialFailure = emptyRepositoryState.copy(
       listFailureOffset = 0.some,
       listFailure = AlbumRepositoryFailure.DatabaseFailure.some
@@ -80,27 +79,42 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(initialResult, AlbumServiceFailure.ServiceFailure.asLeft[AlbumPage])
       assertEquals(laterResult, AlbumServiceFailure.ServiceFailure.asLeft[AlbumPage])
 
-  test("should trim a title and create the complete initial composition"):
-    val initialState = emptyRepositoryState.copy(template = albumStartTemplate.some)
+  test("should trim a title and create an Album, album-start Spread, and empty Cover"):
+    val initialState = emptyRepositoryState.copy(template = buildAlbumStartTemplate.some)
 
     for
       repository <- FakeAlbumRepository.make(initialState)
       result     <- makeService(repository).create("  Northern Coast  ")
       state      <- repository.state.get
     yield
-      val created = state.createdComposition.fold(fail("expected the created composition"))(identity)
+      val (createdAlbum, start, cover) =
+        state.createdInitialState.fold(fail("expected the created album state"))(identity)
+      val firstSlotBox = start.slots.headOption.collect:
+        case SpreadSlot.Text(_, _, box) => box
+      assertEquals(firstSlotBox, Some(buildFullSpreadBox))
       assertEquals(result.map(_.title), "Northern Coast".refineUnsafe[Not[Empty]].asRight[AlbumServiceFailure])
-      assertEquals(created.album.createdAt, createdAt)
-      assertEquals(created.start.slots.size, 1)
-      assert(created.start.slots.headOption.exists:
-        case SpreadSlot.Text(_, _, box) =>
-          assertEquals(box, fullSpreadBox)
-          true
-        case _ => false)
-      assertEquals(created.start.placements, Vector.empty[SpreadPlacement])
-      assertEquals(created.cover.frontPlacement, Option.empty[CoverPlacement])
-      assertEquals(created.cover.backPlacement, Option.empty[CoverPlacement])
-      assertEquals(created.chapters, Vector.empty[photography.domain.album.ChapterComposition])
+      assertEquals(result.map(_.synopsis), "".asRight[AlbumServiceFailure])
+      assertEquals(result.map(_.createdAt), createdAt.asRight[AlbumServiceFailure])
+      assertEquals(createdAlbum.createdAt, createdAt)
+      assertEquals(start.id.value, buildUuid(11))
+      assertEquals(start.album, createdAlbum.id)
+      assertEquals(start.template, buildAlbumStartTemplate.id)
+      assertEquals(start.slots.size, 1)
+      assertEquals(start.placements, Vector.empty[SpreadPlacement])
+      assertEquals(cover.album, createdAlbum.id)
+      assertEquals(cover.spineOwner, SpineOwner.Front)
+      assertEquals(cover.front.id.value, buildUuid(13))
+      assertEquals(cover.back.id.value, buildUuid(14))
+
+  test("should truncate creation time to the precision persisted by SQLite"):
+    val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
+    val expectedTime = Instant.ofEpochMilli(suppliedTime.toEpochMilli)
+    val initialState = emptyRepositoryState.copy(template = buildAlbumStartTemplate.some)
+
+    for
+      repository <- FakeAlbumRepository.make(initialState)
+      result     <- makeServiceAt(repository, suppliedTime).create("Album")
+    yield assertEquals(result.map(_.createdAt), expectedTime.asRight[AlbumServiceFailure])
 
   test("should reject blank titles before reading a template or writing"):
     for
@@ -108,25 +122,25 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       result     <- makeService(repository).create("   ")
       state      <- repository.state.get
     yield
-      assertEquals(result, AlbumServiceFailure.InvalidTitle.asLeft[AlbumSummary])
+      assertEquals(result, AlbumServiceFailure.InvalidTitle.asLeft[Album])
       assertEquals(state.templateReads, 0)
-      assertEquals(state.createdComposition, Option.empty[AlbumComposition])
+      assertEquals(state.createdInitialState, Option.empty[(Album, Spread.AlbumStart, Cover)])
 
   test("should return service failure when no built-in template exists"):
     for
       repository <- FakeAlbumRepository.make(emptyRepositoryState)
       result     <- makeService(repository).create("New album")
-    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
+    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[Album])
 
   test("should reject AlbumStart templates with a photo slot or wrong template kind"):
-    val photoTemplate = albumStartTemplate.copy(
-      slots = NonEmptySet.one(SpreadTemplateSlot.Photo(fullSpreadBox))
+    val photoTemplate = buildAlbumStartTemplate.copy(
+      slots = NonEmptySet.one(SpreadTemplateSlot.Photo(buildFullSpreadBox))
     )
-    val wrongKindTemplate = albumStartTemplate.copy(kind = SpreadTemplateKind.PhotosOnly)
-    val nonFullBox        = fullSpreadBox.copy(
+    val wrongKindTemplate = buildAlbumStartTemplate.copy(kind = SpreadTemplateKind.PhotosOnly)
+    val nonFullBox        = buildFullSpreadBox.copy(
       x = 0.5.refineUnsafe[GreaterEqual[0.0] & Less[1.7976931348623157e308]]
     )
-    val nonFullTemplate = albumStartTemplate.copy(
+    val nonFullTemplate = buildAlbumStartTemplate.copy(
       slots = NonEmptySet.one(SpreadTemplateSlot.Text(nonFullBox))
     )
 
@@ -141,12 +155,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       nonFullResult       <- makeService(nonFullRepository).create("New album")
       nonFullState        <- nonFullRepository.state.get
     yield
-      assertEquals(photoResult, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
-      assertEquals(photoState.createdComposition, Option.empty[AlbumComposition])
-      assertEquals(wrongKindResult, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
-      assertEquals(wrongKindState.createdComposition, Option.empty[AlbumComposition])
-      assertEquals(nonFullResult, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
-      assertEquals(nonFullState.createdComposition, Option.empty[AlbumComposition])
+      assertEquals(photoResult, AlbumServiceFailure.ServiceFailure.asLeft[Album])
+      assertEquals(photoState.createdInitialState, Option.empty[(Album, Spread.AlbumStart, Cover)])
+      assertEquals(wrongKindResult, AlbumServiceFailure.ServiceFailure.asLeft[Album])
+      assertEquals(wrongKindState.createdInitialState, Option.empty[(Album, Spread.AlbumStart, Cover)])
+      assertEquals(nonFullResult, AlbumServiceFailure.ServiceFailure.asLeft[Album])
+      assertEquals(nonFullState.createdInitialState, Option.empty[(Album, Spread.AlbumStart, Cover)])
 
   test("should return service failure when the built-in template cannot be read"):
     val initialState = emptyRepositoryState.copy(templateFailure = AlbumRepositoryFailure.DatabaseFailure.some)
@@ -154,91 +168,70 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     for
       repository <- FakeAlbumRepository.make(initialState)
       result     <- makeService(repository).create("New album")
-    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
+    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[Album])
 
   test("should return service failure when atomic creation fails"):
     val initialState = emptyRepositoryState.copy(
-      template = albumStartTemplate.some,
+      template = buildAlbumStartTemplate.some,
       createFailure = AlbumRepositoryFailure.DatabaseFailure.some
     )
 
     for
       repository <- FakeAlbumRepository.make(initialState)
       result     <- makeService(repository).create("New album")
-    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
+    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[Album])
 
-  test("should return service failure when persisted composition is incomplete"):
-    val initialState = emptyRepositoryState.copy(readFailure = AlbumRepositoryFailure.IncompleteComposition.some)
+  test("should return service failure when Album persistence fails"):
+    val initialState = emptyRepositoryState.copy(readFailure = AlbumRepositoryFailure.InvalidAlbumData.some)
 
     for
       repository <- FakeAlbumRepository.make(initialState)
-      result     <- makeService(repository).get(albumId(1))
-    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[AlbumComposition])
+      result     <- makeService(repository).get(buildAlbumId(1))
+    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[Album])
 
   test("should return album not found when the requested album is missing"):
     for
       repository <- FakeAlbumRepository.make(emptyRepositoryState)
-      result     <- makeService(repository).get(albumId(1))
+      result     <- makeService(repository).get(buildAlbumId(1))
       state      <- repository.state.get
     yield
-      assertEquals(result, AlbumServiceFailure.AlbumNotFound.asLeft[AlbumComposition])
-      assertEquals(state.lastReadId, albumId(1).some)
+      assertEquals(result, AlbumServiceFailure.AlbumNotFound.asLeft[Album])
+      assertEquals(state.lastReadId, buildAlbumId(1).some)
 
-  test("should return a complete composition when the album exists"):
-    val album = AlbumComposition(
-      album = photography.domain.album.Album(
-        albumId(2),
-        "Album 2".refineUnsafe[Not[Empty]],
-        "",
-        createdAt
-      ),
-      start = SpreadComposition(
-        SpreadId(uuid(3)),
-        SpreadTemplateId(uuid(1)),
-        Vector.empty[SpreadSlot],
-        Vector.empty[SpreadPlacement]
-      ),
-      cover = CoverComposition(
-        SpineOwner.Front,
-        CoverSlot(CoverSlotId(uuid(4))),
-        Option.empty[CoverPlacement],
-        CoverSlot(CoverSlotId(uuid(5))),
-        Option.empty[CoverPlacement]
-      ),
-      chapters = Vector.empty[photography.domain.album.ChapterComposition]
-    )
+  test("should return the Album when it exists"):
+    val expectedAlbum = buildAlbum(2)
 
     for
-      repository <- FakeAlbumRepository.make(emptyRepositoryState.copy(readComposition = album.some))
-      result     <- makeService(repository).get(albumId(2))
-    yield assertEquals(result, album.asRight[AlbumServiceFailure])
+      repository <- FakeAlbumRepository.make(emptyRepositoryState.copy(readAlbum = expectedAlbum.some))
+      result     <- makeService(repository).get(buildAlbumId(2))
+    yield assertEquals(result, expectedAlbum.asRight[AlbumServiceFailure])
 
   test("should reject a blank renamed title"):
     for
       repository <- FakeAlbumRepository.make(emptyRepositoryState)
-      result     <- makeService(repository).rename(albumId(1), " ")
+      result     <- makeService(repository).rename(buildAlbumId(1), " ")
       state      <- repository.state.get
     yield
-      assertEquals(result, AlbumServiceFailure.InvalidTitle.asLeft[AlbumSummary])
+      assertEquals(result, AlbumServiceFailure.InvalidTitle.asLeft[Album])
       assertEquals(state.lastRenamed, Option.empty[(AlbumId, AlbumName)])
 
   test("should return album not found when rename targets a missing album"):
     for
       repository <- FakeAlbumRepository.make(emptyRepositoryState)
-      result     <- makeService(repository).rename(albumId(1), "Renamed")
-    yield assertEquals(result, AlbumServiceFailure.AlbumNotFound.asLeft[AlbumSummary])
+      result     <- makeService(repository).rename(buildAlbumId(1), "Renamed")
+    yield assertEquals(result, AlbumServiceFailure.AlbumNotFound.asLeft[Album])
 
-  test("should return the renamed album summary"):
-    val renamed      = summary(1).copy(title = "Renamed".refineUnsafe[Not[Empty]])
+  test("should return the renamed Album"):
+    val renamed      = buildAlbum(1).copy(title = "Renamed".refineUnsafe[Not[Empty]])
     val initialState = emptyRepositoryState.copy(renameResult = renamed.some)
 
     for
       repository <- FakeAlbumRepository.make(initialState)
-      result     <- makeService(repository).rename(albumId(1), " Renamed ")
+      result     <- makeService(repository).rename(buildAlbumId(1), " Renamed ")
       state      <- repository.state.get
     yield
       assertEquals(result, renamed.asRight[AlbumServiceFailure])
-      assertEquals(state.lastRenamed, (albumId(1) -> "Renamed".refineUnsafe[Not[Empty]]).some)
+      assertEquals(state.lastRenamed, (buildAlbumId(1) -> "Renamed".refineUnsafe[Not[Empty]]).some)
 
   test("should report a service failure when rename persistence fails"):
     val initialState = emptyRepositoryState.copy(
@@ -247,13 +240,13 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(initialState)
-      result     <- makeService(repository).rename(albumId(1), "Renamed")
-    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[AlbumSummary])
+      result     <- makeService(repository).rename(buildAlbumId(1), "Renamed")
+    yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[Album])
 
   test("should report missing albums when deletion finds no row"):
     for
       repository <- FakeAlbumRepository.make(emptyRepositoryState)
-      result     <- makeService(repository).delete(albumId(1))
+      result     <- makeService(repository).delete(buildAlbumId(1))
     yield assertEquals(result, AlbumServiceFailure.AlbumNotFound.asLeft[Unit])
 
   test("should delete an existing album"):
@@ -261,7 +254,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(initialState)
-      result     <- makeService(repository).delete(albumId(1))
+      result     <- makeService(repository).delete(buildAlbumId(1))
     yield assertEquals(result, ().asRight[AlbumServiceFailure])
 
   test("should report a service failure when deletion persistence fails"):
@@ -271,7 +264,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     for
       repository <- FakeAlbumRepository.make(initialState)
-      result     <- makeService(repository).delete(albumId(1))
+      result     <- makeService(repository).delete(buildAlbumId(1))
     yield assertEquals(result, AlbumServiceFailure.ServiceFailure.asLeft[Unit])
 
   test("should provide unique UUIDs and a current UTC instant from live ports"):
@@ -283,55 +276,59 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertNotEquals(first, second)
       assert(now.isAfter(Instant.parse("2020-01-01T00:00:00Z")))
 
-  private def makeService(repository: FakeAlbumRepository): AlbumService[IO] =
+  private def makeService(repository: FakeAlbumRepository) =
+    makeServiceAt(repository, createdAt)
+
+  private def makeServiceAt(repository: FakeAlbumRepository, currentTime: Instant) =
     val identifiers = new UUIDGenerator[IO]:
       private val nextValue           = Ref.unsafe[IO, Int](10)
       override def nextUUID: IO[UUID] =
-        nextValue.getAndUpdate(_ + 1).map(uuid)
+        nextValue.getAndUpdate(_ + 1).map(buildUuid)
     val clock = new UtcClock[IO]:
-      override def now: IO[Instant] = IO.pure(createdAt)
+      override def now: IO[Instant] = IO.pure(currentTime)
     AlbumService.make(repository, identifiers, clock)
 
-  private def albumStartTemplate: SpreadTemplate =
+  private def buildAlbumStartTemplate =
     SpreadTemplate(
-      id = SpreadTemplateId(uuid(1)),
+      id = SpreadTemplateId(buildUuid(1)),
       name = "Built-in AlbumStart".refineUnsafe[Not[Empty]],
       kind = SpreadTemplateKind.AlbumStart,
-      slots = NonEmptySet.one(SpreadTemplateSlot.Text(fullSpreadBox))
+      slots = NonEmptySet.one(SpreadTemplateSlot.Text(buildFullSpreadBox))
     )
 
-  private def fullSpreadBox: SlotBox =
+  private def buildFullSpreadBox =
     val x      = 0.0.refineUnsafe[GreaterEqual[0.0] & Less[1.7976931348623157e308]]
     val y      = 0.0.refineUnsafe[GreaterEqual[0.0] & Less[1.7976931348623157e308]]
     val width  = 1.0.refineUnsafe[Positive & Less[1.7976931348623157e308]]
     val height = 1.0.refineUnsafe[Positive & Less[1.7976931348623157e308]]
     SlotBox(x, y, width, height)
 
-  private def summary(index: Int): AlbumSummary =
-    AlbumSummary(
-      id = albumId(index),
+  private def buildAlbum(index: Int) =
+    Album(
+      id = buildAlbumId(index),
       title = s"Album $index".refineUnsafe[Not[Empty]],
+      synopsis = s"Synopsis $index",
       createdAt = createdAt.plusSeconds(index.toLong)
     )
 
-  private def albumId(index: Int): AlbumId =
-    AlbumId(uuid(index))
+  private def buildAlbumId(index: Int) =
+    AlbumId(buildUuid(index))
 
-  private def uuid(index: Int): UUID =
+  private def buildUuid(index: Int) =
     val suffix = index.toString.reverse.padTo(12, '0').reverse
     UUID.fromString(s"00000000-0000-4000-8000-$suffix")
 
   final private case class RepositoryState(
-      albums: Vector[AlbumSummary],
+      albums: Vector[Album],
       template: Option[SpreadTemplate],
       templateFailure: Option[AlbumRepositoryFailure],
-      createdComposition: Option[AlbumComposition],
+      createdInitialState: Option[(Album, Spread.AlbumStart, Cover)],
       createFailure: Option[AlbumRepositoryFailure],
-      readComposition: Option[AlbumComposition],
+      readAlbum: Option[Album],
       readFailure: Option[AlbumRepositoryFailure],
       lastReadId: Option[AlbumId],
       lastRenamed: Option[(AlbumId, AlbumName)],
-      renameResult: Option[AlbumSummary],
+      renameResult: Option[Album],
       lastDeletedId: Option[AlbumId],
       deleteResult: Boolean,
       listFailureOffset: Option[Int],
@@ -365,28 +362,31 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
             case Some(failure) => failure.asLeft[Option[SpreadTemplate]]
             case None          => current.template.asRight[AlbumRepositoryFailure]
 
-    override def create(composition: AlbumComposition)
-        : IO[Either[AlbumRepositoryFailure, Unit]] =
-      state.update(_.copy(createdComposition = composition.some)).flatMap: _ =>
+    override def create(
+        album: Album,
+        start: Spread.AlbumStart,
+        cover: Cover
+    ): IO[Either[AlbumRepositoryFailure, Unit]] =
+      state.update(_.copy(createdInitialState = (album, start, cover).some)).flatMap: _ =>
         state.get.map: current =>
           current.createFailure match
             case Some(failure) => failure.asLeft[Unit]
             case None          => ().asRight[AlbumRepositoryFailure]
 
-    override def getComposition(id: AlbumId)
-        : IO[Either[AlbumRepositoryFailure, Option[AlbumComposition]]] =
+    override def getAlbum(id: AlbumId)
+        : IO[Either[AlbumRepositoryFailure, Option[Album]]] =
       state.update(_.copy(lastReadId = id.some)) *>
         state.get.map: current =>
           current.readFailure match
-            case Some(failure) => failure.asLeft[Option[AlbumComposition]]
-            case None          => current.readComposition.asRight[AlbumRepositoryFailure]
+            case Some(failure) => failure.asLeft[Option[Album]]
+            case None          => current.readAlbum.asRight[AlbumRepositoryFailure]
 
     override def rename(id: AlbumId, title: AlbumName)
-        : IO[Either[AlbumRepositoryFailure, Option[AlbumSummary]]] =
+        : IO[Either[AlbumRepositoryFailure, Option[Album]]] =
       state.update(_.copy(lastRenamed = (id -> title).some)) *>
         state.get.map: current =>
           current.renameFailure match
-            case Some(failure) => failure.asLeft[Option[AlbumSummary]]
+            case Some(failure) => failure.asLeft[Option[Album]]
             case None          => current.renameResult.asRight[AlbumRepositoryFailure]
 
     override def delete(id: AlbumId): IO[Either[AlbumRepositoryFailure, Boolean]] =
@@ -397,5 +397,5 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
             case None          => current.deleteResult.asRight[AlbumRepositoryFailure]
 
   private object FakeAlbumRepository:
-    def make(initialState: RepositoryState): IO[FakeAlbumRepository] =
+    def make(initialState: RepositoryState) =
       Ref.of[IO, RepositoryState](initialState).map(new FakeAlbumRepository(_))

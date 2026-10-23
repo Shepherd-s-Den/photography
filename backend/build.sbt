@@ -5,7 +5,14 @@ ThisBuild / version      := "0.1.0"
 lazy val root = (project in file("."))
   .settings(
     name := "photography-backend",
-    Compile / unmanagedResourceDirectories += baseDirectory.value.getParentFile / "frontend" / "dist",
+    Compile / resourceGenerators += Def.task {
+      val frontendDist = baseDirectory.value.getParentFile / "frontend" / "dist"
+      if (!frontendDist.isDirectory) sys.error("Build the frontend before compiling the backend")
+      val frontendResources = (Compile / resourceManaged).value / "frontend"
+      IO.delete(frontendResources)
+      IO.copyDirectory(frontendDist, frontendResources)
+      (frontendResources ** AllPassFilter).get()
+    }.taskValue,
     scalacOptions ++= Seq(
       "-encoding",
       "utf8",
@@ -49,6 +56,7 @@ lazy val root = (project in file("."))
       "org.xerial"             % "sqlite-jdbc"               % "3.53.4.0",
       "org.http4s"            %% "http4s-dsl"                % "0.23.33",
       "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
+      "io.circe"              %% "circe-generic"             % "0.14.14",
       "io.circe"              %% "circe-parser"              % "0.14.14",
       "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
       "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test
