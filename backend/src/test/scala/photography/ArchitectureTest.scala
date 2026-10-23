@@ -12,7 +12,7 @@ class ArchitectureTest extends FunSuite:
 
   private val classes = ClassFileImporter().withImportOption(excludeTestClasses).importPackages("photography")
 
-  test("should keep domain free of any outgoing dependency"):
+  test("should keep layers pointing inward and adapters isolated from each other"):
     noClasses()
       .that()
       .resideInAPackage("photography.domain..")
@@ -26,8 +26,6 @@ class ArchitectureTest extends FunSuite:
         "photography.app.."
       )
       .check(classes)
-
-  test("should keep capabilities free of any outgoing dependency"):
     noClasses()
       .that()
       .resideInAPackage("photography.capabilities..")
@@ -35,8 +33,6 @@ class ArchitectureTest extends FunSuite:
       .dependOnClassesThat()
       .resideInAnyPackage("photography.domain..", "photography.ports..", "photography.usecases..", "photography.adapters..", "photography.app..")
       .check(classes)
-
-  test("should keep ports dependent on domain only"):
     noClasses()
       .that()
       .resideInAPackage("photography.ports..")
@@ -44,8 +40,6 @@ class ArchitectureTest extends FunSuite:
       .dependOnClassesThat()
       .resideInAnyPackage("photography.capabilities..", "photography.usecases..", "photography.adapters..", "photography.app..")
       .check(classes)
-
-  test("should keep usecases independent from adapters and the application"):
     noClasses()
       .that()
       .resideInAPackage("photography.usecases..")
@@ -53,6 +47,4 @@ class ArchitectureTest extends FunSuite:
       .dependOnClassesThat()
       .resideInAnyPackage("photography.adapters..", "photography.app..")
       .check(classes)
-
-  test("should keep adapters independent from each other"):
     slices().matching("photography.adapters.(*)..").should().notDependOnEachOther().check(classes)

@@ -19,171 +19,132 @@ import java.util.UUID
 
 final class AlbumServiceComponentTest extends CatsEffectSuite:
 
-  private val createdAt = Instant.parse("2026-10-07T12:00:00Z")
+  private val createdAt      = Instant.parse("2026-10-07T12:00:00Z")
+  private val fullBox        = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
+  private val partialBox     = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 0.5.refineUnsafe, 1.0.refineUnsafe)
+  private val newTitle       = "Northern Coast".refineUnsafe[Not[Empty]]
+  private val thirteenAlbums = Vector.tabulate(13)(buildAlbum)
 
-  test("should return the last Album page in newest-first order for an out-of-range request"):
-    val refs     = Refs()
-    val albums   = Vector.tabulate(13)(index => buildAlbum(12 - index))
-    val expected = AlbumPage(Vector(buildAlbum(0)), 3, 6, 13, 3)
+  test("should page albums newest-first with six per page and clamp requests to the available pages"):
+    val refs      = Refs()
+    val albums    = Vector.tabulate(13)(index => buildAlbum(12 - index))
+    val lastPage  = AlbumPage(Vector(buildAlbum(0)), 3, 6, 13, 3)
+    val emptyPage = AlbumPage(Vector.empty[Album], 1, 6, 0, 0)
+    val firstRefs = Refs()
 
     for
-      result <- buildService(refs, albums = albums).list(page = 99)
-      calls  <- refs.listCalls.get
+      selected  <- buildService(refs, albums = albums).list(page = 99)
+      calls     <- refs.listCalls.get
+      _         <- buildService(firstRefs, albums = albums).list(page = 1)
+      firstCall <- firstRefs.listCalls.get
+      empty     <- buildService(Refs()).list(page = 1)
     yield
-      assertEquals(result, ListAlbumsResult.Listed(expected))
+      assertEquals(selected, ListAlbumsResult.Listed(lastPage))
       assertEquals(calls, Vector(0 -> 6, 12 -> 6))
+      assertEquals(firstCall, Vector(0 -> 6))
+      assertEquals(empty, ListAlbumsResult.Listed(emptyPage))
 
-  test("should return page one with empty results and zero pages"):
-    val expected = AlbumPage(Vector.empty[Album], 1, 6, 0, 0)
-
-    buildService(Refs()).list(page = 1).map(assertEquals(_, ListAlbumsResult.Listed(expected)))
-
-  test("should not repeat the first query when the first page is selected"):
-    val refs = Refs()
+  test("should report failure when either album page query fails"):
+    val firstPageFails    = buildService(Refs(), listFailureOffset = 0.some).list(page = 1)
+    val selectedPageFails = buildService(Refs(), albums = thirteenAlbums, listFailureOffset = 12.some).list(page = 99)
 
     for
-      _     <- buildService(refs, albums = Vector.tabulate(13)(buildAlbum)).list(page = 1)
-      calls <- refs.listCalls.get
-    yield assertEquals(calls, Vector(0 -> 6))
+      first    <- firstPageFails
+      selected <- selectedPageFails
+    yield
+      assertEquals(first, ListAlbumsResult.Failed)
+      assertEquals(selected, ListAlbumsResult.Failed)
 
-  test("should report failure when the first album page query fails"):
-    buildService(Refs(), listFailureOffset = 0.some).list(page = 1).map(assertEquals(_, ListAlbumsResult.Failed))
-
-  test("should report failure when the selected album page query fails"):
-    val service = buildService(Refs(), albums = Vector.tabulate(13)(buildAlbum), listFailureOffset = 12.some)
-    service.list(page = 99).map(assertEquals(_, ListAlbumsResult.Failed))
-
-  test("should create an Album, album-start Spread, and empty Cover"):
-    val refs = Refs()
+  test("should create an Album with its album-start Spread and empty Cover from the first AlbumStart template"):
+    val refs          = Refs()
+    val suppliedTime  = Instant.parse("2026-10-07T12:00:00.123456789Z")
+    val listed        = ListAlbumStartTemplatesResult.Listed(Vector(buildAlbumStartTemplate(21), buildAlbumStartTemplate(20)))
+    val expectedAlbum =
+      Album(AlbumId(buildUuid(10)), newTitle, synopsis = "", Instant.parse("2026-10-07T12:00:00.123Z"))
+    val expectedStart = Spread.AlbumStart(
+      SpreadId(buildUuid(11)),
+      AlbumId(buildUuid(10)),
+      SpreadTemplateId(buildUuid(21)),
+      Vector(SpreadSlot.Text(TextSpreadSlotId(buildUuid(12)), SpreadId(buildUuid(11)), fullBox)),
+      Vector.empty[SpreadPlacement]
+    )
+    val expectedCover =
+      Cover(AlbumId(buildUuid(10)), SpineOwner.Front, CoverSlot(CoverSlotId(buildUuid(13))), CoverSlot(CoverSlotId(buildUuid(14))))
 
     for
-      result  <- buildService(refs).create("Northern Coast".refineUnsafe[Not[Empty]])
+      result  <- buildService(refs, listResult = listed, currentTime = suppliedTime).create(newTitle)
       created <- refs.created.get
     yield
-      val (album, start, cover) = created.getOrElse(fail("expected a created composition"))
-      assertEquals(result, CreateAlbumResult.Created(album))
-      assertEquals(album.title, "Northern Coast".refineUnsafe[Not[Empty]])
-      assertEquals(album.synopsis, "")
-      assertEquals(album.createdAt, createdAt)
-      assertEquals(start.album, album.id)
-      assertEquals(start.template, SpreadTemplateId(buildUuid(20)))
-      val expectedSlot =
-        SpreadSlot.Text(TextSpreadSlotId(buildUuid(12)), start.id, SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe))
-      assertEquals(start.slots, Vector(expectedSlot))
-      assertEquals(start.placements, Vector.empty[SpreadPlacement])
-      assertEquals(cover.album, album.id)
-      assertEquals(cover.spineOwner, SpineOwner.Front)
-      assertEquals(cover.front, CoverSlot(CoverSlotId(buildUuid(13))))
-      assertEquals(cover.back, CoverSlot(CoverSlotId(buildUuid(14))))
+      assertEquals(result, CreateAlbumResult.Created(expectedAlbum))
+      assertEquals(created, (expectedAlbum, expectedStart, expectedCover).some)
 
-  test("should truncate creation time to the precision persisted by SQLite"):
-    val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
-    val expectedTime = Instant.ofEpochMilli(suppliedTime.toEpochMilli)
-
-    buildService(Refs(), currentTime = suppliedTime).create("Album".refineUnsafe[Not[Empty]]).map {
-      case CreateAlbumResult.Created(album) => assertEquals(album.createdAt, expectedTime)
-      case other                            => fail(s"unexpected result: $other")
-    }
-
-  test("should report failure when atomic creation fails"):
+  test("should report failure when the atomic creation write fails"):
     buildService(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.DatabaseFailure))
-      .create("New album".refineUnsafe[Not[Empty]])
+      .create(newTitle)
       .map(assertEquals(_, CreateAlbumResult.Failed))
 
-  test("should report failure when album lookup fails"):
-    val service = buildService(Refs(), getResult = AlbumRepository.GetResult.Failed(Failure.InvalidAlbumData))
-    service.get(AlbumId(buildUuid(1))).map(assertEquals(_, GetAlbumResult.Failed))
+  test("should reject creation without writing when no valid AlbumStart template is available"):
+    val photoTemplate   = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Photo(fullBox)))
+    val partialTemplate = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Text(partialBox)))
+    val kindMismatch    = buildAlbumStartTemplate(20).copy(kind = SpreadTemplateKind.PhotosOnly)
+    val rejectedLists   = Vector(
+      ListAlbumStartTemplatesResult.Listed(Vector.empty[SpreadTemplate]),
+      ListAlbumStartTemplatesResult.Failed,
+      ListAlbumStartTemplatesResult.Listed(Vector(kindMismatch)),
+      ListAlbumStartTemplatesResult.Listed(Vector(photoTemplate)),
+      ListAlbumStartTemplatesResult.Listed(Vector(partialTemplate))
+    )
 
-  test("should report not found when the requested album is missing"):
-    val refs = Refs()
+    rejectedLists.traverse_ { listResult =>
+      val refs = Refs()
+      for
+        result  <- buildService(refs, listResult = listResult).create(newTitle)
+        created <- refs.created.get
+      yield
+        assertEquals(result, CreateAlbumResult.Failed)
+        assertEquals(created, None)
+    }
+
+  test("should return the Album by id, report not found, and report failure when lookup fails"):
+    val album = buildAlbum(2)
+    val refs  = Refs()
 
     for
-      result   <- buildService(refs, getResult = AlbumRepository.GetResult.NotFound).get(AlbumId(buildUuid(1)))
+      found    <- buildService(Refs(), getResult = AlbumRepository.GetResult.Found(album)).get(AlbumId(buildUuid(2)))
+      missing  <- buildService(refs, getResult = AlbumRepository.GetResult.NotFound).get(AlbumId(buildUuid(1)))
       lastRead <- refs.lastReadId.get
+      failed   <- buildService(Refs(), getResult = AlbumRepository.GetResult.Failed(Failure.InvalidAlbumData)).get(AlbumId(buildUuid(1)))
     yield
-      assertEquals(result, GetAlbumResult.NotFound)
+      assertEquals(found, GetAlbumResult.Found(album))
+      assertEquals(missing, GetAlbumResult.NotFound)
       assertEquals(lastRead, AlbumId(buildUuid(1)).some)
+      assertEquals(failed, GetAlbumResult.Failed)
 
-  test("should return the Album when it exists"):
-    val expected = buildAlbum(2)
-
-    val service = buildService(Refs(), getResult = AlbumRepository.GetResult.Found(expected))
-    service.get(AlbumId(buildUuid(2))).map(assertEquals(_, GetAlbumResult.Found(expected)))
-
-  test("should report not found when rename targets a missing album"):
-    buildService(Refs()).rename(AlbumId(buildUuid(1)), "Renamed".refineUnsafe[Not[Empty]]).map(assertEquals(_, RenameAlbumResult.NotFound))
-
-  test("should return the renamed Album"):
-    val refs     = Refs()
-    val renamed  = buildAlbum(1).copy(title = "Renamed".refineUnsafe[Not[Empty]])
-    val newTitle = "Renamed".refineUnsafe[Not[Empty]]
-    val service  = buildService(refs, renameResult = AlbumRepository.RenameResult.Renamed(renamed))
+  test("should rename an existing Album, report not found, and report failure when persistence fails"):
+    val refs    = Refs()
+    val renamed = buildAlbum(1).copy(title = newTitle)
 
     for
-      result    <- service.rename(AlbumId(buildUuid(1)), newTitle)
+      result    <- buildService(refs, renameResult = AlbumRepository.RenameResult.Renamed(renamed)).rename(AlbumId(buildUuid(1)), newTitle)
       renamedTo <- refs.renamed.get
+      missing   <- buildService(Refs()).rename(AlbumId(buildUuid(1)), newTitle)
+      failed    <-
+        buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure)).rename(AlbumId(buildUuid(1)), newTitle)
     yield
       assertEquals(result, RenameAlbumResult.Renamed(renamed))
       assertEquals(renamedTo, (AlbumId(buildUuid(1)) -> newTitle).some)
+      assertEquals(missing, RenameAlbumResult.NotFound)
+      assertEquals(failed, RenameAlbumResult.Failed)
 
-  test("should report failure when rename persistence fails"):
-    buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure))
-      .rename(AlbumId(buildUuid(1)), "Renamed".refineUnsafe[Not[Empty]])
-      .map(assertEquals(_, RenameAlbumResult.Failed))
-
-  test("should report not found when deletion finds no row"):
-    buildService(Refs()).delete(AlbumId(buildUuid(1))).map(assertEquals(_, DeleteAlbumResult.NotFound))
-
-  test("should delete an existing album"):
-    val service = buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Deleted)
-    service.delete(AlbumId(buildUuid(1))).map(assertEquals(_, DeleteAlbumResult.Deleted))
-
-  test("should report failure when deletion persistence fails"):
-    buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Failed(Failure.DatabaseFailure))
-      .delete(AlbumId(buildUuid(1)))
-      .map(assertEquals(_, DeleteAlbumResult.Failed))
-
-  test("should use the first AlbumStart template the spread service lists when creating"):
-    val refs   = Refs()
-    val listed = ListAlbumStartTemplatesResult.Listed(Vector(buildAlbumStartTemplate(21), buildAlbumStartTemplate(20)))
-
+  test("should delete an existing Album, report not found, and report failure when persistence fails"):
     for
-      _       <- buildService(refs, listResult = listed).create("Northern Coast".refineUnsafe[Not[Empty]])
-      created <- refs.created.get
-    yield assertEquals(created.map(_._2.template), SpreadTemplateId(buildUuid(21)).some)
-
-  test("should fail creation without writing when no AlbumStart template is seeded"):
-    assertCreationRejectedWithoutWriting(ListAlbumStartTemplatesResult.Listed(Vector.empty[SpreadTemplate]))
-
-  test("should fail creation without writing when the template lookup fails"):
-    assertCreationRejectedWithoutWriting(ListAlbumStartTemplatesResult.Failed)
-
-  test("should fail creation without writing when the first template is not an AlbumStart kind"):
-    val template = buildAlbumStartTemplate(20).copy(kind = SpreadTemplateKind.PhotosOnly)
-
-    assertCreationRejectedWithoutWriting(ListAlbumStartTemplatesResult.Listed(Vector(template)))
-
-  test("should fail creation without writing when the first template has a photo slot"):
-    val fullBox  = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
-    val template = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Photo(fullBox)))
-
-    assertCreationRejectedWithoutWriting(ListAlbumStartTemplatesResult.Listed(Vector(template)))
-
-  test("should fail creation without writing when the text slot does not cover the full spread"):
-    val partialBox = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 0.5.refineUnsafe, 1.0.refineUnsafe)
-    val template   = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Text(partialBox)))
-
-    assertCreationRejectedWithoutWriting(ListAlbumStartTemplatesResult.Listed(Vector(template)))
-
-  private def assertCreationRejectedWithoutWriting(listResult: ListAlbumStartTemplatesResult) =
-    val refs = Refs()
-
-    for
-      result  <- buildService(refs, listResult = listResult).create("Northern Coast".refineUnsafe[Not[Empty]])
-      created <- refs.created.get
+      deleted <- buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Deleted).delete(AlbumId(buildUuid(1)))
+      missing <- buildService(Refs()).delete(AlbumId(buildUuid(1)))
+      failed  <- buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Failed(Failure.DatabaseFailure)).delete(AlbumId(buildUuid(1)))
     yield
-      assertEquals(result, CreateAlbumResult.Failed)
-      assertEquals(created, None)
+      assertEquals(deleted, DeleteAlbumResult.Deleted)
+      assertEquals(missing, DeleteAlbumResult.NotFound)
+      assertEquals(failed, DeleteAlbumResult.Failed)
 
   // scalafix:off DisableSyntax.defaultArgs
   private def buildService(
@@ -231,7 +192,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       SpreadTemplateId(buildUuid(index)),
       s"Template $index".refineUnsafe[Not[Empty]],
       SpreadTemplateKind.AlbumStart,
-      NonEmptyList.one(SpreadTemplateSlot.Text(SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)))
+      NonEmptyList.one(SpreadTemplateSlot.Text(fullBox))
     )
 
   private def buildAlbum(index: Int) =

@@ -15,7 +15,7 @@ import java.util.UUID
 
 class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
 
-  test("should list only AlbumStart templates ordered by lowest ID"):
+  test("should list only AlbumStart templates by lowest ID and report failure when the repository cannot list them"):
     val listed = Vector(
       buildTemplate(21, SpreadTemplateKind.AlbumStart),
       buildTemplate(22, SpreadTemplateKind.PhotosOnly),
@@ -23,13 +23,14 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
     )
     val expectedTemplates = Vector(buildTemplate(20, SpreadTemplateKind.AlbumStart), buildTemplate(21, SpreadTemplateKind.AlbumStart))
     val expected          = ListAlbumStartTemplatesResult.Listed(expectedTemplates)
+    val failedRepository  = SpreadRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure)
 
-    buildService(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed)).listAlbumStartTemplates.map(assertEquals(_, expected))
-
-  test("should report failure when the repository cannot list templates"):
-    val failed = SpreadRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure)
-
-    buildService(failed).listAlbumStartTemplates.map(assertEquals(_, ListAlbumStartTemplatesResult.Failed))
+    for
+      found  <- buildService(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed)).listAlbumStartTemplates
+      failed <- buildService(failedRepository).listAlbumStartTemplates
+    yield
+      assertEquals(found, expected)
+      assertEquals(failed, ListAlbumStartTemplatesResult.Failed)
 
   private def buildService(listResult: SpreadRepository.ListAlbumStartTemplatesResult): SpreadTemplateService[IO] =
     val repository = new SpreadRepository[IO]:
