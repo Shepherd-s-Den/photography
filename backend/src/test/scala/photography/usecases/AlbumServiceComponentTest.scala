@@ -9,7 +9,10 @@ import munit.CatsEffectSuite
 import photography.capabilities.{Clock, IdGenerator}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
-import photography.ports.{AlbumPageSlice, AlbumRepository, AlbumRepositoryFailure}
+import photography.ports.AlbumRepository
+import photography.ports.AlbumRepository.{AlbumPageSlice, AlbumRepositoryFailure}
+import photography.usecases.AlbumService.*
+import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.time.Instant
 import java.util.UUID

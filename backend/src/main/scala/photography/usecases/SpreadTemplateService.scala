@@ -5,14 +5,14 @@ import cats.syntax.all.*
 import photography.domain.layout.{SpreadTemplate, SpreadTemplateKind}
 import photography.ports.SpreadRepository
 
-enum ListAlbumStartTemplatesResult derives CanEqual:
-  case Listed(templates: Vector[SpreadTemplate])
-  case Failed
-
 trait SpreadTemplateService[F[_]]:
-  def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult]
+  def listAlbumStartTemplates: F[SpreadTemplateService.ListAlbumStartTemplatesResult]
 
 object SpreadTemplateService:
+  enum ListAlbumStartTemplatesResult derives CanEqual:
+    case Listed(templates: Vector[SpreadTemplate])
+    case Failed
+
   def make[F[_]: Functor](repository: SpreadRepository[F]): SpreadTemplateService[F] =
     new LiveSpreadTemplateService(repository)
 

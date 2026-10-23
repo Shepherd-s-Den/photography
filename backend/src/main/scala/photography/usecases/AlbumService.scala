@@ -8,35 +8,12 @@ import photography.capabilities.{Clock, IdGenerator}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
+import photography.usecases.AlbumService.*
+import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.time.temporal.ChronoUnit
 
 type AlbumPageSize = Int :| Positive
-
-final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
-
-enum ListAlbumsResult derives CanEqual:
-  case Listed(page: AlbumPage)
-  case Failed
-
-enum CreateAlbumResult derives CanEqual:
-  case Created(album: Album)
-  case Failed
-
-enum GetAlbumResult derives CanEqual:
-  case Found(album: Album)
-  case NotFound
-  case Failed
-
-enum RenameAlbumResult derives CanEqual:
-  case Renamed(album: Album)
-  case NotFound
-  case Failed
-
-enum DeleteAlbumResult derives CanEqual:
-  case Deleted
-  case NotFound
-  case Failed
 
 trait AlbumService[F[_]]:
   def list(page: Int): F[ListAlbumsResult]
@@ -46,6 +23,31 @@ trait AlbumService[F[_]]:
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
 object AlbumService:
+  final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
+
+  enum ListAlbumsResult derives CanEqual:
+    case Listed(page: AlbumPage)
+    case Failed
+
+  enum CreateAlbumResult derives CanEqual:
+    case Created(album: Album)
+    case Failed
+
+  enum GetAlbumResult derives CanEqual:
+    case Found(album: Album)
+    case NotFound
+    case Failed
+
+  enum RenameAlbumResult derives CanEqual:
+    case Renamed(album: Album)
+    case NotFound
+    case Failed
+
+  enum DeleteAlbumResult derives CanEqual:
+    case Deleted
+    case NotFound
+    case Failed
+
   def make[F[_]: Monad](
       repository: AlbumRepository[F],
       spreads: SpreadTemplateService[F],

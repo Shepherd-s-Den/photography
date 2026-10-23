@@ -3,11 +3,6 @@ package photography.ports
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.{Cover, Spread}
 
-final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
-
-enum AlbumRepositoryFailure derives CanEqual:
-  case InvalidAlbumData, DatabaseFailure
-
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
   def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[AlbumRepository.CreateResult]
@@ -16,6 +11,11 @@ trait AlbumRepository[F[_]]:
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
 
 object AlbumRepository:
+  final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
+
+  enum AlbumRepositoryFailure derives CanEqual:
+    case InvalidAlbumData, DatabaseFailure
+
   enum ListResult derives CanEqual:
     case Listed(slice: AlbumPageSlice)
     case Failed(reason: AlbumRepositoryFailure)

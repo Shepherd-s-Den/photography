@@ -6,7 +6,9 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.domain.layout.*
-import photography.ports.{SpreadRepository, SpreadRepositoryFailure}
+import photography.ports.SpreadRepository
+import photography.ports.SpreadRepository.SpreadRepositoryFailure
+import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.util.UUID
 
