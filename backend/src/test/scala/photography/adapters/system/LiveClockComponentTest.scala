@@ -2,7 +2,7 @@ package photography.adapters.system
 
 import cats.effect.IO
 import munit.CatsEffectSuite
-import photography.app.capabilities.Clock
+import photography.capabilities.Clock
 
 import java.time.Instant
 

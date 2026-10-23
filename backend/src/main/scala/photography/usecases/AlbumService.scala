@@ -4,7 +4,7 @@ import cats.Monad
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import photography.app.capabilities.{Clock, IdGenerator}
+import photography.capabilities.{Clock, IdGenerator}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 import photography.ports.AlbumRepository

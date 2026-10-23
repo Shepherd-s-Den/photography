@@ -1,4 +1,4 @@
-package photography.app.capabilities
+package photography.capabilities
 
 import cats.effect.Clock as EffectClock
 

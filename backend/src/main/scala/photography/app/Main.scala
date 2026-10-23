@@ -1,10 +1,9 @@
-package photography.app.runtime
+package photography.app
 
 import cats.effect.{IO, IOApp}
 import fs2.io.net.Network
 import org.http4s.ember.server.EmberServerBuilder
 import photography.adapters.http.HealthRoutes
-import photography.app.AppConfig
 
 object Main extends IOApp.Simple:
 

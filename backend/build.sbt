@@ -27,7 +27,7 @@ lazy val root = (project in file("."))
     coverageMinimumBranchTotal := 100,
     coverageFailOnMinimum      := true,
     coverageExcludedPackages   := Seq(
-      "photography\\.app\\.runtime\\..*",
+      "photography\\.app\\..*",
       "photography\\.adapters\\.sqlite\\..*",
       ".*photography\\.domain\\..*(AbsoluteLocation|AlbumId|ChapterId|CountryId|DestinationId|PhotoId|RelativeLocation|EditorId|SessionId|CameraId|LensId|CoverPlacementId|CoverSlotId|PhotoSpreadSlotId|SpreadId|SpreadPlacementId|SpreadTemplateId|TextSpreadSlotId).*"
     ).mkString(";"),
@@ -49,6 +49,7 @@ lazy val root = (project in file("."))
       "org.http4s"            %% "http4s-dsl"                % "0.23.33",
       "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
       "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
-      "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test
+      "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test,
+      "com.tngtech.archunit"   % "archunit"                  % "1.5.1"   % Test
     )
   )

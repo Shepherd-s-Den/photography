@@ -3,7 +3,7 @@ package photography.adapters.system
 import cats.effect.IO
 import cats.syntax.all.*
 import munit.CatsEffectSuite
-import photography.app.capabilities.IdGenerator
+import photography.capabilities.IdGenerator
 
 final class LiveIdGeneratorComponentTest extends CatsEffectSuite:
 

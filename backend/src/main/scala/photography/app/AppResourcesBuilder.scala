@@ -1,9 +1,8 @@
-package photography.app.runtime
+package photography.app
 
 import cats.effect.{Async, Resource}
 import fly4s.Fly4s
 import org.typelevel.doobie.Transactor
-import photography.app.AppConfig
 import photography.adapters.sqlite.{FlywayMigrator, SqliteConnection}
 
 final case class AppResources[F[_]](sqlite: Transactor[F], flyway: Fly4s[F])
