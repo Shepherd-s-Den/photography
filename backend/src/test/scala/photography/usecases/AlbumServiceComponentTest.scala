@@ -59,8 +59,6 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
     val listed       = ListAlbumStartTemplatesResult.Listed(NonEmptyList.of(buildAlbumStartTemplate(20), buildAlbumStartTemplate(21)))
 
-    val expectedAlbum =
-      Album(AlbumId(buildUuid(10)), newTitle, synopsis = "", Instant.parse("2026-10-07T12:00:00.123Z"))
     val expectedStart = Spread.AlbumStart(
       SpreadId(buildUuid(11)),
       AlbumId(buildUuid(10)),
@@ -68,6 +66,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       Vector(SpreadSlot.Text(TextSpreadSlotId(buildUuid(12)), SpreadId(buildUuid(11)), fullBox)),
       Vector.empty[SpreadPlacement]
     )
+    val expectedAlbum =
+      Album(AlbumId(buildUuid(10)), newTitle, synopsis = "", Instant.parse("2026-10-07T12:00:00.123Z"), AlbumSpreads.initial(expectedStart))
     val expectedCover =
       Cover(AlbumId(buildUuid(10)), SpineOwner.Front, CoverSlot(CoverSlotId(buildUuid(13))), CoverSlot(CoverSlotId(buildUuid(14))))
 
@@ -76,7 +76,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       created <- refs.maybeCreated.get
     yield
       assertEquals(result, CreateAlbumResult.Created(expectedAlbum))
-      assertEquals(created, (expectedAlbum, expectedStart, expectedCover).some)
+      assertEquals(created, (expectedAlbum, expectedCover).some)
 
   test("should report failure when the atomic creation write fails"):
     buildService(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.DatabaseFailure))
@@ -150,11 +150,11 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(failed, DeleteAlbumResult.Failed)
 
   final private case class Refs():
-    val listCalls: Ref[IO, Vector[(Int, Int)]]                           = Ref.unsafe(Vector.empty)
-    val maybeCreated: Ref[IO, Option[(Album, Spread.AlbumStart, Cover)]] = Ref.unsafe(None)
-    val maybeLastReadId: Ref[IO, Option[AlbumId]]                        = Ref.unsafe(None)
-    val maybeRenamed: Ref[IO, Option[(AlbumId, AlbumName)]]              = Ref.unsafe(None)
-    val maybeDeletedId: Ref[IO, Option[AlbumId]]                         = Ref.unsafe(None)
+    val listCalls: Ref[IO, Vector[(Int, Int)]]              = Ref.unsafe(Vector.empty)
+    val maybeCreated: Ref[IO, Option[(Album, Cover)]]       = Ref.unsafe(None)
+    val maybeLastReadId: Ref[IO, Option[AlbumId]]           = Ref.unsafe(None)
+    val maybeRenamed: Ref[IO, Option[(AlbumId, AlbumName)]] = Ref.unsafe(None)
+    val maybeDeletedId: Ref[IO, Option[AlbumId]]            = Ref.unsafe(None)
 
   // Test builder defaults keep each scenario to the one argument it overrides.
   // scalafix:off DisableSyntax.defaultArgs
@@ -184,8 +184,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
           else AlbumRepository.ListResult.Listed(AlbumPageSlice(albums.size.toLong, albums.slice(offset, offset + limit)))
         )
 
-      override def create(album: Album, start: Spread.AlbumStart, cover: Cover): IO[AlbumRepository.CreateResult] =
-        refs.maybeCreated.set((album, start, cover).some).as(createResult)
+      override def create(album: Album, cover: Cover): IO[AlbumRepository.CreateResult] =
+        refs.maybeCreated.set((album, cover).some).as(createResult)
 
       override def get(id: AlbumId): IO[AlbumRepository.GetResult] =
         refs.maybeLastReadId.set(id.some).as(getResult)
@@ -207,7 +207,15 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     )
 
   private def buildAlbum(index: Int) =
-    Album(AlbumId(buildUuid(index)), s"Album $index".refineUnsafe[Not[Empty] & Not[Blank]], s"Synopsis $index", createdAt.plusSeconds(index.toLong))
+    val albumId = AlbumId(buildUuid(index))
+    val start   = Spread.AlbumStart(SpreadId(buildUuid(index + 100)), albumId, SpreadTemplateId(buildUuid(20)), Vector.empty, Vector.empty)
+    Album(
+      albumId,
+      s"Album $index".refineUnsafe[Not[Empty] & Not[Blank]],
+      s"Synopsis $index",
+      createdAt.plusSeconds(index.toLong),
+      AlbumSpreads.initial(start)
+    )
 
   private def buildUuid(index: Int) =
     val suffix = index.toString.reverse.padTo(12, '0').reverse

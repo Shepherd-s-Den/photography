@@ -1,12 +1,12 @@
 package photography.ports
 
 import photography.domain.album.{Album, AlbumId, AlbumName}
-import photography.domain.layout.{Cover, Spread}
+import photography.domain.layout.Cover
 
 trait AlbumRepository[F[_]]:
   /** Returns one page of albums ordered newest-first by `createdAt`. */
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
-  def create(album: Album, start: Spread.AlbumStart, cover: Cover): F[AlbumRepository.CreateResult]
+  def create(album: Album, cover: Cover): F[AlbumRepository.CreateResult]
   def get(id: AlbumId): F[AlbumRepository.GetResult]
   def rename(id: AlbumId, title: AlbumName): F[AlbumRepository.RenameResult]
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]

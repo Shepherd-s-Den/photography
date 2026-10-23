@@ -39,22 +39,22 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 
 | Member | Shape |
 |---|---|
-| `album` | `{id, title, synopsis}` |
-| `start` | `{id, templateId, slots, placements}`; slots preserve template order and kind. |
+| `album` | `{id, title, synopsis}`; metadata only. |
+| `spreads` | Non-empty ordered list. The first spread is an `AlbumStart`; it is followed by chapter blocks, each a `ChapterStart` followed by that chapter's photo spreads. Each spread is `{id, templateId, slots, placements}` with slots in template order. |
 | `cover` | `{spineOwner, front, back}`; each side is `{id, placement}`, with `null` for an empty placement. |
-| `chapters` | Position-ordered `{chapter, start, photos, spreads}` entries; `[]` when absent. |
 | Values | IDs are canonical UUID strings; absent optional values are `null`; empty collections are `[]`. |
 
-New albums have one full-spread text slot, empty cover placements, and no chapters; slot and placement associations use stable IDs and arrays preserve domain order.
+New albums have a single `AlbumStart` spread with one full-spread text slot, and empty cover placements; slot and placement associations use stable IDs and arrays preserve domain order.
 
 ```mermaid
 flowchart TD
-Album["Album · empty synopsis"] --> Start["AlbumStart · position 0"]
+Album["Album · empty synopsis"] --> Spreads["Spreads · non-empty"]
+Spreads --> Start["AlbumStart · first spread"]
 Start --> TextSlot["One full-spread text slot"]
+Spreads --> Chapter["Chapter block · ChapterStart then its photo spreads"]
 Album --> Cover["Cover · front spine"]
 Cover --> Front["Empty front slot"]
 Cover --> Back["Empty back slot"]
-Album --> Chapters["No chapters on creation"]
 ```
 
 ## Acceptance Criteria
@@ -83,7 +83,7 @@ Album --> Chapters["No chapters on creation"]
 - Selecting, directly opening, or reloading `/albums/{id}` loads that album read-only.
 - `GET` returns the album metadata `{id, title, synopsis, createdAt}`; it does not return the composition.
 - Show loading until album metadata arrives; failed loads never render partial success.
-- New albums have no chapters and empty start/cover placements.
+- New albums have a single `AlbumStart` spread and empty cover placements.
 - Create the valid initial composition atomically using the `AlbumStart` template with the lowest ID.
 - The dashboard fetches all `AlbumStart` templates for display; loading and failure states follow the same rules as albums.
 - Malformed or unknown IDs on read, rename, or delete share `404 album_not_found`.

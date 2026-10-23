@@ -48,8 +48,8 @@ object AlbumService:
     override def create(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) if isAlbumStartComposition(templates.head) =>
-          buildInitialComposition(title, templates.head).flatMap: (album, start, cover) =>
-            repository.create(album, start, cover).map:
+          buildInitialComposition(title, templates.head).flatMap: (album, cover) =>
+            repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
         case _ => CreateAlbumResult.Failed.pure[F]
@@ -106,10 +106,10 @@ object AlbumService:
       yield
         val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
           SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
-        val album = Album(albumId, title, synopsis = "", createdAt)
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, Vector.empty[SpreadPlacement])
+        val album = Album(albumId, title, synopsis = "", createdAt, AlbumSpreads.initial(start))
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
-        (album, start, cover)
+        (album, cover)
 
   final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
 
