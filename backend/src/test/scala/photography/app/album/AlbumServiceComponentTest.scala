@@ -19,12 +19,11 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   private val createdAt = Instant.parse("2026-10-07T12:00:00Z")
 
   test("should return the last Album page in newest-first order for an out-of-range request"):
-    val albums     = Vector.tabulate(13)(index => buildAlbum(12 - index))
-    val expected   = AlbumPage(Vector(buildAlbum(0)), 3, 6, 13, 3)
-    val repository = FakeAlbumRepository.make(RepositoryFixture.empty.copy(albums = albums))
+    val albums   = Vector.tabulate(13)(index => buildAlbum(12 - index))
+    val expected = AlbumPage(Vector(buildAlbum(0)), 3, 6, 13, 3)
 
     for
-      fake   <- repository
+      fake   <- FakeAlbumRepository.make(RepositoryFixture.empty.copy(albums = albums))
       result <- buildService(fake).list(page = 99)
       state  <- fake.state.get
     yield
@@ -32,24 +31,21 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(state.listCalls, Vector(0 -> 6, 12 -> 6))
 
   test("should return page one with empty results and zero pages"):
-    val repository = FakeAlbumRepository.make(RepositoryFixture.empty)
-    val expected   = AlbumPage(Vector.empty[Album], 1, 6, 0, 0)
+    val expected = AlbumPage(Vector.empty[Album], 1, 6, 0, 0)
 
-    repository.flatMap(buildService(_).list(page = 1)).map(assertEquals(_, ListAlbumsResult.Listed(expected)))
+    FakeAlbumRepository.make(RepositoryFixture.empty).flatMap(buildService(_).list(page = 1)).map(assertEquals(_, ListAlbumsResult.Listed(expected)))
 
   test("should not repeat the first query when the first page is selected"):
-    val repository = FakeAlbumRepository.make(RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum)))
-
     for
-      fake  <- repository
+      fake  <- FakeAlbumRepository.make(RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum)))
       _     <- buildService(fake).list(page = 1)
       state <- fake.state.get
     yield assertEquals(state.listCalls, Vector(0 -> 6))
 
   test("should report failure when the first album page query fails"):
-    val repository = FakeAlbumRepository.make(RepositoryFixture.empty.copy(listFailureOffset = 0.some))
-
-    repository.flatMap(buildService(_).list(page = 1)).map(assertEquals(_, ListAlbumsResult.Failed))
+    FakeAlbumRepository.make(RepositoryFixture.empty.copy(listFailureOffset = 0.some)).flatMap(buildService(_).list(page =
+      1
+    )).map(assertEquals(_, ListAlbumsResult.Failed))
 
   test("should report failure when the selected album page query fails"):
     val fixture = RepositoryFixture.empty.copy(albums = Vector.tabulate(13)(buildAlbum), listFailureOffset = 12.some)
