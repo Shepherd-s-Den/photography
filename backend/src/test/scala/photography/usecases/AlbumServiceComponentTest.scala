@@ -170,7 +170,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     assertCreationRejectedWithoutWriting(singleTemplate(template))
 
-  private def assertCreationRejectedWithoutWriting(spreads: SpreadTemplateService[IO]): IO[Unit] =
+  private def assertCreationRejectedWithoutWriting(spreads: SpreadTemplateService[IO]) =
     val refs = Refs()
 
     for
@@ -180,10 +180,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(result, CreateAlbumResult.Failed)
       assertEquals(created, None)
 
-  private def singleTemplate(template: SpreadTemplate): SpreadTemplateService[IO] =
+  private def singleTemplate(template: SpreadTemplate) =
     buildSpreadTemplates(ListAlbumStartTemplatesResult.Listed(Vector(template)))
 
-  private def buildSpreadTemplates(listResult: ListAlbumStartTemplatesResult): SpreadTemplateService[IO] =
+  private def buildSpreadTemplates(listResult: ListAlbumStartTemplatesResult) =
     new SpreadTemplateService[IO]:
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = IO.pure(listResult)
 
@@ -225,12 +225,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
         IO.pure(deleteResult)
     AlbumService.make(repository, spreads, identifiers, clock, buildPageSize)
 
-  private def buildPageSize: AlbumPageSize = 6.refineUnsafe[Positive]
+  private def buildPageSize = 6.refineUnsafe[Positive]
 
-  private def buildFullSpreadBox: SlotBox =
+  private def buildFullSpreadBox =
     SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
 
-  private def buildAlbumStartTemplate(index: Int): SpreadTemplate =
+  private def buildAlbumStartTemplate(index: Int) =
     SpreadTemplate(
       buildTemplateId(index),
       s"Template $index".refineUnsafe[Not[Empty]],
@@ -238,19 +238,19 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       NonEmptyList.one(SpreadTemplateSlot.Text(buildFullSpreadBox))
     )
 
-  private def seededAlbumStartTemplates: Vector[SpreadTemplate] =
+  private def seededAlbumStartTemplates =
     Vector(buildAlbumStartTemplate(20), buildAlbumStartTemplate(21))
 
-  private def buildTemplateId(index: Int): SpreadTemplateId =
+  private def buildTemplateId(index: Int) =
     SpreadTemplateId(buildUuid(index))
 
-  private def buildAlbum(index: Int): Album =
+  private def buildAlbum(index: Int) =
     Album(buildAlbumId(index), s"Album $index".refineUnsafe[Not[Empty]], s"Synopsis $index", createdAt.plusSeconds(index.toLong))
 
-  private def buildAlbumId(index: Int): AlbumId =
+  private def buildAlbumId(index: Int) =
     AlbumId(buildUuid(index))
 
-  private def buildUuid(index: Int): UUID =
+  private def buildUuid(index: Int) =
     val suffix = index.toString.reverse.padTo(12, '0').reverse
     UUID.fromString(s"00000000-0000-4000-8000-$suffix")
 

@@ -23,7 +23,7 @@ object SpreadTemplateService:
           ListAlbumStartTemplatesResult.Listed(templates.filter(isAlbumStart).sortBy(_.id.value))
         case SpreadRepository.ListAlbumStartTemplatesResult.Failed(_) => ListAlbumStartTemplatesResult.Failed
 
-    private def isAlbumStart(template: SpreadTemplate): Boolean =
+    private def isAlbumStart(template: SpreadTemplate) =
       template.kind match
         case SpreadTemplateKind.AlbumStart => true
         case _                             => false

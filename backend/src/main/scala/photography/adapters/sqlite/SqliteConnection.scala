@@ -24,7 +24,7 @@ object SqliteConnection:
         dataSource              <- Resource.make(Async[F].blocking(createDataSource()))(ds => Async[F].blocking(ds.close()))
       yield Transactor.fromDataSource[F](dataSource, connectExecutionContext)
 
-    private def createDataSource(): HikariDataSource =
+    private def createDataSource() =
       val driverConfig     = new SQLiteConfig().tap(_.enforceForeignKeys(true))
       val sqliteDataSource = new SQLiteDataSource(driverConfig).tap(_.setUrl(s"jdbc:sqlite:${config.path.toAbsolutePath.normalize()}"))
       new HikariConfig()

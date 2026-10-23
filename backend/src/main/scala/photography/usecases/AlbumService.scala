@@ -90,7 +90,7 @@ object AlbumService:
         case AlbumRepository.DeleteResult.NotFound  => DeleteAlbumResult.NotFound
         case AlbumRepository.DeleteResult.Failed(_) => DeleteAlbumResult.Failed
 
-    private def buildListResult(requestedPage: Int, totalAlbums: Long, firstPage: AlbumRepository.ListResult): F[ListAlbumsResult] =
+    private def buildListResult(requestedPage: Int, totalAlbums: Long, firstPage: AlbumRepository.ListResult) =
       val totalPages    = ((totalAlbums + pageSize - 1) / pageSize).toInt
       val selectedPage  = if totalPages === 0 then 1 else requestedPage.max(1).min(totalPages)
       val offset        = (selectedPage - 1) * pageSize
@@ -100,7 +100,7 @@ object AlbumService:
           ListAlbumsResult.Listed(AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
-    private def createAlbum(title: AlbumName): F[CreateAlbumResult] =
+    private def createAlbum(title: AlbumName) =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
           buildInitialComposition(title, template).flatMap: (album, start, cover) =>
@@ -110,7 +110,7 @@ object AlbumService:
         case ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
         case ListAlbumStartTemplatesResult.Failed    => CreateAlbumResult.Failed.pure[F]
 
-    private def isAlbumStartComposition(template: SpreadTemplate): Boolean =
+    private def isAlbumStartComposition(template: SpreadTemplate) =
       val isFullSpreadText = template.slots.toList match
         case List(SpreadTemplateSlot.Text(SlotBox(x, y, width, height))) =>
           (x: Double) === 0.0 && (y: Double) === 0.0 && (width: Double) === 1.0 && (height: Double) === 1.0
@@ -119,7 +119,7 @@ object AlbumService:
         case SpreadTemplateKind.AlbumStart => isFullSpreadText
         case _                             => false
 
-    private def buildInitialComposition(title: AlbumName, template: SpreadTemplate): F[(Album, Spread.AlbumStart, Cover)] =
+    private def buildInitialComposition(title: AlbumName, template: SpreadTemplate) =
       val textSlotBoxes =
         template.slots.toList
           .collect:
