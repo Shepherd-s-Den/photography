@@ -13,8 +13,6 @@ import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.time.temporal.ChronoUnit
 
-type AlbumPageSize = Int :| Positive
-
 trait AlbumService[F[_]]:
   def list(page: Int): F[ListAlbumsResult]
   def create(title: AlbumName): F[CreateAlbumResult]
@@ -22,32 +20,9 @@ trait AlbumService[F[_]]:
   def rename(id: AlbumId, title: AlbumName): F[RenameAlbumResult]
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
+type AlbumPageSize = Int :| Positive
+
 object AlbumService:
-  final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
-
-  enum ListAlbumsResult derives CanEqual:
-    case Listed(page: AlbumPage)
-    case Failed
-
-  enum CreateAlbumResult derives CanEqual:
-    case Created(album: Album)
-    case Failed
-
-  enum GetAlbumResult derives CanEqual:
-    case Found(album: Album)
-    case NotFound
-    case Failed
-
-  enum RenameAlbumResult derives CanEqual:
-    case Renamed(album: Album)
-    case NotFound
-    case Failed
-
-  enum DeleteAlbumResult derives CanEqual:
-    case Deleted
-    case NotFound
-    case Failed
-
   def make[F[_]: Monad](
       repository: AlbumRepository[F],
       spreads: SpreadTemplateService[F],
@@ -138,3 +113,28 @@ object AlbumService:
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, Vector.empty[SpreadPlacement])
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, start, cover)
+
+  final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
+
+  enum ListAlbumsResult derives CanEqual:
+    case Listed(page: AlbumPage)
+    case Failed
+
+  enum CreateAlbumResult derives CanEqual:
+    case Created(album: Album)
+    case Failed
+
+  enum GetAlbumResult derives CanEqual:
+    case Found(album: Album)
+    case NotFound
+    case Failed
+
+  enum RenameAlbumResult derives CanEqual:
+    case Renamed(album: Album)
+    case NotFound
+    case Failed
+
+  enum DeleteAlbumResult derives CanEqual:
+    case Deleted
+    case NotFound
+    case Failed
