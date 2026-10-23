@@ -7,7 +7,7 @@ import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.app.SqliteConfig
 import photography.app.album.AlbumRepositoryFailure
-import photography.domain.album.{Album, AlbumId, AlbumName, PhotoId}
+import photography.domain.album.{Album, AlbumId, PhotoId}
 import photography.domain.layout.*
 
 import java.nio.file.{Files, Path}
@@ -21,7 +21,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should transactionally persist and read the Album while listing it"):
     buildMigratedDatabase.use: transactor =>
       val repository            = SqliteAlbumRepository.make[IO](transactor)
-      val (album, start, cover) = buildInitialState(albumNumber = 1)
+      val (album, start, cover) = buildInitialState
 
       for
         created <- repository.create(album, start, cover)
@@ -33,7 +33,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(listed.map(_.albums.map(_.id)), Vector(album.id).asRight[AlbumRepositoryFailure])
 
   test("should reject initial resources that do not belong together or contain existing placements"):
-    val (album, start, cover) = buildInitialState(albumNumber = 4)
+    val (album, start, cover) = buildInitialState
     val unrelatedSlots        = start.slots.collect { case SpreadSlot.Text(id, _, box) => SpreadSlot.Text(id, SpreadId(buildUuid(99)), box) }
     val unrelatedSlot         = unrelatedSlots.headOption.getOrElse(fail("expected a text slot"))
     val invalidAlbumId        = (album, start.copy(album = AlbumId(buildUuid(98))), cover)
@@ -61,7 +61,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should rename, delete, and recreate an Album through repository APIs"):
     buildMigratedDatabase.use: transactor =>
       val repository            = SqliteAlbumRepository.make[IO](transactor)
-      val (album, start, cover) = buildInitialState(albumNumber = 2)
+      val (album, start, cover) = buildInitialState
       val renamedTitle          = "Retitled".refineUnsafe[Not[Empty]]
       val expectedAlbum         = album.copy(title = renamedTitle)
 
@@ -84,7 +84,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should roll back a failed create before allowing the same Album to be created"):
     buildMigratedDatabase.use: transactor =>
       val repository            = SqliteAlbumRepository.make[IO](transactor)
-      val (album, start, cover) = buildInitialState(albumNumber = 3)
+      val (album, start, cover) = buildInitialState
       val repeatedSlot          = start.slots.headOption.fold(fail("expected a text slot"))(identity)
       val invalidStart          = start.copy(slots = Vector(repeatedSlot, repeatedSlot))
 
@@ -99,18 +99,17 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(retried, ().asRight[AlbumRepositoryFailure])
         assertEquals(afterRetry, album.some.asRight[AlbumRepositoryFailure])
 
-  private def buildInitialState(albumNumber: Int) =
-    val albumId          = AlbumId(buildUuid(albumNumber))
-    val spreadId         = SpreadId(buildUuid(albumNumber + 10))
-    val slotId           = TextSpreadSlotId(buildUuid(albumNumber + 20))
-    val frontSlot        = CoverSlot(CoverSlotId(buildUuid(albumNumber + 30)))
-    val backSlot         = CoverSlot(CoverSlotId(buildUuid(albumNumber + 40)))
-    val title: AlbumName = s"Album $albumNumber".refineUnsafe[Not[Empty]]
-    val box              = buildFullSpreadBox
-    val album            = Album(albumId, title, "A synopsis", createdAt)
-    val slots            = Vector(SpreadSlot.Text(slotId, spreadId, box))
-    val start            = Spread.AlbumStart(spreadId, albumId, SpreadTemplateId(buildUuid(1)), slots, Vector.empty[SpreadPlacement])
-    val cover            = Cover(albumId, SpineOwner.Front, frontSlot, backSlot)
+  private def buildInitialState =
+    val albumId   = AlbumId(buildUuid(1))
+    val spreadId  = SpreadId(buildUuid(11))
+    val slotId    = TextSpreadSlotId(buildUuid(21))
+    val frontSlot = CoverSlot(CoverSlotId(buildUuid(31)))
+    val backSlot  = CoverSlot(CoverSlotId(buildUuid(41)))
+    val box       = buildFullSpreadBox
+    val album     = Album(albumId, "Album".refineUnsafe[Not[Empty]], "A synopsis", createdAt)
+    val slots     = Vector(SpreadSlot.Text(slotId, spreadId, box))
+    val start     = Spread.AlbumStart(spreadId, albumId, SpreadTemplateId(buildUuid(1)), slots, Vector.empty[SpreadPlacement])
+    val cover     = Cover(albumId, SpineOwner.Front, frontSlot, backSlot)
     (album, start, cover)
 
   private def buildFullSpreadBox =
