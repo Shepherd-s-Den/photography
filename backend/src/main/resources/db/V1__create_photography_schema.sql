@@ -14,7 +14,8 @@ CREATE TABLE destination (
 CREATE TABLE album (
     id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
-    synopsis TEXT NOT NULL
+    synopsis TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE chapter (
@@ -89,6 +90,12 @@ CREATE TABLE spread_template_slot (
     height REAL NOT NULL,
     UNIQUE (template_id, kind, x, y, width, height)
 ) STRICT;
+
+INSERT INTO spread_template (id, name, kind)
+VALUES ('00000000-0000-4000-8000-000000000001', 'Built-in AlbumStart', 'album_start');
+
+INSERT INTO spread_template_slot (template_id, kind, x, y, width, height)
+VALUES ('00000000-0000-4000-8000-000000000001', 'text', 0.0, 0.0, 1.0, 1.0);
 
 CREATE TABLE spread (
     id TEXT PRIMARY KEY NOT NULL,
