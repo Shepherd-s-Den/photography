@@ -50,11 +50,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     buildService(Refs(), listFailureOffset = 0.some).list(page = 1).map(assertEquals(_, ListAlbumsResult.Failed))
 
   test("should report failure when the selected album page query fails"):
-    buildService(
-      Refs(),
-      albums = Vector.tabulate(13)(buildAlbum),
-      listFailureOffset = 12.some
-    ).list(page = 99).map(assertEquals(_, ListAlbumsResult.Failed))
+    val service = buildService(Refs(), albums = Vector.tabulate(13)(buildAlbum), listFailureOffset = 12.some)
+    service.list(page = 99).map(assertEquals(_, ListAlbumsResult.Failed))
 
   test("should create an Album, album-start Spread, and empty Cover"):
     val refs = Refs()
@@ -92,10 +89,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       .map(assertEquals(_, CreateAlbumResult.Failed))
 
   test("should report failure when album lookup fails"):
-    buildService(
-      Refs(),
-      getResult = AlbumRepository.GetResult.Failed(AlbumRepositoryFailure.InvalidAlbumData)
-    ).get(buildAlbumId(1)).map(assertEquals(_, GetAlbumResult.Failed))
+    val service = buildService(Refs(), getResult = AlbumRepository.GetResult.Failed(AlbumRepositoryFailure.InvalidAlbumData))
+    service.get(buildAlbumId(1)).map(assertEquals(_, GetAlbumResult.Failed))
 
   test("should report not found when the requested album is missing"):
     val refs = Refs()
@@ -110,10 +105,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   test("should return the Album when it exists"):
     val expected = buildAlbum(2)
 
-    buildService(
-      Refs(),
-      getResult = AlbumRepository.GetResult.Found(expected)
-    ).get(buildAlbumId(2)).map(assertEquals(_, GetAlbumResult.Found(expected)))
+    val service = buildService(Refs(), getResult = AlbumRepository.GetResult.Found(expected))
+    service.get(buildAlbumId(2)).map(assertEquals(_, GetAlbumResult.Found(expected)))
 
   test("should report not found when rename targets a missing album"):
     buildService(Refs()).rename(buildAlbumId(1), "Renamed".refineUnsafe[Not[Empty]]).map(assertEquals(_, RenameAlbumResult.NotFound))
