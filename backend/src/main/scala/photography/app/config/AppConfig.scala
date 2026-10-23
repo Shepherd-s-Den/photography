@@ -2,6 +2,8 @@ package photography.app
 
 import cats.effect.Async
 import com.comcast.ip4s.{Host, Port}
+import io.github.iltotore.iron.pureconfig.given
+import photography.app.album.AlbumPageSize
 import pureconfig.ConfigReader
 import pureconfig.ConfigSource
 import pureconfig.module.catseffect.syntax.*
@@ -11,7 +13,9 @@ import java.nio.file.Path
 
 final case class SqliteConfig(path: Path, connectionAcquisitionThreads: Int, maxSessions: Int) derives ConfigReader
 
-final case class AppConfig(sqlite: SqliteConfig, http: AppConfig.HttpServerConfig)
+final case class AlbumsConfig(pageSize: AlbumPageSize) derives ConfigReader
+
+final case class AppConfig(sqlite: SqliteConfig, albums: AlbumsConfig, http: AppConfig.HttpServerConfig)
     derives ConfigReader
 
 object AppConfig:

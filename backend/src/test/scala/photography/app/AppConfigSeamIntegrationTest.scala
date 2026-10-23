@@ -5,5 +5,5 @@ import munit.CatsEffectSuite
 
 final class AppConfigSeamIntegrationTest extends CatsEffectSuite:
 
-  test("should successfully parse the photography config"):
-    AppConfig.load[IO].map(_ => ())
+  test("should load the default album page size of six"):
+    AppConfig.load[IO].map(config => assertEquals(config.albums.pageSize, 6))
