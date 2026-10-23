@@ -28,7 +28,7 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 - An out-of-range page returns the last page; an empty collection returns page `1` with `totalPages: 0`.
 - Generate a stable UUID and immutable UTC `createdAt` for each album; list newest-first.
 - Seed several `AlbumStart` spread templates for new databases and V1 upgrades; the template list API returns all of them, and clients supply no template ID.
-- Creating an album uses the first `AlbumStart` template in database order.
+- Creating an album uses the `AlbumStart` template with the lowest ID.
 - Album titles are nonempty after trimming; create and rename trim input before validation.
 - SQLite enforces declared primary/foreign keys and unique chapter positions, with foreign-key checks enabled on every connection.
 - The use case checks chapter positions are `0..19`.
@@ -85,7 +85,7 @@ Album --> Chapters["No chapters on creation"]
 - `GET` returns the complete composition shape defined above, including empty arrays and slot associations.
 - Show loading until complete composition arrives; failed loads never render partial success.
 - New albums have no chapters and empty start/cover placements.
-- Create the valid initial composition atomically using the first `AlbumStart` template in database order.
+- Create the valid initial composition atomically using the `AlbumStart` template with the lowest ID.
 - The dashboard fetches all `AlbumStart` templates for display; loading and failure states follow the same rules as albums.
 - Malformed or unknown IDs on read, rename, or delete share `404 album_not_found`.
 - Service/incomplete-state failures use `500 service_failure`.

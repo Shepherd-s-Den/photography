@@ -7,7 +7,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.app.capabilities.{Clock, IdGenerator}
-import photography.app.spread.{SpreadRepository, SpreadRepositoryFailure}
+import photography.app.spread.{ListAlbumStartTemplatesResult, SpreadTemplateService}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
@@ -155,9 +155,9 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     for result <- FakeAlbumRepository.make(fixture).flatMap(buildService(_).delete(buildAlbumId(1)))
     yield assertEquals(result, DeleteAlbumResult.Failed)
 
-  test("should use the first AlbumStart template in database order when creating"):
+  test("should use the first AlbumStart template the spread service lists when creating"):
     val spreads =
-      SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(Vector(buildAlbumStartTemplate(21), buildAlbumStartTemplate(20))))
+      SpreadTemplateCatalog(ListAlbumStartTemplatesResult.Listed(Vector(buildAlbumStartTemplate(21), buildAlbumStartTemplate(20))))
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
@@ -166,7 +166,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     yield assertEquals(state.created.map(_._2.template), buildTemplateId(21).some)
 
   test("should fail creation without writing when no AlbumStart template is seeded"):
-    val spreads = SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(Vector.empty[SpreadTemplate]))
+    val spreads = SpreadTemplateCatalog(ListAlbumStartTemplatesResult.Listed(Vector.empty[SpreadTemplate]))
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
@@ -177,7 +177,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(state.created, None)
 
   test("should fail creation without writing when the template lookup fails"):
-    val spreads = SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure))
+    val spreads = SpreadTemplateCatalog(ListAlbumStartTemplatesResult.Failed)
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
@@ -204,7 +204,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     assertCreationRejectedWithoutWriting(template)
 
   private def assertCreationRejectedWithoutWriting(template: SpreadTemplate): IO[Unit] =
-    val spreads = SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(Vector(template)))
+    val spreads = SpreadTemplateCatalog(ListAlbumStartTemplatesResult.Listed(Vector(template)))
 
     for
       repository <- FakeAlbumRepository.make(RepositoryFixture.empty)
@@ -218,7 +218,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     buildServiceAt(repository, createdAt)
 
   private def buildServiceAt(repository: FakeAlbumRepository, currentTime: Instant): AlbumService[IO] =
-    buildServiceWith(repository, SpreadTemplateCatalog(SpreadRepository.ListAlbumStartTemplatesResult.Listed(seededAlbumStartTemplates)), currentTime)
+    buildServiceWith(repository, SpreadTemplateCatalog(ListAlbumStartTemplatesResult.Listed(seededAlbumStartTemplates)), currentTime)
 
   private def buildServiceWith(
       repository: FakeAlbumRepository,
@@ -287,8 +287,8 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       renamed: Option[(AlbumId, AlbumName)]
   )
 
-  final private case class SpreadTemplateCatalog(listResult: SpreadRepository.ListAlbumStartTemplatesResult) extends SpreadRepository[IO]:
-    override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = IO.pure(listResult)
+  final private case class SpreadTemplateCatalog(listResult: ListAlbumStartTemplatesResult) extends SpreadTemplateService[IO]:
+    override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = IO.pure(listResult)
 
   final private class FakeAlbumRepository(
       fixture: RepositoryFixture,

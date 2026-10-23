@@ -5,7 +5,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import photography.app.capabilities.{Clock, IdGenerator}
-import photography.app.spread.SpreadRepository
+import photography.app.spread.{ListAlbumStartTemplatesResult, SpreadTemplateService}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 
@@ -48,7 +48,7 @@ trait AlbumService[F[_]]:
 object AlbumService:
   def make[F[_]: Monad](
       repository: AlbumRepository[F],
-      spreads: SpreadRepository[F],
+      spreads: SpreadTemplateService[F],
       identifiers: IdGenerator[F],
       clock: Clock[F],
       pageSize: AlbumPageSize
@@ -57,7 +57,7 @@ object AlbumService:
 
   final private class LiveAlbumService[F[_]: Monad](
       repository: AlbumRepository[F],
-      spreads: SpreadRepository[F],
+      spreads: SpreadTemplateService[F],
       identifiers: IdGenerator[F],
       clock: Clock[F],
       pageSize: AlbumPageSize
@@ -100,13 +100,13 @@ object AlbumService:
 
     private def createAlbum(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
-        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
+        case ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
           buildInitialComposition(title, template).flatMap: (album, start, cover) =>
             repository.create(album, start, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
-        case SpreadRepository.ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
-        case SpreadRepository.ListAlbumStartTemplatesResult.Failed(_) => CreateAlbumResult.Failed.pure[F]
+        case ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
+        case ListAlbumStartTemplatesResult.Failed    => CreateAlbumResult.Failed.pure[F]
 
     private def isAlbumStartComposition(template: SpreadTemplate): Boolean =
       val isFullSpreadText = template.slots.toSortedSet.toVector match
