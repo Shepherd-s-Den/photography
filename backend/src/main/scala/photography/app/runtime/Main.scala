@@ -4,7 +4,7 @@ import cats.effect.{IO, IOApp}
 import cats.syntax.all.*
 import fs2.io.net.Network
 import org.http4s.ember.server.EmberServerBuilder
-import photography.adapters.http.{AlbumRoutes, HealthRoutes}
+import photography.adapters.http.{AlbumRoutes, FrontendRoutes, HealthRoutes}
 import photography.adapters.sqlite.SqliteAlbumRepository
 import photography.app.album.{AlbumService, UtcClock, UUIDGenerator}
 import photography.app.AppConfig
@@ -26,5 +26,5 @@ object Main extends IOApp.Simple:
       .default[IO]
       .withHost(config.http.host)
       .withPort(config.http.port)
-      .withHttpApp((HealthRoutes.routes[IO] <+> AlbumRoutes.routes[IO](albumService)).orNotFound)
+      .withHttpApp((HealthRoutes.routes[IO] <+> AlbumRoutes.routes[IO](albumService) <+> FrontendRoutes.routes[IO]).orNotFound)
       .build
