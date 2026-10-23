@@ -45,7 +45,15 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_)                 => ListAlbumsResult.Failed.pure[F]
         case firstPage @ AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice.totalAlbums, firstPage)
 
-    override def create(title: AlbumName): F[CreateAlbumResult] = createAlbum(title)
+    override def create(title: AlbumName): F[CreateAlbumResult] =
+      spreads.listAlbumStartTemplates.flatMap:
+        case ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
+          buildInitialComposition(title, template).flatMap: (album, start, cover) =>
+            repository.create(album, start, cover).map:
+              case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
+              case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
+        case ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
+        case ListAlbumStartTemplatesResult.Failed    => CreateAlbumResult.Failed.pure[F]
 
     override def get(id: AlbumId): F[GetAlbumResult] =
       repository.get(id).map:
@@ -74,16 +82,6 @@ object AlbumService:
         case AlbumRepository.ListResult.Listed(slice) =>
           ListAlbumsResult.Listed(AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
-
-    private def createAlbum(title: AlbumName) =
-      spreads.listAlbumStartTemplates.flatMap:
-        case ListAlbumStartTemplatesResult.Listed(template +: _) if isAlbumStartComposition(template) =>
-          buildInitialComposition(title, template).flatMap: (album, start, cover) =>
-            repository.create(album, start, cover).map:
-              case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
-              case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
-        case ListAlbumStartTemplatesResult.Listed(_) => CreateAlbumResult.Failed.pure[F]
-        case ListAlbumStartTemplatesResult.Failed    => CreateAlbumResult.Failed.pure[F]
 
     private def isAlbumStartComposition(template: SpreadTemplate) =
       val isFullSpreadText = template.slots.toList match
