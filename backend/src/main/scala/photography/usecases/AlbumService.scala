@@ -48,12 +48,12 @@ object AlbumService:
 
     override def create(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
-        case ListAlbumStartTemplatesResult.Listed(templates) if isAlbumStartComposition(templates.head) =>
+        case ListAlbumStartTemplatesResult.Listed(templates) =>
           buildInitialComposition(title, templates.head).flatMap: (album, cover) =>
             repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
-        case _ => CreateAlbumResult.Failed.pure[F]
+        case ListAlbumStartTemplatesResult.Failed => CreateAlbumResult.Failed.pure[F]
 
     override def get(id: AlbumId): F[GetAlbumResult] =
       repository.get(id).map:
@@ -82,15 +82,6 @@ object AlbumService:
         case AlbumRepository.ListResult.Listed(slice) =>
           ListAlbumsResult.Listed(AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
-
-    private def isAlbumStartComposition(template: SpreadTemplate) =
-      val isFullSpreadText = template.slots.toList match
-        case List(SpreadTemplateSlot.Text(SlotBox(x, y, width, height))) =>
-          (x: Double) === 0.0 && (y: Double) === 0.0 && (width: Double) === 1.0 && (height: Double) === 1.0
-        case _ => false
-      template.kind match
-        case SpreadTemplateKind.AlbumStart => isFullSpreadText
-        case _                             => false
 
     // The album spread invariant (first spread is an AlbumStart, then chapter blocks of a ChapterStart
     // followed by its PhotosOnly spreads) holds by construction: a new album starts with a single AlbumStart.

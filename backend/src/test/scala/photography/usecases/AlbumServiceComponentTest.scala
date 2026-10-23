@@ -22,7 +22,6 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   private val pageSize       = 6.refineUnsafe[Positive]
   private val createdAt      = Instant.parse("2026-10-07T12:00:00Z")
   private val fullBox        = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
-  private val partialBox     = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 0.5.refineUnsafe, 1.0.refineUnsafe)
   private val newTitle       = "Northern Coast".refineUnsafe[Not[Empty] & Not[Blank]]
   private val thirteenAlbums = Vector.tabulate(13)(buildAlbum).reverse
 
@@ -83,26 +82,14 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       .create(newTitle)
       .map(assertEquals(_, CreateAlbumResult.Failed))
 
-  test("should reject creation without writing when no valid AlbumStart template is available"):
-    val photoTemplate   = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Photo(fullBox)))
-    val partialTemplate = buildAlbumStartTemplate(20).copy(slots = NonEmptyList.one(SpreadTemplateSlot.Text(partialBox)))
-    val kindMismatch    = buildAlbumStartTemplate(20).copy(kind = SpreadTemplateKind.PhotosOnly)
-    val rejectedLists   = Vector(
-      ListAlbumStartTemplatesResult.Failed,
-      ListAlbumStartTemplatesResult.Listed(NonEmptyList.one(kindMismatch)),
-      ListAlbumStartTemplatesResult.Listed(NonEmptyList.one(photoTemplate)),
-      ListAlbumStartTemplatesResult.Listed(NonEmptyList.one(partialTemplate))
-    )
-
-    rejectedLists.traverse_ { listResult =>
-      val refs = Refs()
-      for
-        result  <- buildService(refs, listResult = listResult).create(newTitle)
-        created <- refs.maybeCreated.get
-      yield
-        assertEquals(result, CreateAlbumResult.Failed)
-        assertEquals(created, None)
-    }
+  test("should reject creation without writing when the AlbumStart template listing fails"):
+    val refs = Refs()
+    for
+      result  <- buildService(refs, listResult = ListAlbumStartTemplatesResult.Failed).create(newTitle)
+      created <- refs.maybeCreated.get
+    yield
+      assertEquals(result, CreateAlbumResult.Failed)
+      assertEquals(created, None)
 
   test("should return the Album by id, report not found, and report failure when lookup fails"):
     val album = buildAlbum(2)
