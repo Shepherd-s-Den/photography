@@ -6,9 +6,9 @@ trait SpreadRepository[F[_]]:
   def listAlbumStartTemplates: F[SpreadRepository.ListAlbumStartTemplatesResult]
 
 object SpreadRepository:
-  enum SpreadRepositoryFailure derives CanEqual:
+  enum Failure derives CanEqual:
     case InvalidSpreadData, DatabaseFailure
 
   enum ListAlbumStartTemplatesResult derives CanEqual:
     case Listed(templates: Vector[SpreadTemplate])
-    case Failed(reason: SpreadRepositoryFailure)
+    case Failed(reason: Failure)

@@ -2,12 +2,13 @@ package photography.usecases
 
 import cats.data.NonEmptyList
 import cats.effect.IO
+import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import photography.domain.layout.*
 import photography.ports.SpreadRepository
-import photography.ports.SpreadRepository.SpreadRepositoryFailure
+import photography.ports.SpreadRepository.Failure
 import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.util.UUID
@@ -26,13 +27,13 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
     buildService(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed)).listAlbumStartTemplates.map(assertEquals(_, expected))
 
   test("should report failure when the repository cannot list templates"):
-    val failed = SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure)
+    val failed = SpreadRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure)
 
     buildService(failed).listAlbumStartTemplates.map(assertEquals(_, ListAlbumStartTemplatesResult.Failed))
 
   private def buildService(listResult: SpreadRepository.ListAlbumStartTemplatesResult): SpreadTemplateService[IO] =
     val repository = new SpreadRepository[IO]:
-      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = IO.pure(listResult)
+      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = listResult.pure[IO]
     SpreadTemplateService.make(repository)
 
   private def buildTemplate(index: Int, kind: SpreadTemplateKind) =

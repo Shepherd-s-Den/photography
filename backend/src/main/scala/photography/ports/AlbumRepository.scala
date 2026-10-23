@@ -13,28 +13,28 @@ trait AlbumRepository[F[_]]:
 object AlbumRepository:
   final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
 
-  enum AlbumRepositoryFailure derives CanEqual:
+  enum Failure derives CanEqual:
     case InvalidAlbumData, DatabaseFailure
 
   enum ListResult derives CanEqual:
     case Listed(slice: AlbumPageSlice)
-    case Failed(reason: AlbumRepositoryFailure)
+    case Failed(reason: Failure)
 
   enum CreateResult derives CanEqual:
     case Created
-    case Failed(reason: AlbumRepositoryFailure)
+    case Failed(reason: Failure)
 
   enum GetResult derives CanEqual:
     case Found(album: Album)
     case NotFound
-    case Failed(reason: AlbumRepositoryFailure)
+    case Failed(reason: Failure)
 
   enum RenameResult derives CanEqual:
     case Renamed(album: Album)
     case NotFound
-    case Failed(reason: AlbumRepositoryFailure)
+    case Failed(reason: Failure)
 
   enum DeleteResult derives CanEqual:
     case Deleted
     case NotFound
-    case Failed(reason: AlbumRepositoryFailure)
+    case Failed(reason: Failure)

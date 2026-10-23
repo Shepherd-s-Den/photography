@@ -10,7 +10,7 @@ import photography.capabilities.{Clock, IdGenerator}
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
-import photography.ports.AlbumRepository.{AlbumPageSlice, AlbumRepositoryFailure}
+import photography.ports.AlbumRepository.{AlbumPageSlice, Failure}
 import photography.usecases.AlbumService.*
 import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
@@ -86,12 +86,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     }
 
   test("should report failure when atomic creation fails"):
-    buildService(Refs(), createResult = AlbumRepository.CreateResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
+    buildService(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.DatabaseFailure))
       .create("New album".refineUnsafe[Not[Empty]])
       .map(assertEquals(_, CreateAlbumResult.Failed))
 
   test("should report failure when album lookup fails"):
-    val service = buildService(Refs(), getResult = AlbumRepository.GetResult.Failed(AlbumRepositoryFailure.InvalidAlbumData))
+    val service = buildService(Refs(), getResult = AlbumRepository.GetResult.Failed(Failure.InvalidAlbumData))
     service.get(AlbumId(buildUuid(1))).map(assertEquals(_, GetAlbumResult.Failed))
 
   test("should report not found when the requested album is missing"):
@@ -127,7 +127,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(renamedTo, (AlbumId(buildUuid(1)) -> newTitle).some)
 
   test("should report failure when rename persistence fails"):
-    buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
+    buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure))
       .rename(AlbumId(buildUuid(1)), "Renamed".refineUnsafe[Not[Empty]])
       .map(assertEquals(_, RenameAlbumResult.Failed))
 
@@ -139,7 +139,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
     service.delete(AlbumId(buildUuid(1))).map(assertEquals(_, DeleteAlbumResult.Deleted))
 
   test("should report failure when deletion persistence fails"):
-    buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Failed(AlbumRepositoryFailure.DatabaseFailure))
+    buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Failed(Failure.DatabaseFailure))
       .delete(AlbumId(buildUuid(1)))
       .map(assertEquals(_, DeleteAlbumResult.Failed))
 
@@ -200,16 +200,16 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   ): AlbumService[IO] =
     // scalafix:on DisableSyntax.defaultArgs
     val spreads = new SpreadTemplateService[IO]:
-      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = IO.pure(listResult)
+      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = listResult.pure[IO]
     val identifiers = new IdGenerator[IO]:
       private val nextValue         = Ref.unsafe[IO, Int](10)
       override def nextId: IO[UUID] = nextValue.getAndUpdate(_ + 1).map(buildUuid)
     val clock = new Clock[IO]:
-      override def now: IO[Instant] = IO.pure(currentTime)
+      override def now: IO[Instant] = currentTime.pure[IO]
     val repository = new AlbumRepository[IO]:
       override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
         refs.listCalls.update(_ :+ (offset -> limit)).as(
-          if listFailureOffset.contains(offset) then AlbumRepository.ListResult.Failed(AlbumRepositoryFailure.DatabaseFailure)
+          if listFailureOffset.contains(offset) then AlbumRepository.ListResult.Failed(Failure.DatabaseFailure)
           else AlbumRepository.ListResult.Listed(AlbumPageSlice(albums.size.toLong, albums.slice(offset, offset + limit)))
         )
 
@@ -223,7 +223,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
         refs.renamed.set((id -> title).some).as(renameResult)
 
       override def delete(id: AlbumId): IO[AlbumRepository.DeleteResult] =
-        IO.pure(deleteResult)
+        deleteResult.pure[IO]
     AlbumService.make(repository, spreads, identifiers, clock, 6.refineUnsafe[Positive])
 
   private def buildAlbumStartTemplate(index: Int) =
