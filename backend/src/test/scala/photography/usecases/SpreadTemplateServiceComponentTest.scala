@@ -20,21 +20,20 @@ class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
       buildTemplate(22, SpreadTemplateKind.PhotosOnly),
       buildTemplate(20, SpreadTemplateKind.AlbumStart)
     )
-    val repository = new SpreadRepository[IO]:
-      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] =
-        IO.pure(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed))
-
     val expectedTemplates = Vector(buildTemplate(20, SpreadTemplateKind.AlbumStart), buildTemplate(21, SpreadTemplateKind.AlbumStart))
     val expected          = ListAlbumStartTemplatesResult.Listed(expectedTemplates)
 
-    SpreadTemplateService.make(repository).listAlbumStartTemplates.map(assertEquals(_, expected))
+    buildService(SpreadRepository.ListAlbumStartTemplatesResult.Listed(listed)).listAlbumStartTemplates.map(assertEquals(_, expected))
 
   test("should report failure when the repository cannot list templates"):
-    val repository = new SpreadRepository[IO]:
-      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] =
-        IO.pure(SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure))
+    val failed = SpreadRepository.ListAlbumStartTemplatesResult.Failed(SpreadRepositoryFailure.DatabaseFailure)
 
-    SpreadTemplateService.make(repository).listAlbumStartTemplates.map(assertEquals(_, ListAlbumStartTemplatesResult.Failed))
+    buildService(failed).listAlbumStartTemplates.map(assertEquals(_, ListAlbumStartTemplatesResult.Failed))
+
+  private def buildService(listResult: SpreadRepository.ListAlbumStartTemplatesResult): SpreadTemplateService[IO] =
+    val repository = new SpreadRepository[IO]:
+      override def listAlbumStartTemplates: IO[SpreadRepository.ListAlbumStartTemplatesResult] = IO.pure(listResult)
+    SpreadTemplateService.make(repository)
 
   private def buildTemplate(index: Int, kind: SpreadTemplateKind) =
     SpreadTemplate(
