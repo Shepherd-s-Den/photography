@@ -75,7 +75,9 @@ Cover --> Back["Empty back slot"]
 - Page changes slide directionally; keep the current page visible while loading.
 - Cards use a 42:28 cover area, bottom title extension, compact type, and turquoise focus halo.
 - Empty covers use a turquoise/azure placeholder; selecting a card opens `/albums/{id}`.
-- Show loading, successful-empty, and retryable list-error states.
+- Keep a single Add album action at the top right.
+- An empty album collection leaves the album area blank.
+- Show loading and retryable list-error states.
 
 ### Add and edit
 
@@ -90,11 +92,11 @@ Cover --> Back["Empty back slot"]
 ### Open and persist
 
 - Selecting, directly opening, or reloading `/albums/{id}` loads that album read-only.
+- The album page displays only its title and synopsis beneath navigation.
 - `GET` returns the album metadata `{id, title, synopsis, createdAt}`; it does not return the composition.
 - Show loading until album metadata arrives; failed loads never render partial success.
 - New albums have a single `AlbumStart` spread and empty cover placements.
 - Create the valid initial composition atomically using the `AlbumStart` template with the lowest ID.
-- The dashboard fetches all `AlbumStart` templates for display; loading and failure states follow the same rules as albums.
 - `GET /api/templates/album-start` returns the complete ordered catalog and slot geometry; listing failure returns `500 service_failure`.
 - Malformed or unknown IDs on read, rename, or delete share `404 album_not_found`.
 - Service/incomplete-state failures use `500 service_failure`.

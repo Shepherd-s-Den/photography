@@ -1,0 +1,529 @@
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #25444c;
+  background: #f3f8f8;
+  font-synthesis: none;
+  --muted: #60767b;
+  --line: #d6e5e7;
+  --teal: #247c7f;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: linear-gradient(145deg, #f7fbfb, #edf6f6 50%, #f2f7fa);
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid #256d85;
+  border-radius: 7px;
+  color: white;
+  background: linear-gradient(110deg, #256d85, #247c7f);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+button:hover {
+  border-color: #1e596e;
+  background: linear-gradient(110deg, #1e596e, #1e6c70);
+}
+button.secondary {
+  color: #1e596e;
+  background: #fff;
+}
+button.danger {
+  border-color: #a03a42;
+  background: #a03a42;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 3px solid #70b8c1;
+  outline-offset: 2px;
+}
+a {
+  color: #1e596e;
+}
+h1,
+h2 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+}
+h1 {
+  margin: 0;
+  font-size: clamp(26px, 3vw, 30px);
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+h2 {
+  margin: 0;
+  font-size: 20px;
+}
+p {
+  line-height: 1.55;
+  color: var(--muted);
+}
+.page {
+  width: min(1248px, calc(100% - 40px));
+  margin: auto;
+  padding: 34px 0 40px;
+}
+.topbar {
+  display: flex;
+  align-items: center;
+  min-height: 58px;
+  padding: 0 clamp(18px, 5vw, 70px);
+  border-bottom: 1px solid var(--line);
+  background: rgb(252 254 254 / 88%);
+}
+.brand {
+  color: inherit;
+  font:
+    500 1.65rem/1 Georgia,
+    "Times New Roman",
+    serif;
+  letter-spacing: -0.025em;
+  text-decoration: none;
+}
+.page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.dashboard-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font:
+    500 16px/1.35 Inter,
+    ui-sans-serif,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.01em;
+}
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 26px 24px;
+}
+.album-grid[data-direction="forward"] {
+  animation: slide-forward 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.album-grid[data-direction="backward"] {
+  animation: slide-backward 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.album-card {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fcfefe;
+  box-shadow: 0 3px 12px #25444c0f;
+  transition:
+    box-shadow 180ms,
+    border-color 180ms,
+    transform 180ms;
+}
+.album-card:hover,
+.album-card:focus-within {
+  transform: translateY(-2px);
+  border-color: var(--teal);
+  box-shadow:
+    0 0 0 4px #247c7f33,
+    0 9px 24px #25444c1c;
+}
+.album-card-open {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.album-card-open:focus-visible {
+  outline: 0;
+}
+.album-card-open:hover h2 {
+  background: #f5fbfb;
+}
+.album-card h2 {
+  margin: 0;
+  padding: 0 14px 9px;
+  min-height: 34px;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+  overflow-wrap: anywhere;
+  border-top: 1px solid var(--line);
+}
+.cover-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 42 / 28;
+  background: linear-gradient(135deg, #f8fcfc, #edf6f6 55%, #f2f7fa);
+}
+.cover-spine {
+  position: absolute;
+  inset: 0 auto 0 12px;
+  width: 1px;
+  background: #d8e9e9;
+}
+.album-card-actions {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 5px;
+}
+button.icon-button {
+  display: grid;
+  place-items: center;
+  min-height: 1.9rem;
+  height: 1.9rem;
+  width: 1.9rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: #1e596e;
+  background: #ffffffed;
+  box-shadow: 0 2px 5px rgb(37 68 76 / 10%);
+}
+.icon-button:hover,
+.icon-button:focus-visible {
+  border-color: #256d85;
+  background: #e2f1f3;
+}
+button.delete-action {
+  color: #a03a42;
+}
+button.delete-action:hover,
+button.delete-action:focus-visible {
+  border-color: #a03a42;
+  background: #fae9e5;
+}
+.icon-button svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+.pagination > span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pagination > div {
+  display: grid;
+  justify-items: center;
+}
+.pagination button {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.control-help {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.state {
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fcfefe;
+}
+.error-state button {
+  margin-top: 17px;
+}
+.album-cover-skeleton {
+  aspect-ratio: 42 / 28;
+}
+.album-title-skeleton {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  padding: 0 14px 9px;
+  border-top: 1px solid var(--line);
+}
+.album-title-skeleton span {
+  width: min(42%, 140px);
+  height: 8px;
+  border-radius: 4px;
+}
+.album-cover-skeleton,
+.album-title-skeleton span {
+  background: linear-gradient(100deg, #e8f1f2 25%, #f5f9f9 48%, #e8f1f2 70%);
+  background-size: 220% 100%;
+  animation: shimmer 1.35s ease-in-out infinite;
+}
+small {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+.loading-placeholder {
+  min-height: 5px;
+  margin-bottom: 16px;
+  border-radius: 6px;
+  background: linear-gradient(100deg, #e0eeee, #f7fbfb, #e0eeee);
+  background-size: 200%;
+  animation: shimmer 1.3s infinite;
+}
+[role="alert"] {
+  padding: 12px 0;
+  color: #90343c;
+}
+.album-dialog {
+  width: min(390px, calc(100% - 32px));
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: inherit;
+  background: #fcfefe;
+  box-shadow: 0 12px 34px rgb(37 68 76 / 10%);
+  animation: dialog-in 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.album-dialog::backdrop {
+  background: rgb(16 35 59 / 48%);
+  animation: scrim-in 280ms ease-out both;
+}
+.album-dialog.is-closing {
+  animation: dialog-out 280ms ease-in both;
+}
+.album-dialog.is-closing::backdrop {
+  animation: scrim-out 280ms ease-in both;
+}
+.dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.album-dialog form {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+.panel-close {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-color: var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  background: white;
+  font-size: 20px;
+  font-weight: 500;
+}
+.panel-close:hover {
+  background: #e2f1f3;
+}
+.album-dialog h2 {
+  margin: 0;
+}
+.album-dialog label {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 750;
+}
+.album-dialog input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #bdcadd;
+  border-radius: 6px;
+  color: inherit;
+  background: white;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: end;
+  gap: 9px;
+  margin-top: 7px;
+}
+.confirmation-dialog {
+  width: min(480px, calc(100% - 32px));
+  padding: 28px;
+  border: 2px solid #a03a42;
+  background: white;
+}
+.confirmation-warning {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  color: white;
+  background: #a03a42;
+  font-size: 36px;
+  font-weight: 800;
+}
+.confirmation-dialog h2 {
+  font-size: 23px;
+}
+.confirmation-dialog form {
+  margin-top: 8px;
+}
+.confirmation-dialog p {
+  margin: 0 0 20px;
+}
+.confirmation-dialog .dialog-actions {
+  margin-top: 0;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.confirmation-dialog button {
+  min-height: 40px;
+  padding: 0 14px;
+}
+.confirmation-dialog button.secondary {
+  color: #25444c;
+  border-color: var(--line);
+}
+.back-link {
+  display: inline-block;
+  margin-bottom: 30px;
+  font-size: 13px;
+}
+.album-open {
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fcfefe;
+  overflow-wrap: anywhere;
+}
+@keyframes slide-forward {
+  from {
+    opacity: 0.8;
+    transform: translateX(36px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes slide-backward {
+  from {
+    opacity: 0.8;
+    transform: translateX(-36px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.975);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+@keyframes scrim-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes scrim-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (max-width: 900px) {
+  .album-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 680px) {
+  .page {
+    width: calc(100% - 28px);
+    padding-top: 28px;
+  }
+  .page-heading {
+    align-items: center;
+  }
+  .brand {
+    font-size: 1.45rem;
+  }
+  .album-grid {
+    grid-template-columns: 1fr;
+  }
+  .pagination {
+    gap: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .album-card:hover,
+  .album-card:focus-within {
+    transform: none;
+  }
+}
