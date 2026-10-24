@@ -103,6 +103,7 @@ Cover --> Back["Empty back slot"]
 - `GET` and `HEAD` serve built assets with their media types; extensionless paths outside `/api`, `/health`, and `/assets` return the app entry point, including direct album links.
 - Missing assets, dotted paths, and unsupported frontend methods return `404`; unmatched `/api` requests return `404 {code: "not_found"}` as JSON. Existing API and health responses take precedence.
 - A backend build fails when the built frontend entry point is absent; the packaged backend includes the complete frontend asset tree.
+- Dagger prepares frontend assets for remote checks; the local launcher installs locked frontend dependencies and builds assets before starting services. Preparation failures stop startup with an explicit error.
 - A browser journey creates, lists, opens, reloads, renames, and deletes using real persistence.
 
 ## Doc Sync
@@ -110,3 +111,4 @@ Cover --> Back["Empty back slot"]
 - `specs/design.md` — Architecture constraints: state that all backend APIs use REST over HTTP.
 - `specs/contracts.md` — Contract inventory: identify SQLite migrations as the schema contract, including the four seeded AlbumStart layouts and connection-level foreign-key enforcement.
 - `specs/contracts.md` — Contract inventory: point to the OpenAPI specification for the five album routes and AlbumStart-template listing, including request, response, pagination, and error contracts.
+- `specs/operational.md` — Local service: the launcher installs locked frontend dependencies and builds assets before starting services; preparation failures stop startup.

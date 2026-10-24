@@ -9,7 +9,7 @@ lazy val root = (project in file("."))
       val frontend = baseDirectory.value.getParentFile / "frontend" / "dist"
       val packaged = (Compile / resourceManaged).value / "frontend"
       if (!(frontend / "index.html").isFile)
-        sys.error("Built frontend entry point missing; run npm ci --prefix frontend && npm run build --prefix frontend")
+        sys.error("Built frontend entry point missing; use Dagger for checks or python3 scripts/local.py for local development")
       IO.delete(packaged)
       IO.copyDirectory(frontend, packaged)
       (packaged ** "*").get().filter(_.isFile)
