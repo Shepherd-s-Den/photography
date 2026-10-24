@@ -52,7 +52,7 @@ lazy val root = (project in file("."))
       "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
       "org.typelevel"         %% "log4cats-slf4j"            % "2.7.0",
       "org.slf4j"              % "slf4j-simple"              % "2.0.20"  % Runtime,
-      "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test,
+      "org.typelevel"         %% "munit-cats-effect"         % "2.2.1"   % Test,
       "com.tngtech.archunit"   % "archunit"                  % "1.5.1"   % Test
     )
   )
