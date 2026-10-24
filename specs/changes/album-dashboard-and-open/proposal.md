@@ -24,8 +24,13 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 | `PATCH /api/albums/{id}` | `{title}` | `200 {id, title, createdAt}` |
 | `GET /api/albums/{id}` | — | `200 {id, title, synopsis, createdAt}` |
 | `DELETE /api/albums/{id}` | — | `204` no body |
+| `GET /api/templates/album-start` | — | `200 {templates: [{id, name, slots: [{kind, x, y, width, height}]}]}` |
 
 - An out-of-range page returns the last page; an empty collection returns page `1` with `totalPages: 0`.
+- List entries contain `{id, title, createdAt}`. A supplied page must be a 32-bit integer; values below `1` select the first page, and malformed or repeated page parameters return `400 {message}`.
+- JSON title requests require a string `title`; malformed JSON, missing or non-string titles, and blank trimmed titles return `400 {message}` with human-readable validation feedback.
+- Missing-album responses are `{code: "album_not_found"}`; service-failure responses are `{code: "service_failure"}`. JSON responses use `application/json`.
+- Template listing preserves ascending template-ID order and each template's slot order. Slot `kind` is `"photo"` or `"text"`; coordinates retain the catalog's geometry units.
 - Generate a stable UUID and immutable UTC `createdAt` for each album; list newest-first.
 - Seed four `AlbumStart` layouts from the legacy catalog: `1 Full L + Synopsis R`, `2×2 L + Synopsis R`, `3+2 L + Synopsis R`, and `P+2L L + Synopsis R`. Preserve their slot order and Saal 42×28 geometry, with synopsis always on the right; the template list API returns all four, and clients supply no template ID.
 - Creating an album uses the `AlbumStart` template with the lowest ID.
@@ -57,6 +62,10 @@ Cover --> Front["Empty front slot"]
 Cover --> Back["Empty back slot"]
 ```
 
+## Tradeoffs Accepted
+
+- Structured JSON validation and encoding add a JSON integration dependency at the HTTP boundary.
+
 ## Acceptance Criteria
 
 ### Dashboard
@@ -86,6 +95,7 @@ Cover --> Back["Empty back slot"]
 - New albums have a single `AlbumStart` spread and empty cover placements.
 - Create the valid initial composition atomically using the `AlbumStart` template with the lowest ID.
 - The dashboard fetches all `AlbumStart` templates for display; loading and failure states follow the same rules as albums.
+- `GET /api/templates/album-start` returns the complete ordered catalog and slot geometry; listing failure returns `500 service_failure`.
 - Malformed or unknown IDs on read, rename, or delete share `404 album_not_found`.
 - Service/incomplete-state failures use `500 service_failure`.
 - Service failures offer Retry; missing albums offer a route back to the dashboard.
@@ -95,4 +105,5 @@ Cover --> Back["Empty back slot"]
 ## Doc Sync
 
 - `specs/design.md` — Architecture constraints: state that all backend APIs use REST over HTTP.
-- `specs/contracts.md` — Contract inventory: point to the generated OpenAPI specification for the album API contract.
+- `specs/contracts.md` — Contract inventory: identify SQLite migrations as the schema contract, including the four seeded AlbumStart layouts and connection-level foreign-key enforcement.
+- `specs/contracts.md` — Contract inventory: point to the OpenAPI specification for the five album routes and AlbumStart-template listing, including request, response, pagination, and error contracts.

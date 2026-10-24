@@ -1,12 +1,17 @@
 package photography.app.runtime
 
 import cats.effect.{IO, IOApp}
+import cats.syntax.all.*
 import fs2.io.net.Network
+import org.http4s.HttpApp
 import org.http4s.ember.server.EmberServerBuilder
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import photography.adapters.http.HealthRoutes
+import photography.adapters.http.{AlbumApi, HealthRoutes, SpreadTemplateApi}
+import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteSpreadTemplateRepository}
 import photography.app.config.AppConfig
+import photography.capabilities.{Clock, IdGenerator}
+import photography.usecases.{AlbumService, SpreadTemplateService}
 import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
@@ -19,13 +24,19 @@ object Main extends IOApp.Simple:
         for
           _ <- resources.flyway.migrate
           _ <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
-          _ <- buildHttpServer(config).useForever.void
+          _ <- buildHttpServer(config, buildHttpApp(config, resources)).useForever.void
         yield ()
 
-  private[app] def buildHttpServer(config: AppConfig) =
+  private def buildHttpApp(config: AppConfig, resources: AppResourcesBuilder.AppResources[IO]) =
+    val templates       = SpreadTemplateService.make(SqliteSpreadTemplateRepository.make[IO](resources.sqlite))
+    val albumRepository = SqliteAlbumRepository.make[IO](resources.sqlite)
+    val albums          = AlbumService.make(albumRepository, templates, IdGenerator.make[IO], Clock.make[IO], config.albums.pageSize)
+    (HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes).orNotFound
+
+  private def buildHttpServer(config: AppConfig, app: HttpApp[IO]) =
     EmberServerBuilder
       .default[IO]
       .withHost(config.http.host)
       .withPort(config.http.port)
-      .withHttpApp(HealthRoutes.routes[IO].orNotFound)
+      .withHttpApp(app)
       .build
