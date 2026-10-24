@@ -85,7 +85,7 @@ Every product change follows the [SDD skill](.agents/skills/sdd/SKILL.md). Its p
 
 ## Pull requests
 
-- Use one branch per change, named `feature/<slug>` or `investigation/<slug>`.
+- Follow the [SDD feature lifecycle](.agents/skills/sdd/SKILL.md#setup) for branch naming and reuse across successive PRs.
 - Keep implementation PRs focused on one reviewable behavior or seam. Link the merged proposal and identify the intended review focus.
 - Commit subjects are imperative and no longer than 72 characters. Explain the reason in the body when the diff alone does not.
 
