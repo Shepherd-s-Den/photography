@@ -40,7 +40,7 @@ lazy val root = (project in file("."))
       "org.typelevel"         %% "doobie-core"               % "1.0.0-RC13",
       "org.typelevel"         %% "doobie-hikari"             % "1.0.0-RC13",
       "com.github.pureconfig" %% "pureconfig-core"           % "0.17.9",
-      "com.github.pureconfig" %% "pureconfig-generic-scala3" % "0.17.9",
+      "com.github.pureconfig" %% "pureconfig-generic-scala3" % "0.17.10",
       "com.github.pureconfig" %% "pureconfig-cats-effect"    % "0.17.10",
       "com.github.pureconfig" %% "pureconfig-http4s"         % "0.17.9",
       "com.github.pureconfig" %% "pureconfig-ip4s"           % "0.17.9",
