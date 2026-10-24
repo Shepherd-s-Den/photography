@@ -1,0 +1,214 @@
+package photography.adapters.http
+
+import cats.data.NonEmptyList
+import cats.effect.{IO, Ref}
+import cats.syntax.all.*
+import io.circe.Json
+import io.circe.jawn.parse
+import io.github.iltotore.iron.*
+import munit.CatsEffectSuite
+import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
+import org.http4s.headers.`Content-Type`
+import photography.domain.album.{Album, AlbumId, AlbumName}
+import photography.domain.layout.*
+import photography.usecases.{AlbumService, SpreadTemplateService}
+import photography.usecases.AlbumService.*
+import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
+
+import java.time.Instant
+import java.util.UUID
+
+final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
+  private val id       = AlbumId(buildUuid(1))
+  private val box      = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
+  private val template = SpreadTemplate(
+    SpreadTemplateId(buildUuid(2)),
+    "Synopsis right".refineUnsafe,
+    SpreadTemplateKind.AlbumStart,
+    NonEmptyList.of(SpreadTemplateSlot.Photo(box), SpreadTemplateSlot.Text(box))
+  )
+  private val start     = Spread.AlbumStart(SpreadId(buildUuid(3)), id, template.id, Vector.empty, Vector.empty)
+  private val album     = Album(id, "Coast".refineUnsafe, "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), NonEmptyList.one(start: Spread))
+  private val metadata  = s"""{"id":"${id.value}","title":"Coast","createdAt":"2026-10-24T10:00:00.123Z"}"""
+  private val albumPath = s"/api/albums/${id.value}"
+  private val jsonMediaType = MediaType.application.json.some
+
+  test("should list exact album metadata and forward default and explicit pages"):
+    val refs              = Refs()
+    val page              = AlbumPage(Vector(album), 2, 6, 7, 2)
+    val server            = buildAlbumApi(refs, listAlbumsResult = ListAlbumsResult.Listed(page))
+    val paths             = Vector("/api/albums", "/api/albums?page=99", "/api/albums?page=0", "/api/albums?page=-1")
+    val emptyServer       = buildAlbumApi(Refs())
+    val expectedPage      = json(s"""{"albums":[$metadata],"page":2,"pageSize":6,"totalAlbums":7,"totalPages":2}""")
+    val expectedEmpty     = json("""{"albums":[],"page":1,"pageSize":6,"totalAlbums":0,"totalPages":0}""")
+    val expectedResponses = Vector.fill(paths.size)(ApiResponse(Status.Ok, jsonMediaType, expectedPage.some))
+
+    for
+      responses <- paths.traverse(send(server, Method.GET, _, ""))
+      empty     <- send(emptyServer, Method.GET, "/api/albums", "")
+      calls     <- refs.calls.get
+    yield
+      assertEquals(responses, expectedResponses)
+      assertEquals(empty, ApiResponse(Status.Ok, jsonMediaType, expectedEmpty.some))
+      assertEquals(calls, Vector("list:1", "list:99", "list:0", "list:-1"))
+
+  test("should reject malformed and repeated page parameters without calling the application"):
+    val refs   = Refs()
+    val server = buildAlbumApi(refs)
+    val pages  = Vector("", "no", "1.5", "2147483648", "1&page=2")
+
+    for
+      responses <- pages.traverse(page => send(server, Method.GET, s"/api/albums?page=$page", ""))
+      calls     <- refs.calls.get
+    yield
+      assertEquals(responses.map(_.status), Vector.fill(pages.size)(Status.BadRequest))
+      assertEquals(responses.map(_.maybeContentType), Vector.fill(pages.size)(jsonMediaType))
+      assert(responses.forall(hasValidationFeedback))
+      assertEquals(calls, Vector.empty)
+
+  test("should trim create and rename titles and return only mutation metadata"):
+    val refs             = Refs()
+    val server           = buildAlbumApi(refs)
+    val expectedMetadata = json(metadata).some
+
+    for
+      created <- send(server, Method.POST, "/api/albums", """{"title":"  Coast  "}""")
+      renamed <- send(server, Method.PATCH, albumPath, """{"title":"\tCoast\n"}""")
+      calls   <- refs.calls.get
+    yield
+      assertEquals(created, ApiResponse(Status.Created, jsonMediaType, expectedMetadata))
+      assertEquals(renamed, ApiResponse(Status.Ok, jsonMediaType, expectedMetadata))
+      assertEquals(calls, Vector("create:Coast", s"rename:${id.value}:Coast"))
+
+  test("should return validation feedback for invalid title bodies without calling the application"):
+    val refs       = Refs()
+    val server     = buildAlbumApi(refs)
+    val operations = Vector(Method.POST -> "/api/albums", Method.PATCH -> albumPath)
+    val bodies     = Vector("""{"title":""}""", """{"title":" \t\n "}""", "{}", """{"title":null}""", """{"title":3}""", "{", "[]")
+    val requests   = operations.flatMap { case (method, path) => bodies.map(body => (method, path, body)) }
+
+    for
+      responses <- requests.traverse { case (method, path, body) => send(server, method, path, body) }
+      calls     <- refs.calls.get
+    yield
+      assertEquals(responses.map(_.status), Vector.fill(requests.size)(Status.BadRequest))
+      assertEquals(responses.map(_.maybeContentType), Vector.fill(requests.size)(jsonMediaType))
+      assert(responses.forall(hasValidationFeedback))
+      assertEquals(calls, Vector.empty)
+
+  test("should read metadata without composition and delete with an empty 204 response"):
+    val refs     = Refs()
+    val server   = buildAlbumApi(refs)
+    val expected = json(s"""{"id":"${id.value}","title":"Coast","synopsis":"A synopsis","createdAt":"2026-10-24T10:00:00.123Z"}""")
+
+    for
+      found   <- send(server, Method.GET, albumPath, "")
+      deleted <- send(server, Method.DELETE, albumPath, "")
+      calls   <- refs.calls.get
+    yield
+      assertEquals(found, ApiResponse(Status.Ok, jsonMediaType, expected.some))
+      assertEquals(deleted, ApiResponse(Status.NoContent, maybeContentType = None, maybeBody = None))
+      assertEquals(calls, Vector(s"get:${id.value}", s"delete:${id.value}"))
+
+  test("should give malformed and unknown album IDs the same missing-resource response"):
+    val refs   = Refs()
+    val server = buildAlbumApi(
+      refs,
+      getAlbumResult = GetAlbumResult.NotFound,
+      renameAlbumResult = RenameAlbumResult.NotFound,
+      deleteAlbumResult = DeleteAlbumResult.NotFound
+    )
+    val paths        = Vector(albumPath, "/api/albums/not-a-uuid", "/api/albums/1-1-1-1-1")
+    val requests     = Vector(Method.GET, Method.PATCH, Method.DELETE).flatMap(method => paths.map(method -> _))
+    val expectedBody = json("""{"code":"album_not_found"}""")
+    val expected     = Vector.fill(requests.size)(ApiResponse(Status.NotFound, jsonMediaType, expectedBody.some))
+
+    for
+      responses <- requests.traverse { case (method, path) => send(server, method, path, """{"title":"Coast"}""") }
+      calls     <- refs.calls.get
+    yield
+      assertEquals(responses, expected)
+      assertEquals(calls, Vector(s"get:${id.value}", s"rename:${id.value}:Coast", s"delete:${id.value}"))
+
+  test("should translate every application's service failure to the same JSON error"):
+    val server = buildAlbumApi(
+      Refs(),
+      listAlbumsResult = ListAlbumsResult.Failed,
+      createAlbumResult = CreateAlbumResult.Failed,
+      getAlbumResult = GetAlbumResult.Failed,
+      renameAlbumResult = RenameAlbumResult.Failed,
+      deleteAlbumResult = DeleteAlbumResult.Failed,
+      listAlbumStartTemplatesResult = ListAlbumStartTemplatesResult.Failed
+    )
+    val operations = Vector(
+      Method.GET    -> "/api/albums",
+      Method.POST   -> "/api/albums",
+      Method.GET    -> albumPath,
+      Method.PATCH  -> albumPath,
+      Method.DELETE -> albumPath,
+      Method.GET    -> "/api/templates/album-start"
+    )
+    val expectedBody = json("""{"code":"service_failure"}""")
+    val expected     = Vector.fill(operations.size)(ApiResponse(Status.InternalServerError, jsonMediaType, expectedBody.some))
+
+    for
+      responses <- operations.traverse { case (method, path) => send(server, method, path, """{"title":"Coast"}""") }
+    yield assertEquals(responses, expected)
+
+  test("should list AlbumStart templates with ordered slot kinds and original geometry"):
+    val catalog        = NonEmptyList.of(template, template.copy(id = SpreadTemplateId(buildUuid(4)), name = "Second".refineUnsafe))
+    val server         = buildAlbumApi(Refs(), listAlbumStartTemplatesResult = ListAlbumStartTemplatesResult.Listed(catalog))
+    val expectedPhoto  = """{"kind":"photo","x":0.0,"y":0.0,"width":21.0,"height":28.0}"""
+    val expectedText   = """{"kind":"text","x":0.0,"y":0.0,"width":21.0,"height":28.0}"""
+    val expectedFirst  = s"""{"id":"${template.id.value}","name":"Synopsis right","slots":[$expectedPhoto,$expectedText]}"""
+    val expectedSecond = s"""{"id":"${buildUuid(4)}","name":"Second","slots":[$expectedPhoto,$expectedText]}"""
+    val expected       = json(s"""{"templates":[$expectedFirst,$expectedSecond]}""")
+
+    for
+      response <- send(server, Method.GET, "/api/templates/album-start", "")
+    yield assertEquals(response, ApiResponse(Status.Ok, jsonMediaType, expected.some))
+
+  final private case class Refs():
+    val calls: Ref[IO, Vector[String]] = Ref.unsafe(Vector.empty)
+
+  final private case class ApiResponse(status: Status, maybeContentType: Option[MediaType], maybeBody: Option[Json])
+
+  // scalafix:off DisableSyntax.defaultArgs
+  private def buildAlbumApi(
+      refs: Refs,
+      listAlbumsResult: ListAlbumsResult = ListAlbumsResult.Listed(AlbumPage(Vector.empty, 1, 6, 0, 0)),
+      createAlbumResult: CreateAlbumResult = CreateAlbumResult.Created(album),
+      getAlbumResult: GetAlbumResult = GetAlbumResult.Found(album),
+      renameAlbumResult: RenameAlbumResult = RenameAlbumResult.Renamed(album),
+      deleteAlbumResult: DeleteAlbumResult = DeleteAlbumResult.Deleted,
+      listAlbumStartTemplatesResult: ListAlbumStartTemplatesResult = ListAlbumStartTemplatesResult.Listed(NonEmptyList.one(template))
+  ) =
+    val albums = new AlbumService[IO]:
+      override def list(page: Int): IO[ListAlbumsResult]           = refs.calls.update(_ :+ s"list:$page").as(listAlbumsResult)
+      override def create(title: AlbumName): IO[CreateAlbumResult] = refs.calls.update(_ :+ s"create:$title").as(createAlbumResult)
+      override def get(albumId: AlbumId): IO[GetAlbumResult]       = refs.calls.update(_ :+ s"get:${albumId.value}").as(getAlbumResult)
+      override def rename(albumId: AlbumId, title: AlbumName): IO[RenameAlbumResult] =
+        refs.calls.update(_ :+ s"rename:${albumId.value}:$title").as(renameAlbumResult)
+      override def delete(albumId: AlbumId): IO[DeleteAlbumResult] = refs.calls.update(_ :+ s"delete:${albumId.value}").as(deleteAlbumResult)
+    val spreads = new SpreadTemplateService[IO]:
+      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = listAlbumStartTemplatesResult.pure[IO]
+    AlbumApi.make(albums, spreads).routes.orNotFound
+  // scalafix:on DisableSyntax.defaultArgs
+
+  private def send(server: HttpApp[IO], method: Method, path: String, body: String) =
+    val request = Request[IO](method, Uri.unsafeFromString(path)).withEntity(body).putHeaders(`Content-Type`(MediaType.application.json))
+
+    for
+      response <- server.run(request)
+      body     <- response.as[String]
+    yield ApiResponse(response.status, response.contentType.map(_.mediaType), Option.when(body.nonEmpty)(json(body)))
+
+  private def hasValidationFeedback(response: ApiResponse) =
+    response.maybeBody.exists: body =>
+      body.asObject.exists(_.keys.toSet === Set("message")) && body.hcursor.get[String]("message").toOption.exists(_.nonEmpty)
+
+  private def json(value: String) =
+    parse(value).fold(error => fail(error.message), identity)
+
+  private def buildUuid(index: Int) =
+    new UUID(0L, index.toLong)
