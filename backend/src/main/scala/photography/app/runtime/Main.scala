@@ -7,7 +7,7 @@ import org.http4s.HttpApp
 import org.http4s.ember.server.EmberServerBuilder
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import photography.adapters.http.{AlbumApi, HealthRoutes}
+import photography.adapters.http.{AlbumApi, HealthRoutes, SpreadTemplateApi}
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteSpreadTemplateRepository}
 import photography.app.config.AppConfig
 import photography.capabilities.{Clock, IdGenerator}
@@ -36,7 +36,7 @@ object Main extends IOApp.Simple:
       Clock.make[IO],
       config.albums.pageSize
     )
-    (HealthRoutes.routes[IO] <+> AlbumApi.make(albums, templates).routes).orNotFound
+    (HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes).orNotFound
 
   private def buildHttpServer(config: AppConfig, app: HttpApp[IO]) =
     EmberServerBuilder

@@ -5,41 +5,37 @@ import cats.syntax.all.*
 import io.circe.{Decoder, Encoder}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import org.http4s.{HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.{HttpRoutes, MessageBodyFailure, Query, QueryParamDecoder, QueryParameterValue, Request}
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.{Album, AlbumId, AlbumName}
-import photography.domain.layout.{SpreadTemplate, SpreadTemplateSlot}
-import photography.usecases.{AlbumService, SpreadTemplateService}
+import photography.usecases.AlbumService
 import photography.usecases.AlbumService.*
-import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 trait AlbumApi[F[_]]:
   def routes: HttpRoutes[F]
 
 object AlbumApi:
-  def make[F[_]: Async](albums: AlbumService[F], templates: SpreadTemplateService[F]): AlbumApi[F] =
-    new LiveAlbumApi(albums, templates)
+  def make[F[_]: Async](albums: AlbumService[F]): AlbumApi[F] =
+    new LiveAlbumApi(albums)
 
-  final private class LiveAlbumApi[F[_]: Async](albums: AlbumService[F], templates: SpreadTemplateService[F])
-      extends AlbumApi[F] with Http4sDsl[F]:
+  final private class LiveAlbumApi[F[_]: Async](albums: AlbumService[F]) extends AlbumApi[F] with Http4sDsl[F]:
     override def routes: HttpRoutes[F] =
       HttpRoutes.of[F] {
-        case request @ GET -> Root / "api" / "albums" :? Page(page) if request.multiParams.get("page").forall(_.size === 1) =>
-          list(page)
-        case GET -> Root / "api" / "albums"                              => BadRequest(Map("message" -> "Supply page once as a 32-bit integer"))
+        case request @ GET -> Root / "api" / "albums"                    => list(request.uri.query)
         case request @ POST -> Root / "api" / "albums"                   => create(request)
         case GET -> Root / "api" / "albums" / AlbumIdVar(id)             => get(id)
         case request @ PATCH -> Root / "api" / "albums" / AlbumIdVar(id) => rename(id, request)
         case DELETE -> Root / "api" / "albums" / AlbumIdVar(id)          => delete(id)
         case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _       => albumNotFound
-        case GET -> Root / "api" / "templates" / "album-start"           => listTemplates
       }
 
-    private def list(page: Int) =
-      albums.list(page).flatMap:
-        case ListAlbumsResult.Listed(selected) => Ok(selected)
-        case ListAlbumsResult.Failed           => serviceFailure
+    private def list(query: Query) = query match
+      case Page(page) =>
+        albums.list(page).flatMap:
+          case ListAlbumsResult.Listed(selected) => Ok(selected)
+          case ListAlbumsResult.Failed           => serviceFailure
+      case _ => BadRequest(Map("message" -> "Supply page once as a 32-bit integer"))
 
     private def create(request: Request[F]) =
       request.as[AlbumName].flatMap(albums.create).flatMap {
@@ -66,16 +62,17 @@ object AlbumApi:
         case DeleteAlbumResult.NotFound => albumNotFound
         case DeleteAlbumResult.Failed   => serviceFailure
 
-    private def listTemplates =
-      templates.listAlbumStartTemplates.flatMap:
-        case listed: ListAlbumStartTemplatesResult.Listed => Ok(listed)
-        case ListAlbumStartTemplatesResult.Failed         => serviceFailure
-
     private def albumNotFound  = NotFound(Map("code" -> "album_not_found"))
     private def serviceFailure = InternalServerError(Map("code" -> "service_failure"))
     private val invalidTitle   = Map("message" -> "Expected a JSON object with a nonblank string title")
 
-    private object Page extends QueryParamDecoderMatcherWithDefault[Int]("page", 1)
+    private object Page:
+      def unapply(query: Query): Option[Int] =
+        // multiParams drops valueless repetitions, so enforce cardinality before decoding.
+        query.pairs.collect { case ("page", value) => value } match
+          case Vector()            => 1.some
+          case Vector(Some(value)) => QueryParamDecoder[Int].decode(QueryParameterValue(value)).toOption
+          case _                   => None
 
     private object AlbumIdVar:
       def unapply(value: String): Option[AlbumId] =
@@ -94,14 +91,3 @@ object AlbumApi:
 
     private given Encoder[AlbumPage] = Encoder.forProduct5("albums", "page", "pageSize", "totalAlbums", "totalPages"): page =>
       (page.albums, page.page, page.pageSize, page.totalAlbums, page.totalPages)
-
-    private given Encoder[SpreadTemplateSlot] = Encoder.forProduct5("kind", "x", "y", "width", "height"): slot =>
-      val (kind, box) = slot match
-        case SpreadTemplateSlot.Photo(box) => ("photo", box)
-        case SpreadTemplateSlot.Text(box)  => ("text", box)
-      (kind, box.x: Double, box.y: Double, box.width: Double, box.height: Double)
-
-    private given Encoder[SpreadTemplate] = Encoder.forProduct3("id", "name", "slots"): template =>
-      (template.id.value.toString, template.name: String, template.slots.toList)
-
-    private given Encoder[ListAlbumStartTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)

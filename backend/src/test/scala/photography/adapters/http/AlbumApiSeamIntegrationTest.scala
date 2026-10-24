@@ -11,23 +11,15 @@ import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
 import org.http4s.headers.`Content-Type`
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.*
-import photography.usecases.{AlbumService, SpreadTemplateService}
+import photography.usecases.AlbumService
 import photography.usecases.AlbumService.*
-import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.time.Instant
 import java.util.UUID
 
 final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
-  private val id       = AlbumId(buildUuid(1))
-  private val box      = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
-  private val template = SpreadTemplate(
-    SpreadTemplateId(buildUuid(2)),
-    "Synopsis right".refineUnsafe,
-    SpreadTemplateKind.AlbumStart,
-    NonEmptyList.of(SpreadTemplateSlot.Photo(box), SpreadTemplateSlot.Text(box))
-  )
-  private val start     = Spread.AlbumStart(SpreadId(buildUuid(3)), id, template.id, Vector.empty, Vector.empty)
+  private val id        = AlbumId(buildUuid(1))
+  private val start     = Spread.AlbumStart(SpreadId(buildUuid(3)), id, SpreadTemplateId(buildUuid(2)), Vector.empty, Vector.empty)
   private val album     = Album(id, "Coast".refineUnsafe, "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), NonEmptyList.one(start: Spread))
   private val metadata  = s"""{"id":"${id.value}","title":"Coast","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath = s"/api/albums/${id.value}"
@@ -53,16 +45,16 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(calls, Vector("list:1", "list:99", "list:0", "list:-1"))
 
   test("should reject malformed and repeated page parameters without calling the application"):
-    val refs   = Refs()
-    val server = buildAlbumApi(refs)
-    val pages  = Vector("", "no", "1.5", "2147483648", "1&page=2")
+    val refs    = Refs()
+    val server  = buildAlbumApi(refs)
+    val queries = Vector("page", "page=", "page=no", "page=1.5", "page=2147483648", "page=1&page=2", "page=1&page=no", "page=1&page")
 
     for
-      responses <- pages.traverse(page => send(server, Method.GET, s"/api/albums?page=$page", ""))
+      responses <- queries.traverse(query => send(server, Method.GET, s"/api/albums?$query", ""))
       calls     <- refs.calls.get
     yield
-      assertEquals(responses.map(_.status), Vector.fill(pages.size)(Status.BadRequest))
-      assertEquals(responses.map(_.maybeContentType), Vector.fill(pages.size)(jsonMediaType))
+      assertEquals(responses.map(_.status), Vector.fill(queries.size)(Status.BadRequest))
+      assertEquals(responses.map(_.maybeContentType), Vector.fill(queries.size)(jsonMediaType))
       assert(responses.forall(hasValidationFeedback))
       assertEquals(calls, Vector.empty)
 
@@ -137,16 +129,14 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       createAlbumResult = CreateAlbumResult.Failed,
       getAlbumResult = GetAlbumResult.Failed,
       renameAlbumResult = RenameAlbumResult.Failed,
-      deleteAlbumResult = DeleteAlbumResult.Failed,
-      listAlbumStartTemplatesResult = ListAlbumStartTemplatesResult.Failed
+      deleteAlbumResult = DeleteAlbumResult.Failed
     )
     val operations = Vector(
       Method.GET    -> "/api/albums",
       Method.POST   -> "/api/albums",
       Method.GET    -> albumPath,
       Method.PATCH  -> albumPath,
-      Method.DELETE -> albumPath,
-      Method.GET    -> "/api/templates/album-start"
+      Method.DELETE -> albumPath
     )
     val expectedBody = json("""{"code":"service_failure"}""")
     val expected     = Vector.fill(operations.size)(ApiResponse(Status.InternalServerError, jsonMediaType, expectedBody.some))
@@ -154,19 +144,6 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     for
       responses <- operations.traverse { case (method, path) => send(server, method, path, """{"title":"Coast"}""") }
     yield assertEquals(responses, expected)
-
-  test("should list AlbumStart templates with ordered slot kinds and original geometry"):
-    val catalog        = NonEmptyList.of(template, template.copy(id = SpreadTemplateId(buildUuid(4)), name = "Second".refineUnsafe))
-    val server         = buildAlbumApi(Refs(), listAlbumStartTemplatesResult = ListAlbumStartTemplatesResult.Listed(catalog))
-    val expectedPhoto  = """{"kind":"photo","x":0.0,"y":0.0,"width":21.0,"height":28.0}"""
-    val expectedText   = """{"kind":"text","x":0.0,"y":0.0,"width":21.0,"height":28.0}"""
-    val expectedFirst  = s"""{"id":"${template.id.value}","name":"Synopsis right","slots":[$expectedPhoto,$expectedText]}"""
-    val expectedSecond = s"""{"id":"${buildUuid(4)}","name":"Second","slots":[$expectedPhoto,$expectedText]}"""
-    val expected       = json(s"""{"templates":[$expectedFirst,$expectedSecond]}""")
-
-    for
-      response <- send(server, Method.GET, "/api/templates/album-start", "")
-    yield assertEquals(response, ApiResponse(Status.Ok, jsonMediaType, expected.some))
 
   final private case class Refs():
     val calls: Ref[IO, Vector[String]] = Ref.unsafe(Vector.empty)
@@ -180,8 +157,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       createAlbumResult: CreateAlbumResult = CreateAlbumResult.Created(album),
       getAlbumResult: GetAlbumResult = GetAlbumResult.Found(album),
       renameAlbumResult: RenameAlbumResult = RenameAlbumResult.Renamed(album),
-      deleteAlbumResult: DeleteAlbumResult = DeleteAlbumResult.Deleted,
-      listAlbumStartTemplatesResult: ListAlbumStartTemplatesResult = ListAlbumStartTemplatesResult.Listed(NonEmptyList.one(template))
+      deleteAlbumResult: DeleteAlbumResult = DeleteAlbumResult.Deleted
   ) =
     val albums = new AlbumService[IO]:
       override def list(page: Int): IO[ListAlbumsResult]           = refs.calls.update(_ :+ s"list:$page").as(listAlbumsResult)
@@ -190,9 +166,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       override def rename(albumId: AlbumId, title: AlbumName): IO[RenameAlbumResult] =
         refs.calls.update(_ :+ s"rename:${albumId.value}:$title").as(renameAlbumResult)
       override def delete(albumId: AlbumId): IO[DeleteAlbumResult] = refs.calls.update(_ :+ s"delete:${albumId.value}").as(deleteAlbumResult)
-    val spreads = new SpreadTemplateService[IO]:
-      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = listAlbumStartTemplatesResult.pure[IO]
-    AlbumApi.make(albums, spreads).routes.orNotFound
+    AlbumApi.make(albums).routes.orNotFound
   // scalafix:on DisableSyntax.defaultArgs
 
   private def send(server: HttpApp[IO], method: Method, path: String, body: String) =
