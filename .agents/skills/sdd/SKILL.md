@@ -16,7 +16,9 @@ Make the smallest change that satisfies the request. Keep each rule in one ownin
 
 ## Setup
 
-**Single-checkout feature lifecycle:** execute the entire feature sequentially in the primary worktree on one `feature/<slug>` branch, from spike and spec through implementation and archive. Reuse that branch for successive PRs; after each merge, rebase it onto `main` before the next slice. Keep existing local edits intact. Use this checkout for gates and the local app; additional execution agents, worktrees, and clones are unnecessary. Fresh review agents follow `reviewer.md`.
+**Single-checkout feature lifecycle:** execute the entire feature sequentially in the primary worktree on one `feature/<slug>` branch named for the overall feature/spec, from spike and spec through implementation and archive. Keep existing local edits intact. Use this checkout for gates and the local app; additional execution agents, worktrees, and clones are unnecessary. Fresh review agents follow `reviewer.md`.
+
+**Slice loop:** complete the current slice and the PR-opening gate below, then open its PR against `main`. Wait for the maintainer-authorized merge, fetch updated `main`, and rebase the same feature branch onto it before starting the next slice. Retain only work not already merged; after a squash merge, reconcile the merged slice's commits rather than replaying them. Verify that the branch includes updated `main` with no already-merged slice commits remaining, and record the new baseline in the local checklist. Continue the next slice on that same branch through the final archive PR.
 
 For each feature, pin a stable `main` revision. Keep spike snapshots, scratch data, and phase evidence under ignored `.agent-work/<slug>/`; use the real app and its local launcher, adding only the behavior under exploration.
 
