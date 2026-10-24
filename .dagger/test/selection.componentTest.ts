@@ -42,7 +42,11 @@ describe("selectAffected", () => {
   });
 
   it("should return all when every component changed", () => {
-    const selection = Selection.selectAffected(["backend/build.sbt", "frontend/index.html", ".dagger/x.ts"]);
+    const selection = Selection.selectAffected([
+      "backend/build.sbt",
+      "frontend/index.html",
+      ".dagger/x.ts",
+    ]);
     expect(selection).toEqual({ kind: "all" });
   });
 });
