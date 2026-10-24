@@ -1,0 +1,224 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Photography album API",
+    "version": "1.0.0",
+    "description": "Same-origin REST API. JSON responses use application/json. Unmatched /api requests return 404 with {\"code\":\"not_found\"}."
+  },
+  "servers": [{ "url": "/" }],
+  "paths": {
+    "/api/albums": {
+      "get": {
+        "operationId": "listAlbums",
+        "summary": "List album metadata newest-first",
+        "description": "Orders by creation time descending, then ID descending. Values below 1 select the first page; values above the available range select the last page. An empty collection returns page 1 with totalPages 0.",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Supply at most once as a 32-bit integer. Malformed, valueless or repeated parameters return 400.",
+            "schema": { "type": "integer", "format": "int32", "minimum": -2147483648, "maximum": 2147483647, "default": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Selected six-album page",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlbumPage" } } }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      },
+      "post": {
+        "operationId": "createAlbum",
+        "summary": "Create an album",
+        "description": "Atomically creates an empty synopsis, the lowest-ID AlbumStart template's slots with empty placements, and both empty cover sides. The server assigns a stable UUID and immutable UTC creation time.",
+        "requestBody": { "$ref": "#/components/requestBodies/Title" },
+        "responses": {
+          "201": { "$ref": "#/components/responses/AlbumSummary" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "description": "Canonical UUID representation; malformed and unknown IDs share the album_not_found response.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "get": {
+        "operationId": "getAlbum",
+        "summary": "Read album metadata without composition",
+        "responses": {
+          "200": {
+            "description": "Album title, synopsis and immutable metadata",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlbumMetadata" } } }
+          },
+          "404": { "$ref": "#/components/responses/AlbumNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      },
+      "patch": {
+        "operationId": "renameAlbum",
+        "summary": "Rename an album",
+        "description": "Changes only the title; identity, creation time, synopsis and composition remain unchanged.",
+        "requestBody": { "$ref": "#/components/requestBodies/Title" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/AlbumSummary" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/AlbumNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAlbum",
+        "summary": "Delete an album and its owned composition",
+        "responses": {
+          "204": { "description": "Deleted; no response body" },
+          "404": { "$ref": "#/components/responses/AlbumNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/templates/album-start": {
+      "get": {
+        "operationId": "listAlbumStartTemplates",
+        "summary": "List the complete AlbumStart template catalog",
+        "description": "Ascending template-ID order with slots in template order. Seeded geometry retains the legacy catalog's percentages of full spread width and height, without rescaling. Each template has photo slots and one right-hand synopsis text slot; clients supply no template ID when creating albums.",
+        "responses": {
+          "200": {
+            "description": "Complete ordered catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["templates"],
+                  "properties": {
+                    "templates": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/AlbumStartTemplate" } }
+                  }
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    }
+  },
+  "components": {
+    "requestBodies": {
+      "Title": {
+        "required": true,
+        "description": "A string title, trimmed before nonblank validation. Malformed JSON, missing or non-string titles, and blank trimmed titles return validation feedback.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["title"],
+              "properties": { "title": { "type": "string", "minLength": 1 } }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "AlbumSummary": {
+        "description": "Album identity, trimmed title and immutable creation time",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlbumSummary" } } }
+      },
+      "ValidationFailure": {
+        "description": "Human-readable validation feedback",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["message"],
+              "properties": { "message": { "type": "string", "minLength": 1 } },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "AlbumNotFound": {
+        "description": "Malformed album ID or album not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["code"],
+              "properties": { "code": { "const": "album_not_found" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "ServiceFailure": {
+        "description": "Infrastructure failure or incomplete persisted composition",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["code"],
+              "properties": { "code": { "const": "service_failure" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "AlbumSummary": {
+        "type": "object",
+        "required": ["id", "title", "createdAt"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string", "minLength": 1 },
+          "createdAt": { "type": "string", "format": "date-time", "description": "Immutable UTC instant" }
+        }
+      },
+      "AlbumMetadata": {
+        "allOf": [
+          { "$ref": "#/components/schemas/AlbumSummary" },
+          { "type": "object", "required": ["synopsis"], "properties": { "synopsis": { "type": "string" } } }
+        ],
+        "unevaluatedProperties": false
+      },
+      "AlbumPage": {
+        "type": "object",
+        "required": ["albums", "page", "pageSize", "totalAlbums", "totalPages"],
+        "properties": {
+          "albums": { "type": "array", "maxItems": 6, "items": { "$ref": "#/components/schemas/AlbumSummary" } },
+          "page": { "type": "integer", "minimum": 1 },
+          "pageSize": { "const": 6 },
+          "totalAlbums": { "type": "integer", "minimum": 0 },
+          "totalPages": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "AlbumStartTemplate": {
+        "type": "object",
+        "required": ["id", "name", "slots"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "minLength": 1 },
+          "slots": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/TemplateSlot" } }
+        }
+      },
+      "TemplateSlot": {
+        "type": "object",
+        "required": ["kind", "x", "y", "width", "height"],
+        "properties": {
+          "kind": { "enum": ["photo", "text"] },
+          "x": { "type": "number", "minimum": 0 },
+          "y": { "type": "number", "minimum": 0 },
+          "width": { "type": "number", "exclusiveMinimum": 0 },
+          "height": { "type": "number", "exclusiveMinimum": 0 }
+        }
+      }
+    }
+  }
+}
