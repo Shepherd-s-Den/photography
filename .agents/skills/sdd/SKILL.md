@@ -40,6 +40,8 @@ When executor and reviewer disagree, this file decides — the reviewer only rep
 
 ## Phases
 
+Before drafting a spec, read the archived [Album dashboard and open](../../../specs/changes/archive/2026-10-24-album-dashboard-and-open/proposal.md) as a worked example of contract-first structure, diagrams and observable criteria. Derive product facts from current living docs.
+
 1. **Classify** — `feature` or `investigation`; branch named to match. Per AGENTS.md, a spec is required only when the change adds or revises knowledge a living doc should record; only the maintainer may waive that requirement, explicitly. Gate: the classification, the spec requirement (or waiver), and the build-vs-reuse/split-now call (`DESIGN-PRINCIPLES.md` §7) are recorded.
 2. **Spike** — once per feature, before its spec, using the workflow above. Gate: the user confirms the journey and its findings are recorded for the spec; reuse that confirmation across its Implementation PRs.
 3. **Spec PR** — After spike confirmation, draft structure first and use the active model, living docs, and spike as authority. Run the Markdown wrapping check on the proposal and every changed Markdown file; failure blocks the PR. Pass `spec-quality.md`, keep criteria observable and Doc Sync minimal, complete both independent rounds in [`reviewer.md`](reviewer.md), adjudicate findings, and merge before implementation.

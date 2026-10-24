@@ -4,7 +4,15 @@
 
 ## Overview
 
-This repository is the starting point for a photography application. Product concepts and user workflows will be recorded here when established by reviewed change specs.
+The application manages persisted albums through a SolidJS dashboard and serves the frontend and backend API on one origin.
+
+## Album workflow
+
+The dashboard at `/` shows existing albums newest-first, six per page, with 42:28 cover placeholders and directional pagination that retains the current cards while loading. An empty collection leaves the album area blank.
+
+A single top-right Add album action opens a centered dialog. Creation and rename trim titles, reject blank input and preserve input on failure; deletion requires confirmation and falls back to the last available page. Dialogs support keyboard and pointer use and restore focus when closed.
+
+Selecting a card opens `/albums/{id}`; direct links and reloads load the same read-only title and synopsis beneath navigation. Creation and opening are separate actions. Failed reads show no partial metadata; service failures offer Retry, and missing albums link back to the dashboard.
 
 ## Domain model
 
@@ -42,10 +50,15 @@ flowchart LR
 
 The Scala domain package defines records, identities, refined scalar types, and closed alternatives. Use cases enforce cross-record and lifecycle rules; adapters validate external values and route mutations through use cases.
 
-### Composition and values
+### Album composition
 
 - Each album has one `AlbumStart` and one `Cover`; each chapter belongs to an album and has one `ChapterStart`; each photo belongs to a chapter.
+- An album's spreads are non-empty and ordered; the first spread is an `AlbumStart`, followed by chapter blocks, each a `ChapterStart` followed by zero or more `PhotosOnly` spreads.
 - Albums have at most 20 chapters at unique positions `0..19`; start spreads use position zero, and `PhotosOnly` positions are unique from one.
+- Creation atomically initializes an empty synopsis, one `AlbumStart` with the lowest-ID template's slots and no placements, and both empty cover sides with front-owned spine.
+
+### Values
+
 - Chapter folders are relative to the album's photo root; photo paths are relative to their chapter folder. Paths cannot escape their owner roots and are unique within those roots.
 - Visit periods require `start < end`; dimensions are positive; names are nonempty; country codes are two uppercase ASCII letters; country flags are absolute.
 - Country, camera, and lens reference codes are unique within their kinds.
@@ -55,7 +68,7 @@ The Scala domain package defines records, identities, refined scalar types, and 
 - Start templates have exactly one text slot; `PhotosOnly` templates contain only photo slots; every template is nonempty.
 - Spreads retain a matching template ID and kind; applying a template copies geometry into typed slots.
 - New photo slots have no bleed; only photo slots can have bleed, and slot order is spatial. Text slots render owner fields without separate placements.
-- Slot boxes use nonnegative positions and positive InDesign-point distances within the Saal `2381.102 × 765.354 pt` spread.
+- Slot boxes use nonnegative positions and positive sizes. The seeded `AlbumStart` catalog retains per-axis percentage coordinates for the Saal `2381.102 × 765.354 pt` spread.
 - Spread coordinates use the top-left of the full two-page spread as the origin; x increases right and y increases down.
 - Cover front and back slots have distinct IDs, separate from spread-slot IDs; cover slots have no geometry or bleed.
 - Interior pages equal twice the spread count; choose the smallest listed Saal specification that fits, or the 130-page specification above 130.
@@ -80,4 +93,5 @@ Missing records, lock/session outcomes, infrastructure failures, and changed/unc
 
 - The backend is Scala 3 and follows Typelevel and Tagless Final principles.
 - The application maintains the SQLite schema with Flyway on startup.
-- HTTP is the service driving boundary; readiness is available only after SQLite migration succeeds and the HTTP listener starts.
+- All backend APIs use REST over HTTP.
+- Readiness is available only after SQLite migration succeeds and the HTTP listener starts.

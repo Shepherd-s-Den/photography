@@ -29,7 +29,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 | Path | What |
 | --- | --- |
-| `backend/` | Scala 3 backend scaffold. |
+| `backend/` | Scala 3 backend and HTTP API. |
 | `frontend/` | SolidJS frontend and tests. |
 | `.dagger/` | TypeScript Dagger CI module. |
 | `specs/` | Living product design, contracts, testing, and operational context. |
