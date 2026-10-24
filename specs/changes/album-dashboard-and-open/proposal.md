@@ -31,8 +31,7 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 - Creating an album uses the `AlbumStart` template with the lowest ID.
 - Album titles are nonempty after trimming; create and rename trim input before validation.
 - SQLite enforces declared primary/foreign keys and unique chapter positions, with foreign-key checks enabled on every connection.
-- The use case checks chapter positions are `0..19`.
-- V1 does not enforce template-kind, required-slot, or cover-side shape; create/open use cases validate these composition rules.
+- Valid persisted albums have chapter positions `0..19`, matching spread/template kinds, all required template slots, and both cover sides. Application validation enforces these composition rules beyond database constraints.
 - Creation validates and writes the complete initial shape in one transaction.
 
 **Composition shape**

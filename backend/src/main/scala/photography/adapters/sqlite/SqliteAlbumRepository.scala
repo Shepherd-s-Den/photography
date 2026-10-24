@@ -4,7 +4,7 @@ import cats.data.NonEmptyList
 import cats.effect.Async
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
-import org.typelevel.doobie.{ConnectionIO, Meta, Transactor}
+import org.typelevel.doobie.{ConnectionIO, Meta, Read, Transactor}
 import org.typelevel.doobie.implicits.*
 import org.typelevel.doobie.util.invariant.InvariantViolation
 import org.typelevel.log4cats.Logger
@@ -54,9 +54,8 @@ object SqliteAlbumRepository:
       execute(query, RenameResult.Failed(_))
 
     override def delete(id: AlbumId): F[DeleteResult] =
-      val query = load(id.value).flatMap:
-        case None    => (DeleteResult.NotFound: DeleteResult).pure[ConnectionIO]
-        case Some(_) => sql"DELETE FROM album WHERE id = ${id.value}".update.run.as(DeleteResult.Deleted: DeleteResult)
+      val query = sql"DELETE FROM album WHERE id = ${id.value}".update.run.map: deleted =>
+        if deleted === 0 then DeleteResult.NotFound else DeleteResult.Deleted
       execute(query, DeleteResult.Failed(_))
 
     private def load(id: UUID) =
@@ -69,15 +68,16 @@ object SqliteAlbumRepository:
           yield Album(AlbumId(id), title, synopsis, createdAt, spreads).some
 
     private def loadRequired(id: UUID) =
-      load(id).flatMap(_.toRight(new IllegalArgumentException(s"Missing listed album $id")).liftTo[ConnectionIO])
+      load(id).flatMap(_.toRight(new IllegalArgumentException(s"Missing required album $id")).liftTo[ConnectionIO])
 
     private def loadSpreads(albumId: UUID) =
+      val select = sql"""SELECT s.id, s.template_id, s.kind, s.album_id, s.chapter_id, s.position, t.kind
+                        FROM spread s LEFT JOIN chapter c ON c.id = s.chapter_id
+                        LEFT JOIN spread_template t ON t.id = s.template_id
+                        WHERE s.album_id = $albumId OR c.album_id = $albumId
+                        ORDER BY COALESCE(c.position, -1), s.position"""
       for
-        rows <- sql"""SELECT s.id, s.template_id, s.kind, s.album_id, s.chapter_id, s.position, t.kind
-                      FROM spread s LEFT JOIN chapter c ON c.id = s.chapter_id
-                      LEFT JOIN spread_template t ON t.id = s.template_id
-                      WHERE s.album_id = $albumId OR c.album_id = $albumId
-                      ORDER BY COALESCE(c.position, -1), s.position""".query[SpreadRow].to[List]
+        rows    <- select.query[SpreadRow].to[List]
         _       <- validateChapters(albumId)
         spreads <- rows.traverse(loadSpread)
         ordered <- validateSpreadOrder(spreads).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
@@ -90,37 +90,43 @@ object SqliteAlbumRepository:
         Either.cond(count === 0L, (), new IllegalArgumentException("Invalid chapter composition")).liftTo[ConnectionIO]
 
     private def loadSpread(row: SpreadRow) =
-      val (id, template, _, _, _, _, _) = row
+      val id             = row.id
+      val template       = row.template
+      val selectExpected = sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $template ORDER BY id"
+      val selectStored   = sql"""SELECT id, 'photo', x, y, width, height FROM spread_photo_slot WHERE spread_id = $id
+                              UNION ALL SELECT id, 'text', x, y, width, height FROM spread_text_slot WHERE spread_id = $id"""
       for
-        expectedSlots <- sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $template ORDER BY id"
-          .query[(String, SlotBox)].to[List]
-        storedSlots <- sql"""SELECT id, 'photo', x, y, width, height FROM spread_photo_slot WHERE spread_id = $id
-                            UNION ALL SELECT id, 'text', x, y, width, height FROM spread_text_slot WHERE spread_id = $id"""
-          .query[SlotRow].to[List]
-        ordered    <- orderSlots(expectedSlots, storedSlots).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
-        slots      <- ordered.traverse(slot => loadSlot(SpreadId(id), slot))
-        placements <- loadPlacements(id)
-        spread     <- decodeSpread(row, slots.toVector, placements).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
+        expectedSlots <- selectExpected.query[(String, SlotBox)].to[List]
+        storedSlots   <- selectStored.query[SlotRow].to[List]
+        ordered       <- orderSlots(expectedSlots, storedSlots).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
+        slots         <- ordered.traverse(slot => loadSlot(SpreadId(id), slot))
+        placements    <- loadPlacements(id)
+        spread        <- decodeSpread(row, slots.toVector, placements).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
       yield spread
 
     private def orderSlots(expected: List[(String, SlotBox)], stored: List[SlotRow]) =
+      val matchedSlots = expected.traverse { case (kind, box) =>
+        stored.find { slot =>
+          val storedBox = slot.box
+          kind === slot.kind && (box.x: Double, box.y: Double, box.width: Double, box.height: Double) ===
+            (storedBox.x: Double, storedBox.y: Double, storedBox.width: Double, storedBox.height: Double)
+        }.toRight("Missing required spread slot")
+      }
       for
         _     <- Either.cond(expected.nonEmpty && expected.size === stored.size, (), "Wrong spread slot count")
-        _     <- Either.cond(stored.map(_._1).distinct.size === stored.size, (), "Duplicate spread slot identities")
-        slots <- expected.traverse { (kind, box) =>
-          stored.find { (_, storedKind, storedBox) =>
-            kind === storedKind && (box.x: Double, box.y: Double, box.width: Double, box.height: Double) ===
-              (storedBox.x: Double, storedBox.y: Double, storedBox.width: Double, storedBox.height: Double)
-          }.toRight("Missing required spread slot")
-        }
+        _     <- Either.cond(stored.map(_.id).distinct.size === stored.size, (), "Duplicate spread slot identities")
+        slots <- matchedSlots
       yield slots
 
     private def loadSlot(spreadId: SpreadId, row: SlotRow) =
-      row match
-        case (id, "photo", box) =>
+      val id  = row.id
+      val box = row.box
+      row.kind match
+        case "photo" =>
           sql"SELECT edge FROM spread_photo_slot_bleed WHERE slot_id = $id".query[SpreadEdge].to[List]
             .map(edges => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, edges.toSet): SpreadSlot)
-        case (id, _, box) => (SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box): SpreadSlot).pure[ConnectionIO]
+        case "text" => (SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box): SpreadSlot).pure[ConnectionIO]
+        case other  => new IllegalArgumentException(s"Unknown slot kind $other").raiseError[ConnectionIO, SpreadSlot]
 
     private def decodeSpread(row: SpreadRow, slots: Vector[SpreadSlot], placements: Vector[SpreadPlacement]) =
       val (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) = row
@@ -146,27 +152,28 @@ object SqliteAlbumRepository:
       sql"""SELECT p.id, p.spread_photo_slot_id, p.photo_id, p.shift_x, p.shift_y, p.mirrored, p.zoom, p.caption_corner
             FROM placement p JOIN spread_photo_slot s ON s.id = p.spread_photo_slot_id
             WHERE s.spread_id = $spreadId ORDER BY p.id""".query[PlacementRow].to[Vector].map:
-        _.map { (id, slot, photo, x, y, mirrored, zoom, corner) =>
+        _.map { case (id, slot, photo, x, y, mirrored, zoom, corner) =>
           SpreadPlacement(SpreadPlacementId(id), PhotoSpreadSlotId(slot), PhotoId(photo), PhotoTransform(Shift(x, y), mirrored, zoom), corner)
         }
 
     private def validateCover(id: UUID) =
       for
         maybeSpine <- sql"SELECT spine_owner FROM cover WHERE album_id = $id".query[String].option
-        slots      <- sql"SELECT id, side FROM cover_slot WHERE album_id = $id ORDER BY side".query[(UUID, String)].to[List]
+        slots      <- sql"SELECT side FROM cover_slot WHERE album_id = $id ORDER BY side".query[String].to[List]
         validSpine = maybeSpine.exists(value => value === "front" || value === "back")
-        _ <- Either.cond(validSpine && slots.map(_._2) === List("back", "front"), (), new IllegalArgumentException("Incomplete cover"))
-          .liftTo[ConnectionIO]
+        complete   = validSpine && slots === List("back", "front")
+        _ <- Either.cond(complete, (), new IllegalArgumentException("Incomplete cover")).liftTo[ConnectionIO]
       yield ()
 
     private def validateInitial(album: Album, cover: Cover) =
       val maybeStart = album.spreads.toList match
         case (start: Spread.AlbumStart) :: Nil if start.album.value === album.id.value && start.placements.isEmpty => start.some
         case _                                                                                                     => None
+      val coverOwnership =
+        Either.cond(cover.album.value === album.id.value, (), new IllegalArgumentException("Cover belongs to a different album"))
       for
         start <- maybeStart.toRight(new IllegalArgumentException("New album must contain one empty AlbumStart")).liftTo[ConnectionIO]
-        _     <- Either.cond(cover.album.value === album.id.value, (), new IllegalArgumentException("Cover belongs to a different album"))
-          .liftTo[ConnectionIO]
+        _     <- coverOwnership.liftTo[ConnectionIO]
       yield start
 
     private def insertAlbum(album: Album) =
@@ -174,9 +181,10 @@ object SqliteAlbumRepository:
             VALUES (${album.id.value}, ${album.title}, ${album.synopsis}, ${album.createdAt})""".update.run.void
 
     private def insertInitialSpread(albumId: AlbumId, start: Spread.AlbumStart) =
+      val insert = sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
+                        VALUES (${start.id.value}, ${start.template.value}, ${SpreadTemplateKind.AlbumStart}, ${albumId.value}, 0)"""
       for
-        _ <- sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
-                   VALUES (${start.id.value}, ${start.template.value}, ${SpreadTemplateKind.AlbumStart}, ${albumId.value}, 0)""".update.run
+        _ <- insert.update.run
         _ <- start.slots.traverse_(insertSlot)
       yield ()
 
@@ -201,7 +209,7 @@ object SqliteAlbumRepository:
         _ <- sql"INSERT INTO cover_slot (id, album_id, side) VALUES (${cover.back.id.value}, $albumId, 'back')".update.run
       yield ()
 
-    private def execute[A](query: ConnectionIO[A], failed: Failure => A): F[A] =
+    private def execute[A](query: ConnectionIO[A], failed: Failure => A) =
       query.transact(transactor).attempt.flatMap:
         case Right(result) => result.pure[F]
         case Left(error)   =>
@@ -214,6 +222,23 @@ object SqliteAlbumRepository:
     private given Meta[Instant]        = Meta[Long].timap[Instant](Instant.ofEpochMilli)(_.toEpochMilli)
     private given Meta[InDesignPoints] = Meta[Double].tiemap[InDesignPoints](_.refineEither)(value => value: Double)
     private given Meta[Zoom]           = Meta[Double].tiemap[Zoom](_.refineEither)(value => value: Double)
+
+    private given Read[SpreadRow] =
+      Read[(UUID, UUID, SpreadTemplateKind, Option[UUID], Option[UUID], Int, Option[SpreadTemplateKind])]
+        .map { case (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) =>
+          (
+            id = id,
+            template = template,
+            kind = kind,
+            maybeAlbum = maybeAlbum,
+            maybeChapter = maybeChapter,
+            position = position,
+            maybeTemplateKind = maybeTemplateKind
+          )
+        }
+
+    private given Read[SlotRow] =
+      Read[(UUID, String, SlotBox)].map { case (id, kind, box) => (id = id, kind = kind, box = box) }
 
     private given Meta[SpreadEdge] = Meta[String].tiemap[SpreadEdge] {
       case "top"    => SpreadEdge.Top.asRight[String]
@@ -241,6 +266,14 @@ object SqliteAlbumRepository:
       case CaptionCorner.BottomRight => "bottom_right"
     }
 
-  private type SpreadRow    = (UUID, UUID, SpreadTemplateKind, Option[UUID], Option[UUID], Int, Option[SpreadTemplateKind])
-  private type SlotRow      = (UUID, String, SlotBox)
+  private type SpreadRow = (
+      id: UUID,
+      template: UUID,
+      kind: SpreadTemplateKind,
+      maybeAlbum: Option[UUID],
+      maybeChapter: Option[UUID],
+      position: Int,
+      maybeTemplateKind: Option[SpreadTemplateKind]
+  )
+  private type SlotRow      = (id: UUID, kind: String, box: SlotBox)
   private type PlacementRow = (UUID, UUID, UUID, InDesignPoints, InDesignPoints, Boolean, Zoom, CaptionCorner)

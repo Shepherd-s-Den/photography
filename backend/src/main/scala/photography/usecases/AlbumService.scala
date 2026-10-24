@@ -49,10 +49,11 @@ object AlbumService:
     override def create(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          buildInitialComposition(title, templates.head).flatMap: (album, cover) =>
+          buildInitialComposition(title, templates.head).flatMap { case (album, cover) =>
             repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
+          }
         case ListAlbumStartTemplatesResult.Failed => CreateAlbumResult.Failed.pure[F]
 
     override def get(id: AlbumId): F[GetAlbumResult] =
@@ -93,7 +94,7 @@ object AlbumService:
         createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
         val slots = template.slots.toList.zip(slotIds).map:
-          case (SpreadTemplateSlot.Photo(box), id) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, Set.empty[SpreadEdge])
+          case (SpreadTemplateSlot.Photo(box), id) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, bleed = Set.empty[SpreadEdge])
           case (SpreadTemplateSlot.Text(box), id)  => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, placements = Vector.empty[SpreadPlacement])
         val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))

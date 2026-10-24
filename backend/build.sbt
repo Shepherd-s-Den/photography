@@ -45,14 +45,15 @@ lazy val root = (project in file("."))
       "com.github.pureconfig" %% "pureconfig-http4s"         % "0.17.9",
       "com.github.pureconfig" %% "pureconfig-ip4s"           % "0.17.9",
       "com.github.geirolz"    %% "fly4s"                     % "1.1.1",
-      "org.flywaydb"           % "flyway-core"               % "11.18.0",
-      "org.xerial"             % "sqlite-jdbc"               % "3.53.4.0",
-      "org.http4s"            %% "http4s-dsl"                % "0.23.33",
-      "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
-      "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
-      "org.typelevel"         %% "log4cats-slf4j"            % "2.7.0",
-      "org.slf4j"              % "slf4j-simple"              % "2.0.20"  % Runtime,
-      "org.typelevel"         %% "munit-cats-effect"         % "2.2.1"   % Test,
-      "com.tngtech.archunit"   % "archunit"                  % "1.5.1"   % Test
+      // fly4s 1.1.1 requires Flyway 11.x APIs; Flyway 13.x fails during migration.
+      "org.flywaydb"         % "flyway-core"         % "11.18.0",
+      "org.xerial"           % "sqlite-jdbc"         % "3.53.4.0",
+      "org.http4s"          %% "http4s-dsl"          % "0.23.33",
+      "org.http4s"          %% "http4s-ember-server" % "0.23.33",
+      "org.http4s"          %% "http4s-ember-client" % "0.23.33" % Test,
+      "org.typelevel"       %% "log4cats-slf4j"      % "2.7.0",
+      "org.slf4j"            % "slf4j-simple"        % "2.0.20"  % Runtime,
+      "org.typelevel"       %% "munit-cats-effect"   % "2.2.1"   % Test,
+      "com.tngtech.archunit" % "archunit"            % "1.5.1"   % Test
     )
   )

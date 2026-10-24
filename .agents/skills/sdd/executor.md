@@ -23,7 +23,7 @@ Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recr
 - **Feature:** current → new behavior, acceptance criteria, invariants, tradeoffs, Doc Sync.
 - **Investigation:** hypotheses and evidence for/against each, narrowing to a proven root cause — the spec's `What & Why` ends up stating that root cause and the hypotheses it ruled out.
 
-Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then open the Spec PR — the proposal and planning artifacts only, no production code. Self-check is prep, not review — complete both sequential independent review rounds in [`reviewer.md`](reviewer.md) before anyone merges. Do not start implementation until it is reviewed and merged.
+Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then satisfy `SKILL.md`'s PR-opening gate before opening the Spec PR — the proposal and planning artifacts only, no production code. Do not start implementation until it is reviewed and merged.
 
 ## Tests
 
@@ -33,7 +33,7 @@ Derive tests from the merged spec's acceptance criteria and enumerated edge case
 
 Implement the approved behavior. Split into multiple PRs on separable seams, or when one PR would exceed a focused review session — never to dodge a gate. Each PR links the merged spec.
 
-Make the tests pass, then run the gates `AGENTS.md` already defines (backend/frontend/pipeline commands and `dagger call verify`) — do not repeat those commands here, and never weaken a gate to pass one. Self-check against the shared [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes ([`code-quality-frontend.md`](checklists/code-quality-frontend.md) for `frontend/**`, [`code-quality-backend.md`](checklists/code-quality-backend.md) for `backend/**`, and no other), and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (against this PR's own slice) before requesting review.
+Make the tests pass, then run the gates `AGENTS.md` already defines (backend/frontend/pipeline commands and `dagger call verify`) — do not repeat those commands here, and never weaken a gate to pass one. Self-check against the shared [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes ([`code-quality-frontend.md`](checklists/code-quality-frontend.md) for `frontend/**`, [`code-quality-backend.md`](checklists/code-quality-backend.md) for `backend/**`, and no other), and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (against this PR's own slice) before requesting internal review. Satisfy `SKILL.md`'s PR-opening gate before opening the PR for maintainer review.
 
 ## Archive PR
 
@@ -41,4 +41,4 @@ Before archiving, run the implemented journey locally and compare it with the ap
 
 After every Implementation PR has merged: apply each `Doc Sync` entry verbatim to the named living doc and section (`specs/*.md`, or `ci/specs/*.md` for pipeline changes) — prune obsolete or duplicated content rather than appending. Move the spec to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
 
-Before opening this PR, self-check [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) against the **complete merged change**, not just the last PR — this is the hard stop that catches a spec archived next to an incomplete implementation. This PR introduces no new product behavior.
+Before opening this PR, self-check [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) against the **complete merged change**, not just the last PR, then satisfy `SKILL.md`'s PR-opening gate. This PR introduces no new product behavior.

@@ -13,3 +13,6 @@ Load only for a PR that changes `backend/**`. `CONTRIBUTING.md` §Scala composit
 - [ ] Resource acquisition, use, and release follow the selected Typelevel effect library's resource-safe primitive.
 - [ ] Low-information values such as `None` and `Option.empty` use named arguments; domain-meaningful values remain positional.
 - [ ] Production dependencies are introduced only for a documented capability and kept out of pure domain modules.
+- [ ] Destructure a tuple or product only when every field is required, including in pattern matches. Otherwise access the required fields directly; use named fields where available.
+- [ ] Use named fields for partial product access and `case (fieldA, fieldB)` patterns when all tuple fields are required, including collection callbacks. Positional tuple accessors such as `._1` are not allowed.
+- [ ] Each statement in a for-comprehension occupies one physical line. Extract multiline SQL and expressions into named vals or private defs before sequencing them.

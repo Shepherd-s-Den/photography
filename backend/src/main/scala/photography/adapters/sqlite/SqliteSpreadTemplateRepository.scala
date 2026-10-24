@@ -30,26 +30,28 @@ object SqliteSpreadTemplateRepository:
           Logger[F].error(error)("Could not list AlbumStart templates").as(ListAlbumStartTemplatesResult.Failed(reason))
 
     private def loadAlbumStarts =
+      val select = sql"SELECT id, name, kind FROM spread_template WHERE kind = 'album_start' ORDER BY id"
       for
-        rows <- sql"SELECT id, name, kind FROM spread_template WHERE kind = 'album_start' ORDER BY id"
-          .query[(UUID, SpreadTemplateName, SpreadTemplateKind)].to[List]
-        templates <- rows.traverse { (id, name, kind) =>
-          loadSlots(id).map(slots => SpreadTemplate(SpreadTemplateId(id), name, kind, slots))
-        }
-        nonEmpty <- NonEmptyList.fromList(templates).toRight(new IllegalArgumentException("No AlbumStart templates")).liftTo[ConnectionIO]
+        rows      <- select.query[(UUID, SpreadTemplateName, SpreadTemplateKind)].to[List]
+        templates <- rows.traverse { case (id, name, kind) => loadSlots(id).map(slots => SpreadTemplate(SpreadTemplateId(id), name, kind, slots)) }
+        nonEmpty  <- NonEmptyList.fromList(templates).toRight(new IllegalArgumentException("No AlbumStart templates")).liftTo[ConnectionIO]
       yield nonEmpty
 
     private def loadSlots(id: UUID) =
+      val select = sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $id ORDER BY id"
       for
-        orderedRows <- sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $id ORDER BY id"
-          .query[(String, SlotBox)].to[List]
-        slots <- orderedRows.traverse {
-          case ("photo", box) => SpreadTemplateSlot.Photo(box).asRight[IllegalArgumentException]
-          case ("text", box)  => SpreadTemplateSlot.Text(box).asRight[IllegalArgumentException]
-          case (other, _)     => new IllegalArgumentException(s"Unknown slot kind $other").asLeft[SpreadTemplateSlot]
-        }.liftTo[ConnectionIO]
-        nonEmpty <- NonEmptyList.fromList(slots).toRight(new IllegalArgumentException(s"Template $id has no slots")).liftTo[ConnectionIO]
+        orderedRows <- select.query[(String, SlotBox)].to[List]
+        slots       <- decodeSlots(orderedRows).liftTo[ConnectionIO]
+        nonEmpty    <- NonEmptyList.fromList(slots).toRight(new IllegalArgumentException(s"Template $id has no slots")).liftTo[ConnectionIO]
       yield nonEmpty
+
+    private def decodeSlots(rows: List[(String, SlotBox)]) =
+      rows.traverse { case (slotKind, slotBox) =>
+        slotKind match
+          case "photo" => SpreadTemplateSlot.Photo(slotBox).asRight[IllegalArgumentException]
+          case "text"  => SpreadTemplateSlot.Text(slotBox).asRight[IllegalArgumentException]
+          case other   => new IllegalArgumentException(s"Unknown slot kind $other").asLeft[SpreadTemplateSlot]
+      }
 
     private given Meta[SpreadTemplateName] =
       Meta[String].tiemap[SpreadTemplateName](_.refineEither)(value => value: String)

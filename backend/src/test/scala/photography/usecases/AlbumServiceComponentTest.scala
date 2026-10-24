@@ -64,7 +64,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       AlbumId(buildUuid(10)),
       SpreadTemplateId(buildUuid(20)),
       Vector(
-        SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(12)), SpreadId(buildUuid(11)), photoBox, Set.empty[SpreadEdge]),
+        SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(12)), SpreadId(buildUuid(11)), photoBox, bleed = Set.empty[SpreadEdge]),
         SpreadSlot.Text(TextSpreadSlotId(buildUuid(13)), SpreadId(buildUuid(11)), fullBox)
       ),
       Vector.empty[SpreadPlacement]
