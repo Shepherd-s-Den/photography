@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "3.8.4"
+ThisBuild / scalaVersion := "3.10.0"
 ThisBuild / organization := "com.cosminci"
 ThisBuild / version      := "0.1.0"
 
@@ -35,25 +35,24 @@ lazy val root = (project in file("."))
     libraryDependencies ++= Seq(
       "org.typelevel"         %% "cats-core"                 % "2.13.0",
       "org.typelevel"         %% "cats-effect"               % "3.7.1",
-      "io.github.iltotore"    %% "iron"                      % "3.3.2-4-36c079",
-      "io.github.iltotore"    %% "iron-pureconfig"           % "3.0.2",
+      "io.github.iltotore"    %% "iron"                      % "3.4.1",
+      "io.github.iltotore"    %% "iron-pureconfig"           % "3.4.1",
       "org.typelevel"         %% "doobie-core"               % "1.0.0-RC13",
       "org.typelevel"         %% "doobie-hikari"             % "1.0.0-RC13",
-      "com.github.pureconfig" %% "pureconfig-core"           % "0.17.9",
-      "com.github.pureconfig" %% "pureconfig-generic-scala3" % "0.17.10",
-      "com.github.pureconfig" %% "pureconfig-cats-effect"    % "0.17.10",
-      "com.github.pureconfig" %% "pureconfig-http4s"         % "0.17.9",
-      "com.github.pureconfig" %% "pureconfig-ip4s"           % "0.17.9",
-      "com.github.geirolz"    %% "fly4s"                     % "1.1.1",
-      // fly4s 1.1.1 requires Flyway 11.x APIs; Flyway 13.x fails during migration.
-      "org.flywaydb"         % "flyway-core"         % "11.18.0",
-      "org.xerial"           % "sqlite-jdbc"         % "3.53.4.0",
-      "org.http4s"          %% "http4s-dsl"          % "0.23.33",
-      "org.http4s"          %% "http4s-ember-server" % "0.23.33",
-      "org.http4s"          %% "http4s-ember-client" % "0.23.33" % Test,
-      "org.typelevel"       %% "log4cats-slf4j"      % "2.7.0",
-      "org.slf4j"            % "slf4j-simple"        % "2.0.20"  % Runtime,
-      "org.typelevel"       %% "munit-cats-effect"   % "2.2.1"   % Test,
-      "com.tngtech.archunit" % "archunit"            % "1.5.1"   % Test
+      "com.github.pureconfig" %% "pureconfig-core"           % "0.17.11",
+      "com.github.pureconfig" %% "pureconfig-generic-scala3" % "0.17.11",
+      "com.github.pureconfig" %% "pureconfig-cats-effect"    % "0.17.11",
+      "com.github.pureconfig" %% "pureconfig-http4s"         % "0.17.11",
+      "com.github.pureconfig" %% "pureconfig-ip4s"           % "0.17.11",
+      "com.github.geirolz"    %% "fly4s"                     % "2.0.0",
+      "org.flywaydb"           % "flyway-core"               % "13.11.1",
+      "org.xerial"             % "sqlite-jdbc"               % "3.53.4.0",
+      "org.http4s"            %% "http4s-dsl"                % "0.23.38",
+      "org.http4s"            %% "http4s-ember-server"       % "0.23.38",
+      "org.http4s"            %% "http4s-ember-client"       % "0.23.38" % Test,
+      "org.typelevel"         %% "log4cats-slf4j"            % "2.8.0",
+      "org.slf4j"              % "slf4j-simple"              % "2.0.20"  % Runtime,
+      "org.typelevel"         %% "munit-cats-effect"         % "2.2.1"   % Test,
+      "com.tngtech.archunit"   % "archunit"                  % "1.5.1"   % Test
     )
   )

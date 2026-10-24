@@ -1,6 +1,6 @@
 package photography.adapters.sqlite
 
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
@@ -8,15 +8,18 @@ import org.typelevel.doobie.Fragment
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import photography.app.config.SqliteConfig
 import photography.domain.layout.*
 import photography.ports.SpreadTemplateRepository.*
+
+import java.nio.file.Files
 
 final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]        = Slf4jLogger.getLogger[IO]
   private val defaultTemplateName = "2×2 L + Synopsis R"
 
   test(s"should preserve the complete synopsis-right catalog with $defaultTemplateName first"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteSpreadTemplateRepository.make[IO](xa)
 
       repository.listAlbumStartTemplates.map:
@@ -60,7 +63,7 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
       "UPDATE spread_template_slot SET kind = 'unknown'" -> Failure.InvalidSpreadData,
       "DROP TABLE spread_template_slot"                  -> Failure.DatabaseFailure
     ).traverse_ { case (corruption, expectedFailure) =>
-      SqliteTestDatabase.resource.use: xa =>
+      buildTransactor.use: xa =>
         val repository = SqliteSpreadTemplateRepository.make[IO](xa)
         val corrupt    = sql"PRAGMA ignore_check_constraints = ON".update.run >>
           Fragment.const(corruption).update.run >> sql"PRAGMA ignore_check_constraints = OFF".update.run
@@ -70,6 +73,13 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
           result <- repository.listAlbumStartTemplates
         yield assertEquals(result, ListAlbumStartTemplatesResult.Failed(expectedFailure))
     }
+
+  private def buildTransactor =
+    for
+      path <- Resource.make(IO.blocking(Files.createTempFile("template-", ".sqlite")))(path => IO.blocking(Files.deleteIfExists(path)).void)
+      _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).transactor
+    yield xa
 
   private def buildBox(x: Double, y: Double, width: Double, height: Double) =
     SlotBox(x.refineUnsafe, y.refineUnsafe, width.refineUnsafe, height.refineUnsafe)

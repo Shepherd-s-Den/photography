@@ -230,19 +230,11 @@ object SqliteAlbumRepository:
     private given Read[SpreadRow] =
       Read[(UUID, UUID, SpreadTemplateKind, Option[UUID], Option[UUID], Int, Option[SpreadTemplateKind])]
         .map { case (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) =>
-          (
-            id = id,
-            template = template,
-            kind = kind,
-            maybeAlbum = maybeAlbum,
-            maybeChapter = maybeChapter,
-            position = position,
-            maybeTemplateKind = maybeTemplateKind
-          )
+          (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind)
         }
 
     private given Read[SlotRow] =
-      Read[(UUID, String, SlotBox)].map { case (id, kind, box) => (id = id, kind = kind, box = box) }
+      Read[(UUID, String, SlotBox)].map { case (id, kind, box) => (id, kind, box) }
 
     private given Meta[SpreadEdge] = Meta[String].tiemap[SpreadEdge] {
       case "top"    => SpreadEdge.Top.asRight[String]

@@ -1,7 +1,7 @@
 package photography.adapters.sqlite
 
 import cats.data.NonEmptyList
-import cats.effect.IO
+import cats.effect.{IO, Resource}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -10,11 +10,13 @@ import org.typelevel.doobie.*
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import photography.app.config.SqliteConfig
 import photography.domain.album.{Album, AlbumId, ChapterId, PhotoId}
 import photography.domain.layout.*
 import photography.ports.AlbumRepository.*
 
 import java.time.Instant
+import java.nio.file.Files
 import java.util.UUID
 
 final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
@@ -28,7 +30,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should persist the complete initial Album and cover atomically and preserve metadata when renamed"):
     Vector(SpineOwner.Front -> "front", SpineOwner.Back -> "back").traverse_ { case (spineOwner, expectedSpine) =>
-      SqliteTestDatabase.resource.use: xa =>
+      buildTransactor.use: xa =>
         val repository = SqliteAlbumRepository.make[IO](xa)
         val album      = buildAlbum(1)
         val cover      = buildCover(album).copy(spineOwner = spineOwner)
@@ -50,7 +52,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     }
 
   test("should list newest-first slices with stable ordering for equal creation instants and an empty collection"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
       val albums     = Vector(1, 2, 3).map(buildAlbum)
 
@@ -68,7 +70,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(beyond, ListResult.Listed(AlbumPageSlice(3, Vector.empty)))
 
   test("should report unknown albums consistently and delete all initial owned rows without deleting shared templates"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
       val unknownId  = AlbumId(buildUuid(999))
       val album      = buildAlbum(1)
@@ -92,7 +94,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(templates, 4L)
 
   test("should roll back every album-owned row when a late cover write fails"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
       val failCover  = sql"""CREATE TRIGGER fail_cover BEFORE INSERT ON cover_slot WHEN NEW.side = 'back'
                            BEGIN SELECT RAISE(ABORT, 'injected cover failure'); END"""
@@ -107,7 +109,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(count, 0L)
 
   test("should reject invalid initial composition without writing owned rows"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
       val album      = buildAlbum(1)
 
@@ -136,7 +138,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       "UPDATE spread_photo_slot SET width = -1",
       "UPDATE spread_text_slot SET id = '0-0-0-0-1'"
     ).traverse_ { corruption =>
-      SqliteTestDatabase.resource.use: xa =>
+      buildTransactor.use: xa =>
         val repository = SqliteAlbumRepository.make[IO](xa)
         val album      = buildAlbum(1)
 
@@ -157,7 +159,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     }
 
   test("should report database failures explicitly for every operation"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
       val album      = buildAlbum(1)
 
@@ -176,7 +178,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(deleted, DeleteResult.Failed(Failure.DatabaseFailure))
 
   test("should preserve persisted photo-slot bleed when reading an album"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
       val album      = buildAlbum(1)
 
@@ -197,7 +199,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(found, GetResult.Found(expectedAlbum))
 
   test("should read chapter spreads and placements in domain order and cascade deletion through the owned graph"):
-    SqliteTestDatabase.resource.use: xa =>
+    buildTransactor.use: xa =>
       val repository         = SqliteAlbumRepository.make[IO](xa)
       val countryId          = buildUuid(400).toString
       val destinationId      = buildUuid(401).toString
@@ -314,6 +316,13 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(owned, 0L)
         assertEquals(shared, (1L, 1L, 6L, 1L))
+
+  private def buildTransactor =
+    for
+      path <- Resource.make(IO.blocking(Files.createTempFile("album-", ".sqlite")))(path => IO.blocking(Files.deleteIfExists(path)).void)
+      _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).transactor
+    yield xa
 
   private def buildAlbum(index: Int) =
     val albumId  = AlbumId(buildUuid(index))
