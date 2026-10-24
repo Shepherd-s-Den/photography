@@ -1,9 +1,10 @@
-package photography.app
+package photography.app.runtime
 
 import cats.effect.{Async, Resource}
 import fly4s.Fly4s
 import org.typelevel.doobie.Transactor
 import photography.adapters.sqlite.{FlywayMigrator, SqliteConnection}
+import photography.app.config.AppConfig
 
 trait AppResourcesBuilder:
   def build[F[_]: Async]: Resource[F, AppResourcesBuilder.AppResources[F]]

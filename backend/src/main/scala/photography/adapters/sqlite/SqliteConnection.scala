@@ -5,7 +5,7 @@ import com.zaxxer.hikari.{HikariConfig, HikariDataSource}
 import org.sqlite.{SQLiteConfig, SQLiteDataSource}
 import org.typelevel.doobie.Transactor
 import org.typelevel.doobie.util.ExecutionContexts
-import photography.app.SqliteConfig
+import photography.app.config.SqliteConfig
 
 import scala.util.chaining.*
 

@@ -1,4 +1,4 @@
-package photography.app
+package photography.app.config
 
 import cats.effect.IO
 import munit.CatsEffectSuite

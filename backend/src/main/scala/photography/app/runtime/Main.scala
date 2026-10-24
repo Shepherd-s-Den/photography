@@ -1,4 +1,4 @@
-package photography.app
+package photography.app.runtime
 
 import cats.effect.{IO, IOApp}
 import fs2.io.net.Network
@@ -6,6 +6,7 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.adapters.http.HealthRoutes
+import photography.app.config.AppConfig
 
 object Main extends IOApp.Simple:
 
