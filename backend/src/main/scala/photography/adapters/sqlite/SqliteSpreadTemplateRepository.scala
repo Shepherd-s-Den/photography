@@ -39,19 +39,15 @@ object SqliteSpreadTemplateRepository:
 
     private def loadSlots(id: UUID) =
       val select = sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $id ORDER BY id"
-      for
-        orderedRows <- select.query[(String, SlotBox)].to[List]
-        slots       <- decodeSlots(orderedRows).liftTo[ConnectionIO]
-        nonEmpty    <- NonEmptyList.fromList(slots).toRight(new IllegalArgumentException(s"Template $id has no slots")).liftTo[ConnectionIO]
-      yield nonEmpty
+      select.query[(String, SlotBox)].to[List].flatMap(rows => decodeSlots(id, rows).liftTo[ConnectionIO])
 
-    private def decodeSlots(rows: List[(String, SlotBox)]) =
+    private def decodeSlots(id: UUID, rows: List[(String, SlotBox)]) =
       rows.traverse { case (slotKind, slotBox) =>
         slotKind match
           case "photo" => SpreadTemplateSlot.Photo(slotBox).asRight[IllegalArgumentException]
           case "text"  => SpreadTemplateSlot.Text(slotBox).asRight[IllegalArgumentException]
           case other   => new IllegalArgumentException(s"Unknown slot kind $other").asLeft[SpreadTemplateSlot]
-      }
+      }.flatMap(slots => NonEmptyList.fromList(slots).toRight(new IllegalArgumentException(s"Template $id has no slots")))
 
     private given Meta[SpreadTemplateName] =
       Meta[String].tiemap[SpreadTemplateName](_.refineEither)(value => value: String)

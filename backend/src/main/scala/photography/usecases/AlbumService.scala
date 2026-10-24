@@ -88,18 +88,21 @@ object AlbumService:
       for
         albumId   <- identifiers.nextId.map(AlbumId(_))
         spreadId  <- identifiers.nextId.map(SpreadId(_))
-        slotIds   <- template.slots.toList.traverse(_ => identifiers.nextId)
+        slots     <- template.slots.toList.traverse(buildInitialSlot(spreadId, _))
         frontId   <- identifiers.nextId.map(CoverSlotId(_))
         backId    <- identifiers.nextId.map(CoverSlotId(_))
         createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
-        val slots = template.slots.toList.zip(slotIds).map:
-          case (SpreadTemplateSlot.Photo(box), id) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, bleed = Set.empty[SpreadEdge])
-          case (SpreadTemplateSlot.Text(box), id)  => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, placements = Vector.empty[SpreadPlacement])
         val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
+
+    private def buildInitialSlot(spreadId: SpreadId, slot: SpreadTemplateSlot) =
+      identifiers.nextId.map: id =>
+        slot match
+          case SpreadTemplateSlot.Photo(box) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, bleed = Set.empty[SpreadEdge]): SpreadSlot
+          case SpreadTemplateSlot.Text(box)  => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box): SpreadSlot
 
   final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
 

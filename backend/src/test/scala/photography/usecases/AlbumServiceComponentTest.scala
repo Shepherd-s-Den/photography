@@ -111,15 +111,16 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(failed, GetAlbumResult.Failed)
 
   test("should rename an existing Album, report not found, and report failure when persistence fails"):
-    val refs    = Refs()
-    val renamed = buildAlbum(1).copy(title = newTitle)
+    val refs         = Refs()
+    val renamed      = buildAlbum(1).copy(title = newTitle)
+    val failedRename =
+      buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure)).rename(AlbumId(buildUuid(1)), newTitle)
 
     for
       result    <- buildService(refs, renameResult = AlbumRepository.RenameResult.Renamed(renamed)).rename(AlbumId(buildUuid(1)), newTitle)
       renamedTo <- refs.maybeRenamed.get
       missing   <- buildService(Refs()).rename(AlbumId(buildUuid(1)), newTitle)
-      failed    <-
-        buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure)).rename(AlbumId(buildUuid(1)), newTitle)
+      failed    <- failedRename
     yield
       assertEquals(result, RenameAlbumResult.Renamed(renamed))
       assertEquals(renamedTo, (AlbumId(buildUuid(1)) -> newTitle).some)

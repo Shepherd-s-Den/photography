@@ -157,13 +157,17 @@ object SqliteAlbumRepository:
         }
 
     private def validateCover(id: UUID) =
-      for
-        maybeSpine <- sql"SELECT spine_owner FROM cover WHERE album_id = $id".query[String].option
-        slots      <- sql"SELECT side FROM cover_slot WHERE album_id = $id ORDER BY side".query[String].to[List]
-        validSpine = maybeSpine.exists(value => value === "front" || value === "back")
-        complete   = validSpine && slots === List("back", "front")
-        _ <- Either.cond(complete, (), new IllegalArgumentException("Incomplete cover")).liftTo[ConnectionIO]
-      yield ()
+      validateCoverSpine(id) >> validateCoverSlots(id)
+
+    private def validateCoverSpine(id: UUID) =
+      sql"SELECT spine_owner FROM cover WHERE album_id = $id".query[String].option
+        .ensure(new IllegalArgumentException("Incomplete cover"))(_.exists(value => value === "front" || value === "back"))
+        .void
+
+    private def validateCoverSlots(id: UUID) =
+      sql"SELECT side FROM cover_slot WHERE album_id = $id ORDER BY side".query[String].to[List]
+        .ensure(new IllegalArgumentException("Incomplete cover"))(_ === List("back", "front"))
+        .void
 
     private def validateInitial(album: Album, cover: Cover) =
       val maybeStart = album.spreads.toList match
