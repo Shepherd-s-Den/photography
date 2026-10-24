@@ -2,20 +2,17 @@ package photography.adapters.http
 
 import cats.effect.Async
 import cats.syntax.all.*
-import io.circe.Json
+import io.circe.{Decoder, Encoder}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import org.http4s.{EntityDecoder, EntityEncoder, HttpRoutes, Request, Response}
-import org.http4s.circe.{jsonEncoderOf, jsonOf}
+import org.http4s.{HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.{Album, AlbumId, AlbumName}
 import photography.domain.layout.{SpreadTemplate, SpreadTemplateSlot}
 import photography.usecases.{AlbumService, SpreadTemplateService}
 import photography.usecases.AlbumService.*
 import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
-
-import java.util.UUID
-import scala.util.Try
 
 trait AlbumApi[F[_]]:
   def routes: HttpRoutes[F]
@@ -26,41 +23,42 @@ object AlbumApi:
 
   final private class LiveAlbumApi[F[_]: Async](albums: AlbumService[F], templates: SpreadTemplateService[F])
       extends AlbumApi[F] with Http4sDsl[F]:
-    override def routes: HttpRoutes[F] = HttpRoutes.of[F]:
-      case request @ GET -> Root / "api" / "albums"           => list(request)
-      case request @ POST -> Root / "api" / "albums"          => withTitle(request)(create)
-      case GET -> Root / "api" / "albums" / rawId             => withId(rawId)(get)
-      case request @ PATCH -> Root / "api" / "albums" / rawId => withId(rawId)(id => withTitle(request)(rename(id, _)))
-      case DELETE -> Root / "api" / "albums" / rawId          => withId(rawId)(delete)
-      case GET -> Root / "api" / "templates" / "album-start"  => listTemplates
+    override def routes: HttpRoutes[F] =
+      HttpRoutes.of[F] {
+        case request @ GET -> Root / "api" / "albums" :? Page(page) if request.multiParams.get("page").forall(_.size === 1) =>
+          list(page)
+        case GET -> Root / "api" / "albums"                              => BadRequest(Map("message" -> "Supply page once as a 32-bit integer"))
+        case request @ POST -> Root / "api" / "albums"                   => create(request)
+        case GET -> Root / "api" / "albums" / AlbumIdVar(id)             => get(id)
+        case request @ PATCH -> Root / "api" / "albums" / AlbumIdVar(id) => rename(id, request)
+        case DELETE -> Root / "api" / "albums" / AlbumIdVar(id)          => delete(id)
+        case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _       => albumNotFound
+        case GET -> Root / "api" / "templates" / "album-start"           => listTemplates
+      }
 
-    private given EntityDecoder[F, Json] = jsonOf[F, Json]
-    private given EntityEncoder[F, Json] = jsonEncoderOf[F, Json]
+    private def list(page: Int) =
+      albums.list(page).flatMap:
+        case ListAlbumsResult.Listed(selected) => Ok(selected)
+        case ListAlbumsResult.Failed           => serviceFailure
 
-    private def list(request: Request[F]) =
-      parsePage(request) match
-        case Left(message) => BadRequest(Json.obj("message" -> Json.fromString(message)))
-        case Right(page)   =>
-          albums.list(page).flatMap:
-            case ListAlbumsResult.Listed(selected) => Ok(encodePage(selected))
-            case ListAlbumsResult.Failed           => serviceFailure
-
-    private def create(title: AlbumName) =
-      albums.create(title).flatMap:
-        case CreateAlbumResult.Created(album) => Created(encodeSummary(album))
+    private def create(request: Request[F]) =
+      request.as[AlbumName].flatMap(albums.create).flatMap {
+        case CreateAlbumResult.Created(album) => Created(album)
         case CreateAlbumResult.Failed         => serviceFailure
+      }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidTitle) }
 
     private def get(id: AlbumId) =
       albums.get(id).flatMap:
-        case GetAlbumResult.Found(album) => Ok(encodeSummary(album).deepMerge(Json.obj("synopsis" -> Json.fromString(album.synopsis))))
+        case found: GetAlbumResult.Found => Ok(found)
         case GetAlbumResult.NotFound     => albumNotFound
         case GetAlbumResult.Failed       => serviceFailure
 
-    private def rename(id: AlbumId, title: AlbumName) =
-      albums.rename(id, title).flatMap:
-        case RenameAlbumResult.Renamed(album) => Ok(encodeSummary(album))
+    private def rename(id: AlbumId, request: Request[F]) =
+      request.as[AlbumName].flatMap(albums.rename(id, _)).flatMap {
+        case RenameAlbumResult.Renamed(album) => Ok(album)
         case RenameAlbumResult.NotFound       => albumNotFound
         case RenameAlbumResult.Failed         => serviceFailure
+      }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidTitle) }
 
     private def delete(id: AlbumId) =
       albums.delete(id).flatMap:
@@ -70,61 +68,40 @@ object AlbumApi:
 
     private def listTemplates =
       templates.listAlbumStartTemplates.flatMap:
-        case ListAlbumStartTemplatesResult.Listed(catalog) => Ok(Json.obj("templates" -> Json.fromValues(catalog.toList.map(encodeTemplate))))
-        case ListAlbumStartTemplatesResult.Failed          => serviceFailure
+        case listed: ListAlbumStartTemplatesResult.Listed => Ok(listed)
+        case ListAlbumStartTemplatesResult.Failed         => serviceFailure
 
-    private def withTitle(request: Request[F])(respond: AlbumName => F[Response[F]]) =
-      request.attemptAs[Json].value.flatMap:
-        case Left(_)     => BadRequest(Json.obj("message" -> Json.fromString("Expected a JSON object with a string title")))
-        case Right(json) =>
-          json.hcursor.get[String]("title").leftMap(_.message).flatMap(_.trim.refineEither[Not[Empty] & Not[Blank]]) match
-            case Left(_)      => BadRequest(Json.obj("message" -> Json.fromString("Title must be a nonblank string")))
-            case Right(title) => respond(title)
+    private def albumNotFound  = NotFound(Map("code" -> "album_not_found"))
+    private def serviceFailure = InternalServerError(Map("code" -> "service_failure"))
+    private val invalidTitle   = Map("message" -> "Expected a JSON object with a nonblank string title")
 
-    private def withId(rawId: String)(respond: AlbumId => F[Response[F]]) =
-      Try(UUID.fromString(rawId)).toOption.filter(_.toString.equalsIgnoreCase(rawId)) match
-        case None        => albumNotFound
-        case Some(value) => respond(AlbumId(value))
+    private object Page extends QueryParamDecoderMatcherWithDefault[Int]("page", 1)
 
-    private def parsePage(request: Request[F]) =
-      request.uri.query.multiParams.get("page") match
-        case None         => 1.asRight[String]
-        case Some(values) =>
-          values.toList match
-            case value :: Nil => value.toIntOption.toRight("Page must be a 32-bit integer")
-            case _            => "Supply page once".asLeft[Int]
+    private object AlbumIdVar:
+      def unapply(value: String): Option[AlbumId] =
+        UUIDVar.unapply(value).filter(_.toString.equalsIgnoreCase(value)).map(AlbumId(_))
 
-    private def albumNotFound  = NotFound(Json.obj("code" -> Json.fromString("album_not_found")))
-    private def serviceFailure = InternalServerError(Json.obj("code" -> Json.fromString("service_failure")))
+    private given Decoder[AlbumName] = Decoder.decodeString
+      .emap(_.trim.refineEither[Not[Empty] & Not[Blank]])
+      .prepare(_.downField("title"))
 
-    private def encodeSummary(album: Album) = Json.obj(
-      "id"        -> Json.fromString(album.id.value.toString),
-      "title"     -> Json.fromString(album.title),
-      "createdAt" -> Json.fromString(album.createdAt.toString)
-    )
+    private given Encoder[Album] = Encoder.forProduct3("id", "title", "createdAt"): album =>
+      (album.id.value.toString, album.title: String, album.createdAt.toString)
 
-    private def encodePage(page: AlbumPage) = Json.obj(
-      "albums"      -> Json.fromValues(page.albums.map(encodeSummary)),
-      "page"        -> Json.fromInt(page.page),
-      "pageSize"    -> Json.fromInt(page.pageSize),
-      "totalAlbums" -> Json.fromLong(page.totalAlbums),
-      "totalPages"  -> Json.fromInt(page.totalPages)
-    )
+    private given Encoder[GetAlbumResult.Found] = Encoder.forProduct4("id", "title", "synopsis", "createdAt"): found =>
+      val album = found.album
+      (album.id.value.toString, album.title: String, album.synopsis, album.createdAt.toString)
 
-    private def encodeTemplate(template: SpreadTemplate) = Json.obj(
-      "id"    -> Json.fromString(template.id.value.toString),
-      "name"  -> Json.fromString(template.name),
-      "slots" -> Json.fromValues(template.slots.toList.map(encodeSlot))
-    )
+    private given Encoder[AlbumPage] = Encoder.forProduct5("albums", "page", "pageSize", "totalAlbums", "totalPages"): page =>
+      (page.albums, page.page, page.pageSize, page.totalAlbums, page.totalPages)
 
-    private def encodeSlot(slot: SpreadTemplateSlot) =
+    private given Encoder[SpreadTemplateSlot] = Encoder.forProduct5("kind", "x", "y", "width", "height"): slot =>
       val (kind, box) = slot match
         case SpreadTemplateSlot.Photo(box) => ("photo", box)
         case SpreadTemplateSlot.Text(box)  => ("text", box)
-      Json.obj(
-        "kind"   -> Json.fromString(kind),
-        "x"      -> Json.fromDoubleOrString(box.x),
-        "y"      -> Json.fromDoubleOrString(box.y),
-        "width"  -> Json.fromDoubleOrString(box.width),
-        "height" -> Json.fromDoubleOrString(box.height)
-      )
+      (kind, box.x: Double, box.y: Double, box.width: Double, box.height: Double)
+
+    private given Encoder[SpreadTemplate] = Encoder.forProduct3("id", "name", "slots"): template =>
+      (template.id.value.toString, template.name: String, template.slots.toList)
+
+    private given Encoder[ListAlbumStartTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)
