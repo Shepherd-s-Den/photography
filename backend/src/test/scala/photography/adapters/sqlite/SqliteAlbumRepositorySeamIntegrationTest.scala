@@ -23,6 +23,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   private val renamedTitle     = "Renamed album".refineUnsafe[Not[Empty] & Not[Blank]]
   private val countInitialRows = sql"""SELECT (SELECT count(*) FROM album) + (SELECT count(*) FROM spread) +
                                       (SELECT count(*) FROM spread_photo_slot) + (SELECT count(*) FROM spread_text_slot) +
+                                      (SELECT count(*) FROM spread_photo_slot_bleed) +
                                       (SELECT count(*) FROM cover) + (SELECT count(*) FROM cover_slot)""".query[Long].unique
 
   test("should persist the complete initial Album and cover atomically and preserve metadata when renamed"):
@@ -202,6 +203,9 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       val placementId        = buildUuid(407).toString
       val sessionId          = buildUuid(408).toString
       val albumId            = buildUuid(1).toString
+      val photosTemplateId   = buildUuid(409).toString
+      val photosSpreadId     = buildUuid(410).toString
+      val photosSlotId       = buildUuid(411).toString
       val insertTemplateSlot = sql"""INSERT INTO spread_template_slot (template_id, kind, x, y, width, height)
                                      VALUES ($templateId, 'photo', 0, 0, 100, 100)"""
       val insertChapterStart = sql"""INSERT INTO spread (id, template_id, kind, chapter_id, position)
@@ -209,6 +213,10 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       val insertPlacement = sql"""INSERT INTO placement
                                   (id, photo_id, kind, spread_photo_slot_id, shift_x, shift_y, mirrored, zoom, caption_corner)
                                   VALUES ($placementId, $photoId, 'spread', $slotId, 0, 0, 0, 1, 'bottom_left')"""
+      val insertPhotosTemplateSlot = sql"""INSERT INTO spread_template_slot (template_id, kind, x, y, width, height)
+                                           VALUES ($photosTemplateId, 'photo', 0, 0, 100, 100)"""
+      val insertPhotosSpread = sql"""INSERT INTO spread (id, template_id, kind, chapter_id, position)
+                                     VALUES ($photosSpreadId, $photosTemplateId, 'photos_only', $chapterId, 1)"""
       val countOwned = sql"""SELECT (SELECT count(*) FROM album) + (SELECT count(*) FROM chapter) +
                              (SELECT count(*) FROM photo) + (SELECT count(*) FROM spread) +
                              (SELECT count(*) FROM placement) + (SELECT count(*) FROM spread_editing_lock) +
@@ -227,6 +235,10 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           _ <- insertChapterStart.update.run
           _ <- sql"INSERT INTO spread_photo_slot VALUES ($slotId, $spreadId, 0, 0, 100, 100)".update.run
           _ <- insertPlacement.update.run
+          _ <- sql"INSERT INTO spread_template VALUES ($photosTemplateId, 'Photos', 'photos_only')".update.run
+          _ <- insertPhotosTemplateSlot.update.run
+          _ <- insertPhotosSpread.update.run
+          _ <- sql"INSERT INTO spread_photo_slot VALUES ($photosSlotId, $photosSpreadId, 0, 0, 100, 100)".update.run
           _ <- sql"INSERT INTO editor_session VALUES ($sessionId, 'owner', 0)".update.run
           _ <- sql"INSERT INTO spread_editing_lock VALUES ($spreadId, $sessionId)".update.run
           _ <- sql"INSERT INTO cover_editing_lock VALUES ($albumId, $sessionId)".update.run
@@ -239,8 +251,8 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           "UPDATE spread_template SET kind = 'chapter_start' WHERE name = 'Chapter'"
         ),
         (
-          "UPDATE spread SET kind = 'photos_only', position = 1 WHERE chapter_id IS NOT NULL",
-          "UPDATE spread SET kind = 'chapter_start', position = 0 WHERE chapter_id IS NOT NULL"
+          "UPDATE spread SET kind = 'photos_only', position = 2 WHERE position = 0 AND chapter_id IS NOT NULL",
+          "UPDATE spread SET kind = 'chapter_start', position = 0 WHERE position = 2 AND chapter_id IS NOT NULL"
         )
       )
       def rejectCorruptions(album: Album) =
@@ -280,13 +292,24 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           Vector(expectedSlot),
           Vector(expectedPlacement)
         )
-        val expectedAlbum = album.copy(spreads = album.spreads.append(expectedChapter: Spread))
+        val expectedPhotosSlot =
+          SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(411)), SpreadId(buildUuid(410)), box, bleed = Set.empty[SpreadEdge])
+        val expectedPhotos = Spread.PhotosOnly(
+          SpreadId(buildUuid(410)),
+          ChapterId(buildUuid(402)),
+          1.refineUnsafe,
+          SpreadTemplateId(buildUuid(409)),
+          Vector(expectedPhotosSlot),
+          placements = Vector.empty[SpreadPlacement]
+        )
+        val expectedSpreads = album.spreads.append(expectedChapter: Spread).append(expectedPhotos: Spread)
+        val expectedAlbum   = album.copy(spreads = expectedSpreads)
         assertEquals(found, GetResult.Found(expectedAlbum))
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(owned, 0L)
-        assertEquals(shared, (1L, 1L, 5L, 1L))
+        assertEquals(shared, (1L, 1L, 6L, 1L))
 
-  private def buildAlbum(index: Int): IO[Album] =
+  private def buildAlbum(index: Int) =
     IO:
       val albumId  = AlbumId(buildUuid(index))
       val spreadId = SpreadId(buildUuid(index + 100))
