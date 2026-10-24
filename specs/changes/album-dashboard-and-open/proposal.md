@@ -27,7 +27,7 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 
 - An out-of-range page returns the last page; an empty collection returns page `1` with `totalPages: 0`.
 - Generate a stable UUID and immutable UTC `createdAt` for each album; list newest-first.
-- Seed several `AlbumStart` spread templates for new databases and V1 upgrades; the template list API returns all of them, and clients supply no template ID.
+- Seed four `AlbumStart` layouts from the legacy catalog: `1 Full L + Synopsis R`, `2×2 L + Synopsis R`, `3+2 L + Synopsis R`, and `P+2L L + Synopsis R`. Preserve their slot order and Saal 42×28 geometry, with synopsis always on the right; the template list API returns all four, and clients supply no template ID.
 - Creating an album uses the `AlbumStart` template with the lowest ID.
 - Album titles are nonempty after trimming; create and rename trim input before validation.
 - SQLite enforces declared primary/foreign keys and unique chapter positions, with foreign-key checks enabled on every connection.
@@ -44,13 +44,14 @@ Replace the static entry point with a persisted-album dashboard at `/` where use
 | `cover` | `{spineOwner, front, back}`; each side is `{id, placement}`, with `null` for an empty placement. |
 | Values | IDs are canonical UUID strings; absent optional values are `null`; empty collections are `[]`. |
 
-New albums have a single `AlbumStart` spread with one full-spread text slot, and empty cover placements; slot and placement associations use stable IDs and arrays preserve domain order.
+New albums have a single `AlbumStart` spread with all slots of the selected template and empty placements. The lowest-ID seed is `2×2 L + Synopsis R`: four photo slots on the left and one synopsis text slot on the right. Slot and placement associations use stable IDs and arrays preserve template order.
 
 ```mermaid
 flowchart TD
 Album["Album · empty synopsis"] --> Spreads["Spreads · non-empty"]
 Spreads --> Start["AlbumStart · first spread"]
-Start --> TextSlot["One full-spread text slot"]
+Start --> PhotoSlot["Four empty left photo slots"]
+Start --> TextSlot["Right synopsis text slot"]
 Spreads --> Chapter["Chapter block · ChapterStart then its photo spreads"]
 Album --> Cover["Cover · front spine"]
 Cover --> Front["Empty front slot"]

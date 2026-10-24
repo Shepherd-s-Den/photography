@@ -84,20 +84,17 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate) =
-      val textSlotBoxes =
-        template.slots.toList
-          .collect:
-            case SpreadTemplateSlot.Text(box) => box
       for
         albumId   <- identifiers.nextId.map(AlbumId(_))
         spreadId  <- identifiers.nextId.map(SpreadId(_))
-        slotIds   <- textSlotBoxes.traverse(_ => identifiers.nextId)
+        slotIds   <- template.slots.toList.traverse(_ => identifiers.nextId)
         frontId   <- identifiers.nextId.map(CoverSlotId(_))
         backId    <- identifiers.nextId.map(CoverSlotId(_))
         createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
-        val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
-          SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
+        val slots = template.slots.toList.zip(slotIds).map:
+          case (SpreadTemplateSlot.Photo(box), id) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, Set.empty[SpreadEdge])
+          case (SpreadTemplateSlot.Text(box), id)  => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, placements = Vector.empty[SpreadPlacement])
         val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))

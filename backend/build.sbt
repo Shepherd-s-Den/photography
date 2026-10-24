@@ -45,7 +45,7 @@ lazy val root = (project in file("."))
       "com.github.pureconfig" %% "pureconfig-http4s"         % "0.17.9",
       "com.github.pureconfig" %% "pureconfig-ip4s"           % "0.17.9",
       "com.github.geirolz"    %% "fly4s"                     % "1.1.1",
-      "org.flywaydb"           % "flyway-core"               % "13.10.0",
+      "org.flywaydb"           % "flyway-core"               % "11.18.0",
       "org.xerial"             % "sqlite-jdbc"               % "3.53.4.0",
       "org.http4s"            %% "http4s-dsl"                % "0.23.33",
       "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
