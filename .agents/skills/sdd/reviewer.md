@@ -1,6 +1,6 @@
 # SDD reviewer
 
-Independently re-derive each applicable checklist for one work item (a Spec PR, an Implementation PR, or the Archive PR) from its source artifacts and evidence. Spec PRs require **two sequential rounds**, each performed by a fresh, context-free agent; never reuse or fork the first reviewer.
+Independently re-derive each applicable checklist for one work item (a Spec PR, an Implementation PR, or the Archive PR) from its source artifacts and evidence. Every work item requires **two sequential rounds**, each performed by a fresh, context-free agent; never reuse or fork the first reviewer.
 
 ## Which checklist, for which PR
 
@@ -14,9 +14,8 @@ Spike has no work item of its own — it produces no PR, and its scratch notes i
 
 ## Protocol
 
-1. **Round one — diagnose.** A fresh reviewer reads the work item and governing sources, runs the spec wrapping check on the proposal and every changed Markdown file, fills `.agent-work/<slug>/review-1/` blind, and reports exact disagreements. A failed check blocks approval; for specs, also flag slop, grounding, visual-form, Doc Sync, and Out of Scope.
-2. **Adjudicate and revise.** The executor records each disposition and fixes accepted findings; round one does not edit or approve the work item.
-3. **Round two — independently re-review.** A second fresh reviewer reads sources anew, reruns the wrapping check on the proposal and every changed Markdown file, and fills `.agent-work/<slug>/review-2/` before seeing earlier reviews. It checks round-one findings and reports unresolved or new issues with exact passages; it does not edit the spec.
-4. **Close the gate.** Resolve round-two findings and adjudicate every dispute; merge only after both rounds.
+1. **Review, twice in sequence.** Each round is the same: the orchestrator launches a fresh reviewer that re-derives every applicable checklist and checks the work item against its sources, the wrapping check, and, for specs, the spec-quality items. Round two starts from round one's findings and dispositions. The reviewer only reports exact findings with passages; it never edits or approves. Results go in `.agent-work/<slug>/review-<n>/`.
+2. **Adjudicate and fix after each round.** The orchestrator decides each finding, fixes accepted ones, and records justified exceptions for rejected ones. Then it launches the next round.
+3. **Publication:** report both rounds and their dispositions to the orchestrator for `SKILL.md`'s PR-opening gate. Review the local branch before publication; a GitHub PR is not required to run these rounds. Merge remains a separate maintainer decision.
 
-For Implementation and Archive PRs, use one fresh reviewer and the applicable checklist row above, unless the work item is also a Spec PR.
+Every work item (Spec, Implementation, and Archive PR) gets both rounds in step 1, each performed by a new fresh reviewer, using the applicable checklist row above. A single reviewer never satisfies the review gate for any work item.

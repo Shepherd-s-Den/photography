@@ -49,10 +49,11 @@ object AlbumService:
     override def create(title: AlbumName): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          buildInitialComposition(title, templates.head).flatMap: (album, cover) =>
+          buildInitialComposition(title, templates.head).flatMap { case (album, cover) =>
             repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
+          }
         case ListAlbumStartTemplatesResult.Failed => CreateAlbumResult.Failed.pure[F]
 
     override def get(id: AlbumId): F[GetAlbumResult] =
@@ -84,24 +85,24 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     private def buildInitialComposition(title: AlbumName, template: SpreadTemplate) =
-      val textSlotBoxes =
-        template.slots.toList
-          .collect:
-            case SpreadTemplateSlot.Text(box) => box
       for
         albumId   <- identifiers.nextId.map(AlbumId(_))
         spreadId  <- identifiers.nextId.map(SpreadId(_))
-        slotIds   <- textSlotBoxes.traverse(_ => identifiers.nextId)
+        slots     <- template.slots.toList.traverse(buildInitialSlot(spreadId, _))
         frontId   <- identifiers.nextId.map(CoverSlotId(_))
         backId    <- identifiers.nextId.map(CoverSlotId(_))
         createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
-        val slots = textSlotBoxes.zip(slotIds).map: (box, id) =>
-          SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
         val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, placements = Vector.empty[SpreadPlacement])
         val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
+
+    private def buildInitialSlot(spreadId: SpreadId, slot: SpreadTemplateSlot) =
+      identifiers.nextId.map: id =>
+        slot match
+          case SpreadTemplateSlot.Photo(box) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, bleed = Set.empty[SpreadEdge]): SpreadSlot
+          case SpreadTemplateSlot.Text(box)  => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box): SpreadSlot
 
   final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
 

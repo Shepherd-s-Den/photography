@@ -22,6 +22,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
   private val pageSize       = 6.refineUnsafe[Positive]
   private val createdAt      = Instant.parse("2026-10-07T12:00:00Z")
   private val fullBox        = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 1.0.refineUnsafe, 1.0.refineUnsafe)
+  private val photoBox       = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 0.5.refineUnsafe, 1.0.refineUnsafe)
   private val newTitle       = "Northern Coast".refineUnsafe[Not[Empty] & Not[Blank]]
   private val thirteenAlbums = Vector.tabulate(13)(buildAlbum).reverse
 
@@ -62,13 +63,16 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       SpreadId(buildUuid(11)),
       AlbumId(buildUuid(10)),
       SpreadTemplateId(buildUuid(20)),
-      Vector(SpreadSlot.Text(TextSpreadSlotId(buildUuid(12)), SpreadId(buildUuid(11)), fullBox)),
+      Vector(
+        SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(12)), SpreadId(buildUuid(11)), photoBox, bleed = Set.empty[SpreadEdge]),
+        SpreadSlot.Text(TextSpreadSlotId(buildUuid(13)), SpreadId(buildUuid(11)), fullBox)
+      ),
       Vector.empty[SpreadPlacement]
     )
     val expectedAlbum =
       Album(AlbumId(buildUuid(10)), newTitle, synopsis = "", Instant.parse("2026-10-07T12:00:00.123Z"), NonEmptyList.one(expectedStart: Spread))
     val expectedCover =
-      Cover(AlbumId(buildUuid(10)), SpineOwner.Front, CoverSlot(CoverSlotId(buildUuid(13))), CoverSlot(CoverSlotId(buildUuid(14))))
+      Cover(AlbumId(buildUuid(10)), SpineOwner.Front, CoverSlot(CoverSlotId(buildUuid(14))), CoverSlot(CoverSlotId(buildUuid(15))))
 
     for
       result  <- buildService(refs, listResult = listed, currentTime = suppliedTime).create(newTitle)
@@ -107,15 +111,16 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(failed, GetAlbumResult.Failed)
 
   test("should rename an existing Album, report not found, and report failure when persistence fails"):
-    val refs    = Refs()
-    val renamed = buildAlbum(1).copy(title = newTitle)
+    val refs         = Refs()
+    val renamed      = buildAlbum(1).copy(title = newTitle)
+    val failedRename =
+      buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure)).rename(AlbumId(buildUuid(1)), newTitle)
 
     for
       result    <- buildService(refs, renameResult = AlbumRepository.RenameResult.Renamed(renamed)).rename(AlbumId(buildUuid(1)), newTitle)
       renamedTo <- refs.maybeRenamed.get
       missing   <- buildService(Refs()).rename(AlbumId(buildUuid(1)), newTitle)
-      failed    <-
-        buildService(Refs(), renameResult = AlbumRepository.RenameResult.Failed(Failure.DatabaseFailure)).rename(AlbumId(buildUuid(1)), newTitle)
+      failed    <- failedRename
     yield
       assertEquals(result, RenameAlbumResult.Renamed(renamed))
       assertEquals(renamedTo, (AlbumId(buildUuid(1)) -> newTitle).some)
@@ -190,7 +195,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       SpreadTemplateId(buildUuid(index)),
       s"Template $index".refineUnsafe[Not[Empty]],
       SpreadTemplateKind.AlbumStart,
-      NonEmptyList.one(SpreadTemplateSlot.Text(fullBox))
+      NonEmptyList.of(SpreadTemplateSlot.Photo(photoBox), SpreadTemplateSlot.Text(fullBox))
     )
 
   private def buildAlbum(index: Int) =

@@ -8,7 +8,7 @@ Architecture and design rationale live in [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPL
 
 The backend is Scala 3 and follows Typelevel and Tagless Final principles for effectful application boundaries. The frontend uses SolidJS and TypeScript. Dagger runs affected-component CI.
 
-Install the pinned Java 25, Scala 3.8, and Node 24 toolchain with [mise](https://mise.jdx.dev): `mise install`. Docker is required for Dagger's containerized checks.
+Install the pinned Java 25, Scala 3.10, and Node 24 toolchain with [mise](https://mise.jdx.dev): `mise install`. Docker is required for Dagger's containerized checks.
 
 ### Local development
 
