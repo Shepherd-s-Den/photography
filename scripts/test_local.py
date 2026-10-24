@@ -228,10 +228,8 @@ class LocalRunnerComponentTest(unittest.TestCase):
         self.assertEqual(start.call_count, 2)
         self.assertEqual(start.call_args_list[1].args[0][0:3], ["npm", "run", "dev"])
         self.assertEqual(start.call_args_list[1].kwargs["cwd"], frontend)
-        self.assertEqual(
-            start.call_args_list[1].kwargs["env"]["VITE_API_TARGET"],
-            "http://127.0.0.1:8080",
-        )
+        vite_target = start.call_args_list[1].kwargs["env"]["VITE_API_TARGET"]
+        self.assertEqual(vite_target, "http://127.0.0.1:8080")
         self.assertEqual(ready.call_count, 2)
         self.assertEqual(ready.call_args_list[1].kwargs["service_name"], "Frontend")
 

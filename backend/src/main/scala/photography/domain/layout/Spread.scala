@@ -13,16 +13,32 @@ object SpreadId:
   def apply(value: UUID): SpreadId         = value
   extension (id: SpreadId) def value: UUID = id
 
-enum SpreadOwner:
-  case Album(id: AlbumId)
-  case Chapter(id: ChapterId)
+sealed trait Spread:
+  def id: SpreadId
+  def template: SpreadTemplateId
+  def slots: Vector[SpreadSlot]
+  def placements: Vector[SpreadPlacement]
 
-enum Spread:
-  case AlbumStart(id: SpreadId, album: AlbumId, template: SpreadTemplateId)
-  case ChapterStart(id: SpreadId, chapter: ChapterId, template: SpreadTemplateId)
-  case PhotosOnly(
+object Spread:
+  final case class AlbumStart(
+      id: SpreadId,
+      album: AlbumId,
+      template: SpreadTemplateId,
+      slots: Vector[SpreadSlot],
+      placements: Vector[SpreadPlacement]
+  ) extends Spread
+  final case class ChapterStart(
+      id: SpreadId,
+      chapter: ChapterId,
+      template: SpreadTemplateId,
+      slots: Vector[SpreadSlot],
+      placements: Vector[SpreadPlacement]
+  ) extends Spread
+  final case class PhotosOnly(
       id: SpreadId,
       chapter: ChapterId,
       position: PositionInChapter,
-      template: SpreadTemplateId
-  )
+      template: SpreadTemplateId,
+      slots: Vector[SpreadSlot],
+      placements: Vector[SpreadPlacement]
+  ) extends Spread

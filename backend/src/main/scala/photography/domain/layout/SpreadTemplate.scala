@@ -1,6 +1,6 @@
 package photography.domain.layout
 
-import cats.data.NonEmptySet
+import cats.data.NonEmptyList
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.util.UUID
@@ -19,20 +19,10 @@ object SpreadTemplateId:
 enum SpreadTemplateKind derives CanEqual:
   case AlbumStart, ChapterStart, PhotosOnly
 
-final case class SlotBox(
-    x: PositionOnSpread,
-    y: PositionOnSpread,
-    width: DistanceWithinSpread,
-    height: DistanceWithinSpread
-)
+final case class SlotBox(x: PositionOnSpread, y: PositionOnSpread, width: DistanceWithinSpread, height: DistanceWithinSpread) derives CanEqual
 
 enum SpreadTemplateSlot derives CanEqual:
   case Photo(box: SlotBox)
   case Text(box: SlotBox)
 
-final case class SpreadTemplate(
-    id: SpreadTemplateId,
-    name: SpreadTemplateName,
-    kind: SpreadTemplateKind,
-    slots: NonEmptySet[SpreadTemplateSlot]
-)
+final case class SpreadTemplate(id: SpreadTemplateId, name: SpreadTemplateName, kind: SpreadTemplateKind, slots: NonEmptyList[SpreadTemplateSlot])

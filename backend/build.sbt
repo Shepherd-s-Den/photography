@@ -23,13 +23,14 @@ lazy val root = (project in file("."))
     semanticdbEnabled := true,
     semanticdbVersion := scalafixSemanticdb.revision,
     wartremoverErrors ++= Warts.all,
+    Test / scalacOptions ~= (_.filterNot(_ == "-P:wartremover:traverser:org.wartremover.warts.DefaultArguments")),
     coverageMinimumStmtTotal   := 100,
     coverageMinimumBranchTotal := 100,
     coverageFailOnMinimum      := true,
     coverageExcludedPackages   := Seq(
-      "photography\\.app\\.runtime\\..*",
+      "photography\\.app\\.runtime\\..*", // composition root; exercised by the packaged runtime, not unit tests
       "photography\\.adapters\\.sqlite\\..*",
-      ".*photography\\.domain\\..*(AbsoluteLocation|AlbumId|ChapterId|CountryId|DestinationId|PhotoId|RelativeLocation|EditorId|SessionId|CameraId|LensId|CoverPlacementId|CoverSlotId|PhotoSpreadSlotId|SpreadId|SpreadPlacementId|SpreadTemplateId|TextSpreadSlotId).*"
+      ".*photography\\.domain\\..*(AbsoluteLocation|AlbumId|ChapterId|CountryId|DestinationId|PhotoId|RelativeLocation|EditorId|SessionId|CameraId|LensId|CoverSlotId|PhotoSpreadSlotId|SpreadId|SpreadPlacementId|SpreadTemplateId|TextSpreadSlotId).*"
     ).mkString(";"),
     libraryDependencies ++= Seq(
       "org.typelevel"         %% "cats-core"                 % "2.13.0",
@@ -49,6 +50,9 @@ lazy val root = (project in file("."))
       "org.http4s"            %% "http4s-dsl"                % "0.23.33",
       "org.http4s"            %% "http4s-ember-server"       % "0.23.33",
       "org.http4s"            %% "http4s-ember-client"       % "0.23.33" % Test,
-      "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test
+      "org.typelevel"         %% "log4cats-slf4j"            % "2.7.0",
+      "org.slf4j"              % "slf4j-simple"              % "2.0.20"  % Runtime,
+      "org.typelevel"         %% "munit-cats-effect"         % "2.1.0"   % Test,
+      "com.tngtech.archunit"   % "archunit"                  % "1.5.1"   % Test
     )
   )
