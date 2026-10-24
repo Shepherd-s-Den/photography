@@ -75,7 +75,9 @@ Cover --> Back["Empty back slot"]
 - Page changes slide directionally; keep the current page visible while loading.
 - Cards use a 42:28 cover area, bottom title extension, compact type, and turquoise focus halo.
 - Empty covers use a turquoise/azure placeholder; selecting a card opens `/albums/{id}`.
-- Show loading, successful-empty, and retryable list-error states.
+- Keep a single Add album action at the top right.
+- An empty album collection leaves the album area blank.
+- Show loading and retryable list-error states.
 
 ### Add and edit
 
@@ -90,11 +92,11 @@ Cover --> Back["Empty back slot"]
 ### Open and persist
 
 - Selecting, directly opening, or reloading `/albums/{id}` loads that album read-only.
+- The album page displays only its title and synopsis beneath navigation.
 - `GET` returns the album metadata `{id, title, synopsis, createdAt}`; it does not return the composition.
 - Show loading until album metadata arrives; failed loads never render partial success.
 - New albums have a single `AlbumStart` spread and empty cover placements.
 - Create the valid initial composition atomically using the `AlbumStart` template with the lowest ID.
-- The dashboard fetches all `AlbumStart` templates for display; loading and failure states follow the same rules as albums.
 - `GET /api/templates/album-start` returns the complete ordered catalog and slot geometry; listing failure returns `500 service_failure`.
 - Malformed or unknown IDs on read, rename, or delete share `404 album_not_found`.
 - Service/incomplete-state failures use `500 service_failure`.
@@ -103,6 +105,7 @@ Cover --> Back["Empty back slot"]
 - `GET` and `HEAD` serve built assets with their media types; extensionless paths outside `/api`, `/health`, and `/assets` return the app entry point, including direct album links.
 - Missing assets, dotted paths, and unsupported frontend methods return `404`; unmatched `/api` requests return `404 {code: "not_found"}` as JSON. Existing API and health responses take precedence.
 - A backend build fails when the built frontend entry point is absent; the packaged backend includes the complete frontend asset tree.
+- Dagger prepares frontend assets for remote checks; the local launcher installs locked frontend dependencies and builds assets before starting services. Preparation failures stop startup with an explicit error.
 - A browser journey creates, lists, opens, reloads, renames, and deletes using real persistence.
 
 ## Doc Sync
@@ -110,3 +113,4 @@ Cover --> Back["Empty back slot"]
 - `specs/design.md` — Architecture constraints: state that all backend APIs use REST over HTTP.
 - `specs/contracts.md` — Contract inventory: identify SQLite migrations as the schema contract, including the four seeded AlbumStart layouts and connection-level foreign-key enforcement.
 - `specs/contracts.md` — Contract inventory: point to the OpenAPI specification for the five album routes and AlbumStart-template listing, including request, response, pagination, and error contracts.
+- `specs/operational.md` — Local service: the launcher installs locked frontend dependencies and builds assets before starting services; preparation failures stop startup.

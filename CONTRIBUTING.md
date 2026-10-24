@@ -12,17 +12,9 @@ Install the pinned Java 25, Scala 3.10, and Node 24 toolchain with [mise](https:
 
 ### Local development
 
-Compile the backend:
+Run `python3 scripts/local.py` from the repository root for local development. It installs locked frontend dependencies, builds the assets, and starts the backend and frontend development server.
 
-```sh
-cd backend && sbt compile
-```
-
-Before running or packaging the backend directly, run `npm ci --prefix frontend && npm run build --prefix frontend`. The backend build requires `frontend/dist/index.html` and packages the entire built asset tree; the backend Dagger gate builds it automatically. The backend serves the built app and API on one origin, with extensionless navigation falling back to the app entry point.
-
-Run the local backend service with `python3 scripts/local.py` from the repository root.
-
-Install frontend dependencies with `npm ci` from `frontend/`, then run `python3 scripts/local.py` from the repository root to start the current checkout.
+Use Dagger for remote checks; its backend gate installs and builds the frontend automatically before packaging the complete asset tree with the backend.
 
 | Task | Command |
 | --- | --- |

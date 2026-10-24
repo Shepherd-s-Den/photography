@@ -3,7 +3,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
-from subprocess import TimeoutExpired
+from subprocess import CalledProcessError, TimeoutExpired
 from unittest import mock
 
 import local
@@ -200,38 +200,77 @@ class LocalRunnerComponentTest(unittest.TestCase):
         frontend_process.pid = 48
         frontend_process.poll.return_value = None
 
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            frontend = Path(temporary_directory) / "frontend"
-            (frontend / "node_modules" / ".bin").mkdir(parents=True)
-            (frontend / "package.json").touch()
-            (frontend / "node_modules" / ".bin" / "vite").touch()
-            with mock.patch.object(local, "preflight") as preflight:
-                with mock.patch.object(local.subprocess, "run") as build:
-                    with mock.patch.object(
-                        local.subprocess,
-                        "Popen",
-                        side_effect=[backend_process, frontend_process],
-                    ) as start:
-                        with mock.patch.object(local, "wait_for_readiness") as ready:
-                            with mock.patch.object(local, "wait_for_services", return_value=0):
-                                with mock.patch.object(local, "stop_process_tree"):
-                                    with mock.patch("builtins.print"):
-                                        result = local.run_local_backend(
-                                            Path(temporary_directory),
-                                            {"PHOTOGRAPHY_FRONTEND_PORT": "5174"},
-                                        )
+        for dependencies_present in (False, True):
+            with self.subTest(dependencies_present=dependencies_present), tempfile.TemporaryDirectory() as temporary_directory:
+                frontend = Path(temporary_directory) / "frontend"
+                frontend.mkdir()
+                (frontend / "package.json").touch()
+                if dependencies_present:
+                    (frontend / "node_modules" / ".bin").mkdir(parents=True)
+                    (frontend / "node_modules" / ".bin" / "vite").touch()
+                environment = {"PHOTOGRAPHY_FRONTEND_PORT": "5174"}
+                expected_preparation = [
+                    mock.call(["npm", "ci"], cwd=frontend, env=mock.ANY, check=True),
+                    mock.call(["npm", "run", "build"], cwd=frontend, env=mock.ANY, check=True),
+                ]
 
-        self.assertEqual(result, 0)
-        preflight.assert_called_once_with("127.0.0.1", 8080, 5174)
-        self.assertEqual(build.call_args.args[0], ["npm", "run", "build"])
-        self.assertEqual(build.call_args.kwargs["cwd"], frontend)
-        self.assertEqual(start.call_count, 2)
-        self.assertEqual(start.call_args_list[1].args[0][0:3], ["npm", "run", "dev"])
-        self.assertEqual(start.call_args_list[1].kwargs["cwd"], frontend)
-        vite_target = start.call_args_list[1].kwargs["env"]["VITE_API_TARGET"]
-        self.assertEqual(vite_target, "http://127.0.0.1:8080")
-        self.assertEqual(ready.call_count, 2)
-        self.assertEqual(ready.call_args_list[1].kwargs["service_name"], "Frontend")
+                with (
+                    mock.patch.object(local, "preflight") as preflight,
+                    mock.patch.object(local.subprocess, "run") as preparation,
+                    mock.patch.object(local.subprocess, "Popen", side_effect=[backend_process, frontend_process]) as start,
+                    mock.patch.object(local, "wait_for_readiness") as ready,
+                    mock.patch.object(local, "wait_for_services", return_value=0),
+                    mock.patch.object(local, "stop_process_tree"),
+                    mock.patch("builtins.print"),
+                ):
+                    result = local.run_local_backend(Path(temporary_directory), environment)
+
+                self.assertEqual(result, 0)
+                preflight.assert_called_once_with("127.0.0.1", 8080, 5174)
+                self.assertEqual(preparation.call_args_list, expected_preparation)
+                self.assertEqual(preparation.call_args.kwargs["env"]["PHOTOGRAPHY_FRONTEND_PORT"], "5174")
+                self.assertEqual(start.call_count, 2)
+                self.assertEqual(start.call_args_list[1].args[0][0:3], ["npm", "run", "dev"])
+                self.assertEqual(start.call_args_list[1].kwargs["cwd"], frontend)
+                vite_target = start.call_args_list[1].kwargs["env"]["VITE_API_TARGET"]
+                self.assertEqual(vite_target, "http://127.0.0.1:8080")
+                self.assertEqual(ready.call_count, 2)
+                self.assertEqual(ready.call_args_list[1].kwargs["service_name"], "Frontend")
+
+    def test_should_preparation_failure_stop_startup_and_release_the_lock(self):
+        for command in (["npm", "ci"], ["npm", "run", "build"]):
+            with self.subTest(command=command), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                frontend = root / "frontend"
+                frontend.mkdir()
+                (frontend / "package.json").touch()
+                failure = CalledProcessError(1, command)
+                outcomes = [failure] if command == ["npm", "ci"] else [None, failure]
+
+                with (
+                    mock.patch.object(local, "preflight"),
+                    mock.patch.object(local.subprocess, "run", side_effect=outcomes),
+                    mock.patch.object(local.subprocess, "Popen") as start,
+                ):
+                    with self.assertRaises(CalledProcessError) as raised:
+                        local.run_local_backend(root, {})
+
+                self.assertIs(raised.exception, failure)
+                start.assert_not_called()
+                next_lock = local.acquire_instance_lock(root / ".local" / "photography.lock")
+                next_lock.close()
+
+    def test_should_main_report_preparation_failure_without_starting_services(self):
+        failure = CalledProcessError(1, ["npm", "ci"])
+
+        with (
+            mock.patch.object(local, "run_local_backend", side_effect=failure),
+            mock.patch("builtins.print") as output,
+        ):
+            result = local.main()
+
+        self.assertEqual(result, 1)
+        output.assert_called_once_with(f"Error: {failure}", file=local.sys.stderr)
 
     def test_should_interruption_stop_the_child_and_release_the_lock(self):
         process = mock.Mock()

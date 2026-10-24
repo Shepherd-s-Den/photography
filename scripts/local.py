@@ -212,10 +212,9 @@ def run_local_backend(project_root: Path, environment: Mapping[str, str] | None 
         frontend = project_root / "frontend"
         has_frontend = (frontend / "package.json").is_file()
         frontend_port = parse_frontend_port(launch_environment) if has_frontend else None
-        if has_frontend and not (frontend / "node_modules" / ".bin" / "vite").is_file():
-            raise PreflightError("Run 'npm ci --prefix frontend' before starting the local app")
         preflight(host, port, frontend_port)
         if has_frontend:
+            subprocess.run(["npm", "ci"], cwd=frontend, env=launch_environment, check=True)
             subprocess.run(["npm", "run", "build"], cwd=frontend, env=launch_environment, check=True)
         launch_environment["PHOTOGRAPHY_SQLITE_PATH"] = str(state.database)
         process = subprocess.Popen(
@@ -271,7 +270,7 @@ def main() -> int:
     project_root = Path(__file__).resolve().parent.parent
     try:
         return run_local_backend(project_root)
-    except (PreflightError, StartupError, OSError) as error:
+    except (PreflightError, StartupError, OSError, subprocess.CalledProcessError) as error:
         print(f"Error: {error}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
