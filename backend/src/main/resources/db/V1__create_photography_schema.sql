@@ -14,7 +14,8 @@ CREATE TABLE destination (
 CREATE TABLE album (
     id TEXT PRIMARY KEY NOT NULL,
     title TEXT NOT NULL,
-    synopsis TEXT NOT NULL
+    synopsis TEXT NOT NULL,
+    created_at_ms INTEGER NOT NULL
 ) STRICT;
 
 CREATE TABLE chapter (
@@ -181,3 +182,61 @@ CREATE TABLE cover_editing_lock (
     album_id TEXT PRIMARY KEY NOT NULL REFERENCES cover (album_id),
     session_id TEXT NOT NULL REFERENCES editor_session (id)
 ) STRICT;
+
+-- Album-start spread templates for saal-42x28. Slot coordinates are percent of the spread (x, y, width, height).
+-- Bleed is not seeded: it is a per-spread toggle, not a template property.
+INSERT INTO spread_template (id, name, kind) VALUES
+    ('1e63e2b2-1398-54e8-b059-fdec748f4c98', 'Synopsis Only', 'album_start'),
+    ('e79cafc5-f09d-5ddd-8e17-fe13f65caf8e', '1 Full L + Synopsis R', 'album_start'),
+    ('98f57ca7-5b9f-52bb-afba-584a59533746', '2x2 L + Synopsis R', 'album_start'),
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', '3+2 L + Synopsis R', 'album_start'),
+    ('62947f35-efa8-5d58-ab65-56e4ca1ea162', 'P+2L L + Synopsis R', 'album_start'),
+    ('01ed4265-b44e-5d08-939a-35f9ff006aec', 'Synopsis L + 1 Full R', 'album_start'),
+    ('fb6e0695-8c29-531f-9a57-09b0bd3ff974', 'Synopsis L + 2x2 R', 'album_start'),
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'Synopsis L + 2+3 R', 'album_start'),
+    ('1be6ec3e-b0c6-5a87-989c-19878af0972d', 'Synopsis L + P+2L R', 'album_start');
+
+INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES
+    ('1e63e2b2-1398-54e8-b059-fdec748f4c98', 'text', 50.104993, 0.914609, 49.601025, 98.170781),
+
+    ('e79cafc5-f09d-5ddd-8e17-fe13f65caf8e', 'photo', 0.293982, 0.914609, 49.601025, 98.170781),
+    ('e79cafc5-f09d-5ddd-8e17-fe13f65caf8e', 'text', 50.104993, 0.914609, 49.601025, 98.170781),
+
+    ('98f57ca7-5b9f-52bb-afba-584a59533746', 'photo', 0.293982, 0.914609, 24.695519, 48.758744),
+    ('98f57ca7-5b9f-52bb-afba-584a59533746', 'photo', 25.199487, 0.914609, 24.695519, 48.758744),
+    ('98f57ca7-5b9f-52bb-afba-584a59533746', 'photo', 0.293982, 50.326646, 24.695519, 48.758744),
+    ('98f57ca7-5b9f-52bb-afba-584a59533746', 'photo', 25.199487, 50.326646, 24.695519, 48.758744),
+    ('98f57ca7-5b9f-52bb-afba-584a59533746', 'text', 50.104993, 0.914609, 49.601025, 98.170781),
+
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', 'photo', 0.293982, 0.914609, 16.393684, 38.870004),
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', 'photo', 16.897652, 0.914609, 16.393684, 38.870004),
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', 'photo', 33.501323, 0.914609, 16.393684, 38.870004),
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', 'photo', 0.293982, 40.437905, 24.695519, 58.553948),
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', 'photo', 25.199487, 40.437905, 24.695519, 58.553948),
+    ('995fa056-bbc9-5ad3-a43b-152e9b03bfb4', 'text', 50.104993, 0.914609, 49.601025, 98.170781),
+
+    ('62947f35-efa8-5d58-ab65-56e4ca1ea162', 'photo', 0.293982, 0.914609, 24.695519, 98.170781),
+    ('62947f35-efa8-5d58-ab65-56e4ca1ea162', 'photo', 25.199487, 0.914609, 24.695519, 48.758744),
+    ('62947f35-efa8-5d58-ab65-56e4ca1ea162', 'photo', 25.199487, 50.326646, 24.695519, 48.758744),
+    ('62947f35-efa8-5d58-ab65-56e4ca1ea162', 'text', 50.104993, 0.914609, 49.601025, 98.170781),
+
+    ('01ed4265-b44e-5d08-939a-35f9ff006aec', 'text', 0.293982, 0.914609, 49.601025, 98.170781),
+    ('01ed4265-b44e-5d08-939a-35f9ff006aec', 'photo', 50.104993, 0.914609, 49.601025, 98.170781),
+
+    ('fb6e0695-8c29-531f-9a57-09b0bd3ff974', 'text', 0.293982, 0.914609, 49.601025, 98.170781),
+    ('fb6e0695-8c29-531f-9a57-09b0bd3ff974', 'photo', 50.104993, 0.914609, 24.695519, 48.758744),
+    ('fb6e0695-8c29-531f-9a57-09b0bd3ff974', 'photo', 75.010499, 0.914609, 24.695519, 48.758744),
+    ('fb6e0695-8c29-531f-9a57-09b0bd3ff974', 'photo', 50.104993, 50.326646, 24.695519, 48.758744),
+    ('fb6e0695-8c29-531f-9a57-09b0bd3ff974', 'photo', 75.010499, 50.326646, 24.695519, 48.758744),
+
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'text', 0.293982, 0.914609, 49.601025, 98.170781),
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'photo', 50.104993, 0.914609, 24.695519, 58.553948),
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'photo', 75.010499, 0.914609, 24.695519, 58.553948),
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'photo', 50.104993, 60.12185, 16.393684, 38.870004),
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'photo', 66.708664, 60.12185, 16.393684, 38.870004),
+    ('b363c9a5-7e4e-5cb3-9278-7d5e192e6ed5', 'photo', 83.312335, 60.12185, 16.393684, 38.870004),
+
+    ('1be6ec3e-b0c6-5a87-989c-19878af0972d', 'text', 0.293982, 0.914609, 49.601025, 98.170781),
+    ('1be6ec3e-b0c6-5a87-989c-19878af0972d', 'photo', 50.104993, 0.914609, 24.695519, 98.170781),
+    ('1be6ec3e-b0c6-5a87-989c-19878af0972d', 'photo', 75.010499, 0.914609, 24.695519, 48.758744),
+    ('1be6ec3e-b0c6-5a87-989c-19878af0972d', 'photo', 75.010499, 50.326646, 24.695519, 48.758744);
