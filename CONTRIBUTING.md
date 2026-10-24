@@ -18,6 +18,8 @@ Compile the backend:
 cd backend && sbt compile
 ```
 
+Before running or packaging the backend directly, run `npm ci --prefix frontend && npm run build --prefix frontend`. The backend build requires `frontend/dist/index.html` and packages the entire built asset tree; the backend Dagger gate builds it automatically. The backend serves the built app and API on one origin, with extensionless navigation falling back to the app entry point.
+
 Run the local backend service with `python3 scripts/local.py` from the repository root.
 
 Install frontend dependencies with `npm ci` from `frontend/`, then run `python3 scripts/local.py` from the repository root to start the current checkout.
