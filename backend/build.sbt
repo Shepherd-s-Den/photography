@@ -5,6 +5,15 @@ ThisBuild / version      := "0.1.0"
 lazy val root = (project in file("."))
   .settings(
     name := "photography-backend",
+    Compile / resourceGenerators += Def.task {
+      val frontend = baseDirectory.value.getParentFile / "frontend" / "dist"
+      val packaged = (Compile / resourceManaged).value / "frontend"
+      if (!(frontend / "index.html").isFile)
+        sys.error("Built frontend entry point missing; run npm ci --prefix frontend && npm run build --prefix frontend")
+      IO.delete(packaged)
+      IO.copyDirectory(frontend, packaged)
+      (packaged ** "*").get().filter(_.isFile)
+    }.taskValue,
     scalacOptions ++= Seq(
       "-encoding",
       "utf8",
