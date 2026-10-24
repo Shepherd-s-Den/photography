@@ -18,21 +18,22 @@ import java.time.Instant
 import java.util.UUID
 
 final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
-  private val id        = AlbumId(buildUuid(1))
-  private val start     = Spread.AlbumStart(SpreadId(buildUuid(3)), id, SpreadTemplateId(buildUuid(2)), Vector.empty, Vector.empty)
+  private val id        = AlbumId(new UUID(0L, 1L))
+  private val start     = Spread.AlbumStart(SpreadId(new UUID(0L, 3L)), id, SpreadTemplateId(new UUID(0L, 2L)), Vector.empty, Vector.empty)
   private val album     = Album(id, "Coast".refineUnsafe, "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), NonEmptyList.one(start: Spread))
   private val metadata  = s"""{"id":"${id.value}","title":"Coast","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
 
   test("should list exact album metadata and forward default and explicit pages"):
-    val refs              = Refs()
-    val page              = AlbumPage(Vector(album), 2, 6, 7, 2)
-    val server            = buildAlbumApi(refs, listAlbumsResult = ListAlbumsResult.Listed(page))
-    val paths             = Vector("/api/albums", "/api/albums?page=99", "/api/albums?page=0", "/api/albums?page=-1")
-    val emptyServer       = buildAlbumApi(Refs())
-    val expectedPage      = json(s"""{"albums":[$metadata],"page":2,"pageSize":6,"totalAlbums":7,"totalPages":2}""")
-    val expectedEmpty     = json("""{"albums":[],"page":1,"pageSize":6,"totalAlbums":0,"totalPages":0}""")
+    val refs         = Refs()
+    val page         = AlbumPage(Vector(album), 2, 6, 7, 2)
+    val server       = buildAlbumApi(refs, listAlbumsResult = ListAlbumsResult.Listed(page))
+    val paths        = Vector("/api/albums", "/api/albums?page=99", "/api/albums?page=0", "/api/albums?page=-1")
+    val emptyServer  = buildAlbumApi(Refs())
+    val expectedPage =
+      parse(s"""{"albums":[$metadata],"page":2,"pageSize":6,"totalAlbums":7,"totalPages":2}""").fold(error => fail(error.message), identity)
+    val expectedEmpty = parse("""{"albums":[],"page":1,"pageSize":6,"totalAlbums":0,"totalPages":0}""").fold(error => fail(error.message), identity)
     val expectedResponses = Vector.fill(paths.size)(ApiResponse(Status.Ok, jsonMediaType, expectedPage.some))
 
     for
@@ -61,7 +62,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   test("should trim create and rename titles and return only mutation metadata"):
     val refs             = Refs()
     val server           = buildAlbumApi(refs)
-    val expectedMetadata = json(metadata).some
+    val expectedMetadata = parse(metadata).fold(error => fail(error.message), identity).some
 
     for
       created <- send(server, Method.POST, "/api/albums", """{"title":"  Coast  "}""")
@@ -91,7 +92,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   test("should read metadata without composition and delete with an empty 204 response"):
     val refs     = Refs()
     val server   = buildAlbumApi(refs)
-    val expected = json(s"""{"id":"${id.value}","title":"Coast","synopsis":"A synopsis","createdAt":"2026-10-24T10:00:00.123Z"}""")
+    val expected = parse(s"""{"id":"${id.value}","title":"Coast","synopsis":"A synopsis","createdAt":"2026-10-24T10:00:00.123Z"}""")
+      .fold(error => fail(error.message), identity)
 
     for
       found   <- send(server, Method.GET, albumPath, "")
@@ -112,7 +114,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     )
     val paths        = Vector(albumPath, "/api/albums/not-a-uuid", "/api/albums/1-1-1-1-1")
     val requests     = Vector(Method.GET, Method.PATCH, Method.DELETE).flatMap(method => paths.map(method -> _))
-    val expectedBody = json("""{"code":"album_not_found"}""")
+    val expectedBody = parse("""{"code":"album_not_found"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(requests.size)(ApiResponse(Status.NotFound, jsonMediaType, expectedBody.some))
 
     for
@@ -138,12 +140,11 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       Method.PATCH  -> albumPath,
       Method.DELETE -> albumPath
     )
-    val expectedBody = json("""{"code":"service_failure"}""")
+    val expectedBody = parse("""{"code":"service_failure"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(operations.size)(ApiResponse(Status.InternalServerError, jsonMediaType, expectedBody.some))
 
-    for
-      responses <- operations.traverse { case (method, path) => send(server, method, path, """{"title":"Coast"}""") }
-    yield assertEquals(responses, expected)
+    operations.traverse { case (method, path) => send(server, method, path, """{"title":"Coast"}""") }
+      .map(responses => assertEquals(responses, expected))
 
   final private case class Refs():
     val calls: Ref[IO, Vector[String]] = Ref.unsafe(Vector.empty)
@@ -175,14 +176,10 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     for
       response <- server.run(request)
       body     <- response.as[String]
-    yield ApiResponse(response.status, response.contentType.map(_.mediaType), Option.when(body.nonEmpty)(json(body)))
+    yield
+      val maybeBody = Option.when(body.nonEmpty)(parse(body).fold(error => fail(error.message), identity))
+      ApiResponse(response.status, response.contentType.map(_.mediaType), maybeBody)
 
   private def hasValidationFeedback(response: ApiResponse) =
     response.maybeBody.exists: body =>
       body.asObject.exists(_.keys.toSet === Set("message")) && body.hcursor.get[String]("message").toOption.exists(_.nonEmpty)
-
-  private def json(value: String) =
-    parse(value).fold(error => fail(error.message), identity)
-
-  private def buildUuid(index: Int) =
-    new UUID(0L, index.toLong)

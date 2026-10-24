@@ -19,12 +19,12 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
   private val photoBox      = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
   private val synopsisBox   = SlotBox(21.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
   private val firstTemplate = SpreadTemplate(
-    SpreadTemplateId(buildUuid(2)),
+    SpreadTemplateId(new UUID(0L, 2L)),
     "Synopsis right".refineUnsafe,
     SpreadTemplateKind.AlbumStart,
     NonEmptyList.of(SpreadTemplateSlot.Photo(photoBox), SpreadTemplateSlot.Text(synopsisBox))
   )
-  private val secondTemplate = firstTemplate.copy(id = SpreadTemplateId(buildUuid(4)), name = "Second".refineUnsafe)
+  private val secondTemplate = firstTemplate.copy(id = SpreadTemplateId(new UUID(0L, 4L)), name = "Second".refineUnsafe)
   private val catalog        = NonEmptyList.of(firstTemplate, secondTemplate)
 
   test(s"should list ${SpreadTemplateKind.AlbumStart} templates with ordered geometry and report catalog failures"):
@@ -53,6 +53,3 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
     val templates = new SpreadTemplateService[IO]:
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = result.pure[IO]
     SpreadTemplateApi.make(templates).routes.orNotFound
-
-  private def buildUuid(index: Int) =
-    new UUID(0L, index.toLong)

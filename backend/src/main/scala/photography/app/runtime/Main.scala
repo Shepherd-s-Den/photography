@@ -28,14 +28,9 @@ object Main extends IOApp.Simple:
         yield ()
 
   private def buildHttpApp(config: AppConfig, resources: AppResourcesBuilder.AppResources[IO]) =
-    val templates = SpreadTemplateService.make(SqliteSpreadTemplateRepository.make[IO](resources.sqlite))
-    val albums    = AlbumService.make(
-      SqliteAlbumRepository.make[IO](resources.sqlite),
-      templates,
-      IdGenerator.make[IO],
-      Clock.make[IO],
-      config.albums.pageSize
-    )
+    val templates       = SpreadTemplateService.make(SqliteSpreadTemplateRepository.make[IO](resources.sqlite))
+    val albumRepository = SqliteAlbumRepository.make[IO](resources.sqlite)
+    val albums          = AlbumService.make(albumRepository, templates, IdGenerator.make[IO], Clock.make[IO], config.albums.pageSize)
     (HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes).orNotFound
 
   private def buildHttpServer(config: AppConfig, app: HttpApp[IO]) =
