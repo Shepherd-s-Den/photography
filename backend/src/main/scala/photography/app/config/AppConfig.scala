@@ -15,8 +15,8 @@ final case class AppConfig(sqlite: SqliteConfig, albums: AlbumsConfig, http: Htt
 
 object AppConfig:
 
-  def load[F[_]: Async]: F[AppConfig] =
-    ConfigSource.defaultApplication.at("photography").loadF[F, AppConfig]()
+  def load[F[_]: Async](source: ConfigSource): F[AppConfig] =
+    source.at("photography").loadF[F, AppConfig]()
 
 final case class SqliteConfig(path: Path, connectionAcquisitionThreads: Int, maxSessions: Int) derives ConfigReader
 

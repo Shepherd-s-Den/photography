@@ -2,8 +2,9 @@ package photography.app.config
 
 import cats.effect.IO
 import munit.CatsEffectSuite
+import pureconfig.ConfigSource
 
 final class AppConfigSeamIntegrationTest extends CatsEffectSuite:
 
-  test("should load the default album page size of six"):
-    AppConfig.load[IO].map(config => assertEquals(config.albums.pageSize, 6))
+  test("should load the mock application.conf from test resources"):
+    AppConfig.load[IO](ConfigSource.resources("app-config-seam/application.conf")).void

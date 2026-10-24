@@ -7,13 +7,14 @@ import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.adapters.http.HealthRoutes
 import photography.app.config.AppConfig
+import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
 
   implicit val logger: StructuredLogger[IO] = Slf4jLogger.getLoggerFromName("[Photography]")
 
   override def run: IO[Unit] =
-    AppConfig.load[IO].flatMap: config =>
+    AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
       AppResourcesBuilder.make(config).build[IO].use: resources =>
         for
           _ <- resources.flyway.migrate
