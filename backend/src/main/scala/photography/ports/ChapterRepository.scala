@@ -6,14 +6,14 @@ import photography.domain.album.*
 
 trait ChapterRepository[F[_]]:
   /**
-   * Saved commits references, opening and chronological positions together, checking the chapter manager's rules against the same current state.
-   * Rejected, AlbumNotFound and Failed leave persisted state unchanged; concurrent writes cannot bypass capacity, Home or folder rules.
+   * Commits the chapter, references, opening and supplied order together. Unsuccessful writes leave persisted state unchanged. The manager holds the
+   * shared mutation mutex from its album read through this write; implementations do not choose chapter policy or order.
    */
-  def create(album: AlbumId, chapter: Chapter): F[ChapterRepository.CreateResult]
+  def create(album: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId]): F[ChapterRepository.CreateResult]
 
   /**
-   * Uses the same atomic current-state checks as create, preserving the current chapter's identity, description and composition. A missing or foreign
-   * target returns ChapterNotFound.
+   * Commits editable metadata and supplied order together, preserving identity, description and composition. A missing or foreign target returns
+   * ChapterNotFound. The same mutation mutex covers the manager's read and this write.
    */
   def update(
       album: AlbumId,
@@ -21,16 +21,15 @@ trait ChapterRepository[F[_]]:
       name: DestinationName,
       countries: NonEmptyList[Country],
       period: VisitPeriod,
-      sourceFolder: SourceFolder
+      sourceFolder: SourceFolder,
+      order: NonEmptyList[ChapterId]
   ): F[ChapterRepository.UpdateResult]
 
 object ChapterRepository:
   enum CreateResult:
     case Saved
-    case Rejected(reason: ChapterConflict)
     case AlbumNotFound, Failed
 
   enum UpdateResult:
     case Saved
-    case Rejected(reason: ChapterConflict)
     case ChapterNotFound, AlbumNotFound, Failed

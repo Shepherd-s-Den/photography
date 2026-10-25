@@ -93,6 +93,7 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
 
   test("should reject creation without writing when the AlbumStart template listing fails"):
     val refs = Refs()
+
     for
       result  <- buildService(refs, listResult = ListAlbumStartTemplatesResult.Failed).create(selectedYear, "Asian capitals")
       created <- refs.maybeCreated.get

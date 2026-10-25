@@ -1,7 +1,8 @@
 package photography.usecases
 
-import cats.Monad
 import cats.data.NonEmptyList
+import cats.effect.kernel.MonadCancelThrow
+import cats.effect.std.Mutex
 import cats.syntax.all.*
 import photography.capabilities.IdGenerator
 import photography.domain.album.*
@@ -24,21 +25,17 @@ trait ChapterManager[F[_]]:
   ): F[UpdateResult]
 
 object ChapterManager:
-  def make[F[_]: Monad: IdGenerator](
+  def make[F[_]: MonadCancelThrow: IdGenerator: Mutex](
       albums: AlbumRepository[F],
       chapters: ChapterRepository[F],
-      templates: SpreadTemplateManager[F],
-      rules: Rules
+      templates: SpreadTemplateManager[F]
   ): ChapterManager[F] =
-    new LiveChapterManager(albums, chapters, templates, rules)
+    new LiveChapterManager(albums, chapters, templates)
 
-  def rules: Rules = new LiveRules
-
-  final private class LiveChapterManager[F[_]: Monad: IdGenerator](
+  final private class LiveChapterManager[F[_]: MonadCancelThrow: IdGenerator: Mutex](
       albums: AlbumRepository[F],
       chapters: ChapterRepository[F],
-      templates: SpreadTemplateManager[F],
-      rules: Rules
+      templates: SpreadTemplateManager[F]
   ) extends ChapterManager[F]:
     override def create(
         album: AlbumId,
@@ -47,10 +44,22 @@ object ChapterManager:
         period: Period,
         sourceFolder: SourceFolder
     ): F[CreateResult] =
-      albums.get(album).flatMap:
-        case AlbumRepository.GetResult.Found(current) => createChapter(current, name, countries, period, sourceFolder)
-        case AlbumRepository.GetResult.NotFound       => CreateResult.AlbumNotFound.pure[F]
-        case AlbumRepository.GetResult.Failed(_)      => CreateResult.Failed.pure[F]
+      summon[Mutex[F]].lock.surround:
+        albums.get(album).flatMap:
+          case AlbumRepository.GetResult.Found(current) =>
+            val resolvedPeriod = resolvePeriod(current.year, period)
+            creationConflict(current, name, resolvedPeriod, sourceFolder) match
+              case Some(reason) => CreateResult.Rejected(reason).pure[F]
+              case None         =>
+                templates.listChapterStartTemplates.flatMap:
+                  case ListChapterStartTemplatesResult.Listed(available) =>
+                    for
+                      chapter <- buildChapter(name, countries, resolvedPeriod, sourceFolder, available.head)
+                      saved   <- chapters.create(album, chapter, chapterOrder(chapter, current.chapters))
+                    yield toCreateResult(saved, chapter.id)
+                  case ListChapterStartTemplatesResult.Failed => CreateResult.Failed.pure[F]
+          case AlbumRepository.GetResult.NotFound  => CreateResult.AlbumNotFound.pure[F]
+          case AlbumRepository.GetResult.Failed(_) => CreateResult.Failed.pure[F]
 
     override def update(
         album: AlbumId,
@@ -60,22 +69,65 @@ object ChapterManager:
         period: Period,
         sourceFolder: SourceFolder
     ): F[UpdateResult] =
-      albums.get(album).flatMap:
-        case AlbumRepository.GetResult.Found(current) =>
-          chapters.update(album, chapter, name, countries, resolvePeriod(current.year, period), sourceFolder).map(toUpdateResult)
-        case AlbumRepository.GetResult.NotFound  => UpdateResult.AlbumNotFound.pure[F]
-        case AlbumRepository.GetResult.Failed(_) => UpdateResult.Failed.pure[F]
+      summon[Mutex[F]].lock.surround:
+        albums.get(album).flatMap:
+          case AlbumRepository.GetResult.Found(current) =>
+            current.chapters.find(_.id.value === chapter.value) match
+              case None           => UpdateResult.ChapterNotFound.pure[F]
+              case Some(existing) =>
+                val others = current.chapters.filterNot(_.id.value === chapter.value)
+                revisedChapter(current.year, existing, others, name, countries, resolvePeriod(current.year, period), sourceFolder) match
+                  case Left(reason)   => UpdateResult.Rejected(reason).pure[F]
+                  case Right(updated) =>
+                    chapters.update(album, chapter, name, countries, updated.period, sourceFolder, chapterOrder(updated, others)).map(toUpdateResult)
+          case AlbumRepository.GetResult.NotFound  => UpdateResult.AlbumNotFound.pure[F]
+          case AlbumRepository.GetResult.Failed(_) => UpdateResult.Failed.pure[F]
 
-    private def createChapter(album: Album, name: DestinationName, countries: NonEmptyList[Country], period: Period, sourceFolder: SourceFolder) =
-      templates.listChapterStartTemplates.flatMap:
-        case ListChapterStartTemplatesResult.Listed(available) =>
-          buildChapter(name, countries, resolvePeriod(album.year, period), sourceFolder, available.head).flatMap: chapter =>
-            chapters.create(album.id, chapter).map(toCreateResult(_, chapter.id))
-        case ListChapterStartTemplatesResult.Failed => CreateResult.Failed.pure[F]
+    private def creationConflict(
+        album: Album,
+        name: DestinationName,
+        period: VisitPeriod,
+        sourceFolder: SourceFolder
+    ) =
+      if album.spreads.length >= 65 then ChapterConflict.AtCapacity.some
+      else conflict(album.year, album.chapters, name, period, sourceFolder)
+
+    private def revisedChapter(
+        year: AlbumYear,
+        current: Chapter,
+        others: Vector[Chapter],
+        name: DestinationName,
+        countries: NonEmptyList[Country],
+        period: VisitPeriod,
+        sourceFolder: SourceFolder
+    ) =
+      if current.destination.isHome =!= ((name: String) === "Home") then ChapterConflict.TypeChange.asLeft[Chapter]
+      else
+        conflict(year, others, name, period, sourceFolder).toLeft:
+          current.copy(destination = current.destination.copy(name = name, countries = countries), period = period, sourceFolder = sourceFolder)
 
     private def resolvePeriod(year: AlbumYear, period: Period) = period match
-      case Period.AlbumYear    => rules.yearPeriod(year)
+      case Period.AlbumYear    => yearPeriod(year)
       case Period.Dates(value) => value
+
+    private def conflict(year: AlbumYear, others: Vector[Chapter], name: DestinationName, period: VisitPeriod, sourceFolder: SourceFolder) =
+      val isHome = (name: String) === "Home"
+      if isHome && others.exists(_.destination.isHome) then ChapterConflict.HomeExists.some
+      else if isHome && !samePeriod(period, yearPeriod(year)) then ChapterConflict.HomePeriodMismatch.some
+      else if others.exists(value => (value.sourceFolder: String) === sourceFolder) then ChapterConflict.FolderAssigned.some
+      else None
+
+    private def chapterOrder(chapter: Chapter, others: Vector[Chapter]) =
+      NonEmptyList(chapter, others.toList).sortBy { value =>
+        (value.destination.isHome, value.period.firstDay.toEpochDay, value.period.days: Long, value.id.value.toString)
+      }.map(_.id)
+
+    private def yearPeriod(year: AlbumYear) =
+      val days: VisitDays = if Year.isLeap(year.toLong) then 366L else 365L
+      VisitPeriod(LocalDate.of(year, 1, 1), days)
+
+    private def samePeriod(left: VisitPeriod, right: VisitPeriod) =
+      left.firstDay.compareTo(right.firstDay) === 0 && left.days.compare(right.days) === 0
 
     private def buildChapter(
         name: DestinationName,
@@ -100,39 +152,15 @@ object ChapterManager:
       yield Spread.ChapterStart(id, template.id, photos, text, placements = Vector.empty[SpreadPlacement])
 
     private def toCreateResult(result: ChapterRepository.CreateResult, id: ChapterId) = result match
-      case ChapterRepository.CreateResult.Saved            => CreateResult.Created(id)
-      case ChapterRepository.CreateResult.Rejected(reason) => CreateResult.Rejected(reason)
-      case ChapterRepository.CreateResult.AlbumNotFound    => CreateResult.AlbumNotFound
-      case ChapterRepository.CreateResult.Failed           => CreateResult.Failed
+      case ChapterRepository.CreateResult.Saved         => CreateResult.Created(id)
+      case ChapterRepository.CreateResult.AlbumNotFound => CreateResult.AlbumNotFound
+      case ChapterRepository.CreateResult.Failed        => CreateResult.Failed
 
     private def toUpdateResult(result: ChapterRepository.UpdateResult) = result match
-      case ChapterRepository.UpdateResult.Saved            => UpdateResult.Updated
-      case ChapterRepository.UpdateResult.Rejected(reason) => UpdateResult.Rejected(reason)
-      case ChapterRepository.UpdateResult.ChapterNotFound  => UpdateResult.ChapterNotFound
-      case ChapterRepository.UpdateResult.AlbumNotFound    => UpdateResult.AlbumNotFound
-      case ChapterRepository.UpdateResult.Failed           => UpdateResult.Failed
-
-  final private class LiveRules extends Rules:
-    override def ordered(chapters: Vector[Chapter]): Vector[Chapter] =
-      chapters.sortBy { chapter =>
-        (chapter.destination.isHome, chapter.period.firstDay.toEpochDay, chapter.period.days: Long, chapter.id.value.toString)
-      }
-
-    override def yearPeriod(year: AlbumYear): VisitPeriod =
-      val days: VisitDays = if Year.isLeap(year.toLong) then 366L else 365L
-      VisitPeriod(LocalDate.of(year, 1, 1), days)
-
-    override def conflict(album: Album): Option[ChapterConflict] =
-      val chapters = album.chapters
-      val home     = chapters.filter(_.destination.isHome)
-      if album.spreads.length > 65 then ChapterConflict.AtCapacity.some
-      else if home.sizeIs > 1 then ChapterConflict.HomeExists.some
-      else if home.exists(chapter => !samePeriod(chapter.period, yearPeriod(album.year))) then ChapterConflict.HomePeriodMismatch.some
-      else if chapters.map(_.sourceFolder).distinct.size =!= chapters.size then ChapterConflict.FolderAssigned.some
-      else None
-
-    private def samePeriod(left: VisitPeriod, right: VisitPeriod) =
-      left.firstDay.compareTo(right.firstDay) === 0 && left.days.compare(right.days) === 0
+      case ChapterRepository.UpdateResult.Saved           => UpdateResult.Updated
+      case ChapterRepository.UpdateResult.ChapterNotFound => UpdateResult.ChapterNotFound
+      case ChapterRepository.UpdateResult.AlbumNotFound   => UpdateResult.AlbumNotFound
+      case ChapterRepository.UpdateResult.Failed          => UpdateResult.Failed
 
   enum CreateResult:
     case Created(id: ChapterId)
@@ -147,8 +175,3 @@ object ChapterManager:
   enum Period:
     case AlbumYear
     case Dates(value: VisitPeriod)
-
-  trait Rules:
-    def yearPeriod(year: AlbumYear): VisitPeriod
-    def conflict(album: Album): Option[ChapterConflict]
-    def ordered(chapters: Vector[Chapter]): Vector[Chapter]

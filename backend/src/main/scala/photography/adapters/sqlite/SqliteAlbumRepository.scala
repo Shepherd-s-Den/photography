@@ -14,7 +14,6 @@ import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
 import photography.ports.AlbumRepository.*
-import photography.usecases.ChapterManager
 
 import java.nio.file.{InvalidPathException, Path}
 import java.time.{Instant, ZoneOffset}
@@ -22,10 +21,10 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 object SqliteAlbumRepository:
-  def make[F[_]: Async: Logger](transactor: Transactor[F], rules: ChapterManager.Rules): AlbumRepository[F] =
-    new LiveAlbumRepository(transactor, rules)
+  def make[F[_]: Async: Logger](transactor: Transactor[F]): AlbumRepository[F] =
+    new LiveAlbumRepository(transactor)
 
-  final private class LiveAlbumRepository[F[_]: Async: Logger](transactor: Transactor[F], rules: ChapterManager.Rules) extends AlbumRepository[F]:
+  final private class LiveAlbumRepository[F[_]: Async: Logger](transactor: Transactor[F]) extends AlbumRepository[F]:
     override def list(offset: Int, limit: Int): F[ListResult] =
       val query =
         for
@@ -70,25 +69,7 @@ object SqliteAlbumRepository:
             chapters <- loadChapters(id)
             opening  <- loadAlbumOpening(id)
             _        <- validateCover(id)
-            album    <- decodeAlbum(id, year, title, synopsis, createdAt, opening, chapters)
-          yield album.some
-
-    private def decodeAlbum(
-        id: UUID,
-        year: AlbumYear,
-        title: AlbumTitle,
-        synopsis: String,
-        createdAt: Instant,
-        opening: Spread.AlbumStart,
-        chapters: Vector[Chapter]
-    ) =
-      val album         = Album(AlbumId(id), year, title, synopsis, createdAt, opening, chapters)
-      val chronological = rules.ordered(chapters)
-      Either.cond(
-        rules.conflict(album).isEmpty && chapters.map(_.id.value) === chronological.map(_.id.value),
-        album,
-        new IllegalArgumentException("Invalid album capacity or chapter order")
-      ).liftTo[ConnectionIO]
+          yield Album(AlbumId(id), year, title, synopsis, createdAt, opening, chapters).some
 
     private def loadChapters(albumId: UUID) =
       val select = sql"""SELECT c.id, d.id, d.name, c.description,

@@ -2,6 +2,7 @@ package photography.usecases
 
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
+import cats.effect.std.Mutex
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import munit.CatsEffectSuite
@@ -18,7 +19,6 @@ import java.util.UUID
 
 final class ChapterManagerComponentTest extends CatsEffectSuite:
   private val homeName: DestinationName = "Home"
-  private def country                   = Country(CountryId(id(2)), "RO", "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
   private def countries                 = NonEmptyList.of(
     Country(CountryId(id(21)), "JP", "Japan", AbsoluteLocation(Path.of("/flags/jp.svg"))),
     Country(CountryId(id(22)), "KR", "South Korea", AbsoluteLocation(Path.of("/flags/kr.svg"))),
@@ -35,253 +35,268 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     Instant.EPOCH,
     Spread.AlbumStart(
       SpreadId(id(3)),
-      SpreadTemplateId(id(1000)),
+      template.id,
       photoSlots = Vector.empty[SpreadSlot.Photo],
       SpreadSlot.Text(TextSpreadSlotId(id(5)), box),
       placements = Vector.empty[SpreadPlacement]
     ),
     chapters = Vector.empty[Chapter]
   )
+  private def chapter = Chapter(
+    ChapterId(id(20)),
+    Destination(DestinationId(id(30)), "Asian capitals", countries),
+    VisitPeriod(LocalDate.of(2026, 5, 1), 2),
+    "",
+    "/photos/capitals",
+    Spread.ChapterStart(
+      SpreadId(id(40)),
+      template.id,
+      photoSlots = Vector.empty[SpreadSlot.Photo],
+      SpreadSlot.Text(TextSpreadSlotId(id(41)), box),
+      placements = Vector.empty[SpreadPlacement]
+    ),
+    spreads = Vector.empty[Spread.PhotosOnly]
+  )
+  private def home = chapter.copy(
+    id = ChapterId(id(50)),
+    destination = chapter.destination.copy(name = homeName),
+    period = VisitPeriod(LocalDate.of(2026, 1, 1), 365),
+    sourceFolder = "/photos/Home"
+  )
+  private def atCapacity =
+    val photo = Spread.PhotosOnly(
+      SpreadId(id(60)),
+      template.id,
+      NonEmptyList.one(SpreadSlot.Photo(PhotoSpreadSlotId(id(61)), box, bleed = Set.empty)),
+      placements = Vector.empty[SpreadPlacement]
+    )
+    album.copy(chapters = Vector(chapter.copy(spreads = Vector.tabulate(63)(index => photo.copy(id = SpreadId(id(100 + index.toLong)))))))
 
-  test("should create a chapter and its empty opening"):
-    val refs    = Refs()
-    val service = buildService(refs)
-    val period  = VisitPeriod(LocalDate.of(2026, 5, 1), 2)
+  test("should create a multi-country chapter and its empty opening"):
+    val refs = Refs()
 
     for
-      result    <- service.create(album.id, "Asian capitals", countries, Period.Dates(period), "/photos/custom/Kyoto")
-      requested <- refs.creations.get
+      manager <- buildManager(refs)
+      result  <- manager.create(album.id, chapter.destination.name, countries, Period.Dates(chapter.period), chapter.sourceFolder)
+      writes  <- refs.creations.get
     yield
-      val expectedOpening = Spread.ChapterStart(
+      val opening = Spread.ChapterStart(
         SpreadId(id(11)),
         template.id,
         Vector(SpreadSlot.Photo(PhotoSpreadSlotId(id(12)), box, bleed = Set.empty)),
         SpreadSlot.Text(TextSpreadSlotId(id(13)), box),
         placements = Vector.empty[SpreadPlacement]
       )
-      val expected = Chapter(
-        ChapterId(id(10)),
-        Destination(DestinationId(id(14)), "Asian capitals", countries),
-        period,
-        "",
-        "/photos/custom/Kyoto",
-        expectedOpening,
-        spreads = Vector.empty[Spread.PhotosOnly]
-      )
+      val expected = chapter.copy(id = ChapterId(id(10)), destination = chapter.destination.copy(id = DestinationId(id(14))), opening = opening)
       assertEquals(result, CreateResult.Created(expected.id))
-      assertEquals(requested, Vector(album.id -> expected))
+      assertEquals(writes, Vector((album.id, expected, NonEmptyList.one(expected.id))))
       assertEquals(album.copy(chapters = Vector(expected)).countries, countries.toList.toVector)
 
-  test("should resolve the requested album-year period for creation and updates"):
-    val refs       = Refs()
-    val leapPeriod = VisitPeriod(LocalDate.of(2024, 1, 1), 366)
-    val service    =
-      buildService(refs, read = AlbumRepository.GetResult.Found(album.copy(year = 2024)), expectedYear = 2024, albumYearPeriod = leapPeriod)
-    val chapter = ChapterId(id(20))
+  test(s"should resolve the full year for $homeName including leap days"):
+    Vector((2024: AlbumYear, 366: VisitDays), (2026: AlbumYear, 365: VisitDays)).traverse_ { case (year, days) =>
+      val refs    = Refs()
+      val current = album.copy(year = year, chapters = Vector(home.copy(period = VisitPeriod(LocalDate.of(year, 1, 1), days))))
+
+      for
+        manager <- buildManager(refs, current = current)
+        updated <- manager.update(album.id, home.id, homeName, countries, Period.AlbumYear, home.sourceFolder)
+        updates <- refs.updates.get
+      yield
+        assertEquals(updated, UpdateResult.Updated)
+        assertEquals(updates.map(_.period), Vector(VisitPeriod(LocalDate.of(year, 1, 1), days)))
+    }
+
+  test(s"should reject duplicate $homeName chapters, wrong full-year periods and reused folders before writing"):
+    val scenarios = Vector(
+      (album.copy(chapters = Vector(home)), homeName, Period.AlbumYear, "/photos/new": SourceFolder, ChapterConflict.HomeExists),
+      (album, homeName, Period.Dates(chapter.period), "/photos/new": SourceFolder, ChapterConflict.HomePeriodMismatch),
+      (album, homeName, Period.Dates(VisitPeriod(LocalDate.of(2026, 1, 1), 366)), "/photos/new": SourceFolder, ChapterConflict.HomePeriodMismatch),
+      (
+        album.copy(chapters = Vector(chapter)),
+        chapter.destination.name,
+        Period.Dates(chapter.period),
+        chapter.sourceFolder,
+        ChapterConflict.FolderAssigned
+      )
+    )
+    scenarios.traverse_ { case (current, name, period, folder, expected) =>
+      val refs   = Refs()
+      val target = chapter.copy(id = ChapterId(id(70)), destination = chapter.destination.copy(name = name), sourceFolder = "/photos/target")
+
+      for
+        creator   <- buildManager(refs, current = current)
+        editor    <- buildManager(refs, current = current.copy(chapters = current.chapters :+ target))
+        created   <- creator.create(album.id, name, countries, period, folder)
+        updated   <- editor.update(album.id, target.id, name, countries, period, folder)
+        creations <- refs.creations.get
+        updates   <- refs.updates.get
+      yield
+        assertEquals(created, CreateResult.Rejected(expected))
+        assertEquals(updated, UpdateResult.Rejected(expected))
+        assertEquals(creations, Vector.empty)
+        assertEquals(updates, Vector.empty)
+    }
+
+  test(s"should preserve chapter type when editing $homeName or an ordinary chapter"):
+    Vector((home, chapter.destination.name), (chapter, homeName)).traverse_ { case (current, requestedName) =>
+      val refs = Refs()
+
+      for
+        manager <- buildManager(refs, current = album.copy(chapters = Vector(current)))
+        result  <- manager.update(album.id, current.id, requestedName, countries, Period.AlbumYear, "/photos/changed")
+        writes  <- refs.updates.get
+      yield
+        assertEquals(result, UpdateResult.Rejected(ChapterConflict.TypeChange))
+        assertEquals(writes, Vector.empty)
+    }
+
+  test("should admit the last opening, reject further creation and allow metadata changes at capacity"):
+    val refs             = Refs()
+    val current          = atCapacity
+    val updatedCountries = NonEmptyList.one(countries.head)
+    val beforeLast       = current.copy(chapters = current.chapters.map(value => value.copy(spreads = value.spreads.drop(1))))
 
     for
-      created   <- service.create(album.id, "Home", NonEmptyList.one(country), Period.AlbumYear, "/photos/Home")
-      updated   <- service.update(album.id, chapter, "Home", NonEmptyList.one(country), Period.AlbumYear, "/photos/Home")
+      creator  <- buildManager(refs, current = beforeLast)
+      full     <- buildManager(refs, current = current)
+      admitted <- creator.create(album.id, "Kyoto", countries, Period.Dates(chapter.period), "/photos/new")
+      rejected <- full.create(album.id, "Kyoto", countries, Period.Dates(chapter.period), "/photos/new")
+      updated  <- full.update(album.id, chapter.id, "Kyoto", updatedCountries, Period.Dates(chapter.period), "/photos/new")
+      writes   <- refs.updates.get
+    yield
+      assertEquals(beforeLast.spreads.length, 64)
+      assertEquals(current.spreads.length, 65)
+      assertEquals(admitted, CreateResult.Created(ChapterId(id(10))))
+      assertEquals(rejected, CreateResult.Rejected(ChapterConflict.AtCapacity))
+      assertEquals(updated, UpdateResult.Updated)
+      val expectedWrites =
+        Vector((
+          album.id,
+          chapter.id,
+          "Kyoto": DestinationName,
+          updatedCountries,
+          chapter.period,
+          "/photos/new": SourceFolder,
+          NonEmptyList.one(chapter.id)
+        ))
+      assertEquals(writes, expectedWrites)
+
+  test(s"should order chapters by dates and identity with $homeName last"):
+    val refs    = Refs()
+    val earlier = chapter.copy(id = ChapterId(id(70)), period = chapter.period.copy(days = 1), sourceFolder = "/photos/earlier")
+    val tied    = earlier.copy(id = ChapterId(id(71)), sourceFolder = "/photos/tied")
+    val later   = chapter.copy(id = ChapterId(id(72)), period = VisitPeriod(LocalDate.of(2026, 5, 2), 1), sourceFolder = "/photos/later")
+    val current = album.copy(chapters = Vector(earlier, tied, chapter, later, home))
+
+    for
+      manager   <- buildManager(refs, current = current)
+      created   <- manager.create(album.id, "Kyoto", countries, Period.Dates(chapter.period), "/photos/new")
+      updated   <- manager.update(album.id, later.id, "Kyoto", countries, Period.Dates(earlier.period), later.sourceFolder)
       creations <- refs.creations.get
       updates   <- refs.updates.get
     yield
       assertEquals(created, CreateResult.Created(ChapterId(id(10))))
       assertEquals(updated, UpdateResult.Updated)
-      assertEquals(creations.map(_.chapter.period), Vector(leapPeriod))
-      assertEquals(updates, Vector((album.id, chapter, "Home": DestinationName, NonEmptyList.one(country), leapPeriod, "/photos/Home": SourceFolder)))
+      assertEquals(creations.map(_.order), Vector(NonEmptyList.of(earlier.id, tied.id, ChapterId(id(10)), chapter.id, later.id, home.id)))
+      assertEquals(updates.map(_.order), Vector(NonEmptyList.of(earlier.id, tied.id, later.id, chapter.id, home.id)))
 
-  test("should send only editable metadata to the current-state writer"):
-    val refs     = Refs()
-    val service  = buildService(refs)
-    val chapter  = ChapterId(id(20))
-    val period   = VisitPeriod(LocalDate.of(2027, 1, 1), 3)
-    val expected = (album.id, chapter, "Asian capitals": DestinationName, countries, period, "/photos/override": SourceFolder)
-
-    for
-      result  <- service.update(album.id, chapter, "Asian capitals", countries, Period.Dates(period), "/photos/override")
-      updates <- refs.updates.get
-    yield
-      assertEquals(result, UpdateResult.Updated)
-      assertEquals(updates, Vector(expected))
-
-  test("should preserve business conflicts and missing chapter outcomes"):
-    val refs      = Refs()
-    val period    = VisitPeriod(LocalDate.of(2026, 5, 1), 2)
-    val conflicts = Vector(ChapterConflict.AtCapacity, ChapterConflict.HomeExists, ChapterConflict.HomePeriodMismatch, ChapterConflict.FolderAssigned)
-    val rejected  = conflicts.traverse { conflict =>
-      val service = buildService(
-        refs,
-        createWrite = ChapterRepository.CreateResult.Rejected(conflict),
-        updateWrite = ChapterRepository.UpdateResult.Rejected(conflict)
-      )
-      (
-        service.create(album.id, "Kyoto", NonEmptyList.one(country), Period.Dates(period), "/photos/Kyoto"),
-        service.update(album.id, ChapterId(id(20)), "Kyoto", NonEmptyList.one(country), Period.Dates(period), "/photos/Kyoto")
-      ).tupled
-    }
-    val missing = buildService(refs, updateWrite = ChapterRepository.UpdateResult.ChapterNotFound)
+  test("should decide concurrent creations from the latest saved composition"):
+    val refs       = Refs()
+    val beforeLast = atCapacity.copy(chapters = atCapacity.chapters.map(value => value.copy(spreads = value.spreads.drop(1))))
+    val state      = Ref.unsafe[IO, Album](beforeLast)
+    val read       = state.get.flatMap(value => IO.cede.as(AlbumRepository.GetResult.Found(value)))
+    val save       = (value: Chapter) => state.update(valueBefore => valueBefore.copy(chapters = valueBefore.chapters :+ value))
 
     for
-      results <- rejected
-      absent  <- missing.update(album.id, ChapterId(id(99)), "Kyoto", NonEmptyList.one(country), Period.Dates(period), "/photos/Kyoto")
+      manager <- buildManager(refs, maybeRead = read.some, save = save)
+      results <- Vector.fill(2)(()).parTraverse(_ => manager.create(album.id, "Kyoto", countries, Period.Dates(chapter.period), "/photos/new"))
+      saved   <- state.get
     yield
-      val expected = conflicts.map(conflict => (CreateResult.Rejected(conflict), UpdateResult.Rejected(conflict)))
-      assertEquals(results, expected)
-      assertEquals(absent, UpdateResult.ChapterNotFound)
+      assertEquals(results.collect { case CreateResult.Created(_) => () }.size, 1)
+      assertEquals(results.collect { case CreateResult.Rejected(ChapterConflict.AtCapacity) => () }.size, 1)
+      assertEquals(saved.spreads.length, 65)
 
-  test("should report unavailable albums templates and writes explicitly"):
-    val refs   = Refs()
-    val period = Period.Dates(VisitPeriod(LocalDate.of(2026, 5, 1), 2))
-    val reads  = Vector(
-      (response = AlbumRepository.GetResult.NotFound, expected = (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound)),
-      (response = AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure), expected = (CreateResult.Failed, UpdateResult.Failed))
+  test("should report missing albums chapters templates and failed writes explicitly"):
+    val refs    = Refs()
+    val current = album.copy(chapters = Vector(chapter))
+    val period  = Period.Dates(chapter.period)
+    val reads   = Vector(
+      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound)),
+      (AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure), (CreateResult.Failed, UpdateResult.Failed))
     )
     val writes = Vector(
       (
-        create = ChapterRepository.CreateResult.AlbumNotFound,
-        update = ChapterRepository.UpdateResult.AlbumNotFound,
-        expected = (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound)
+        ChapterRepository.CreateResult.AlbumNotFound,
+        ChapterRepository.UpdateResult.AlbumNotFound,
+        (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound)
       ),
+      (ChapterRepository.CreateResult.Failed, ChapterRepository.UpdateResult.Failed, (CreateResult.Failed, UpdateResult.Failed)),
       (
-        create = ChapterRepository.CreateResult.Failed,
-        update = ChapterRepository.UpdateResult.Failed,
-        expected = (CreateResult.Failed, UpdateResult.Failed)
+        ChapterRepository.CreateResult.Saved,
+        ChapterRepository.UpdateResult.ChapterNotFound,
+        (CreateResult.Created(ChapterId(id(10))), UpdateResult.ChapterNotFound)
       )
     )
-    val unavailableReads = reads.traverse { scenario =>
-      val service = buildService(refs, read = scenario.response)
-      (
-        service.create(album.id, "Kyoto", NonEmptyList.one(country), period, "/photos/Kyoto"),
-        service.update(album.id, ChapterId(id(20)), "Kyoto", NonEmptyList.one(country), period, "/photos/Kyoto")
-      ).tupled
+    val unavailableReads = reads.traverse { case (read, expected) =>
+      buildManager(refs, maybeRead = read.pure[IO].some).flatMap { manager =>
+        (
+          manager.create(album.id, "Kyoto", countries, period, "/photos/new"),
+          manager.update(album.id, chapter.id, "Kyoto", countries, period, "/photos/new")
+        ).tupled.map(result => assertEquals(result, expected))
+      }
     }
-    val unavailableWrites = writes.traverse { scenario =>
-      val service = buildService(refs, createWrite = scenario.create, updateWrite = scenario.update)
-      (
-        service.create(album.id, "Kyoto", NonEmptyList.one(country), period, "/photos/Kyoto"),
-        service.update(album.id, ChapterId(id(20)), "Kyoto", NonEmptyList.one(country), period, "/photos/Kyoto")
-      ).tupled
+    val unavailableWrites = writes.traverse { case (creation, update, expected) =>
+      buildManager(refs, current = current, createWrite = creation, updateWrite = update).flatMap { manager =>
+        (
+          manager.create(album.id, "Kyoto", countries, period, "/photos/new"),
+          manager.update(album.id, chapter.id, "Kyoto", countries, period, "/photos/new")
+        ).tupled.map(result => assertEquals(result, expected))
+      }
     }
-    val unavailableTemplates = buildService(refs, templates = ListChapterStartTemplatesResult.Failed)
 
     for
-      readResults  <- unavailableReads
-      writeResults <- unavailableWrites
-      templates    <- unavailableTemplates.create(album.id, "Kyoto", NonEmptyList.one(country), period, "/photos/Kyoto")
+      _           <- unavailableReads
+      _           <- unavailableWrites
+      missing     <- buildManager(refs)
+      absent      <- missing.update(album.id, chapter.id, "Kyoto", countries, period, "/photos/new")
+      noTemplates <- buildManager(refs, templates = ListChapterStartTemplatesResult.Failed)
+      failed      <- noTemplates.create(album.id, "Kyoto", countries, period, "/photos/new")
     yield
-      assertEquals(readResults, reads.map(_.expected))
-      assertEquals(writeResults, writes.map(_.expected))
-      assertEquals(templates, CreateResult.Failed)
-
-  test("should derive the entire album year including leap days"):
-    val rules = ChapterManager.rules
-
-    val periods = Vector(rules.yearPeriod(2024), rules.yearPeriod(2026))
-
-    assertEquals(periods, Vector(VisitPeriod(LocalDate.of(2024, 1, 1), 366), VisitPeriod(LocalDate.of(2026, 1, 1), 365)))
-
-  test(s"should enforce interior capacity and $homeName and folder invariants"):
-    val opening = Spread.ChapterStart(
-      SpreadId(id(30)),
-      template.id,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      SpreadSlot.Text(TextSpreadSlotId(id(31)), box),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    val period  = VisitPeriod(LocalDate.of(2026, 5, 1), 2)
-    val chapter = Chapter(
-      ChapterId(id(32)),
-      Destination(DestinationId(id(33)), "Asian capitals", countries),
-      period,
-      "",
-      "/photos/capitals",
-      opening,
-      spreads = Vector.empty[Spread.PhotosOnly]
-    )
-    val home = chapter.copy(
-      id = ChapterId(id(40)),
-      destination = chapter.destination.copy(name = homeName),
-      period = VisitPeriod(LocalDate.of(2026, 1, 1), 365)
-    )
-    val second = chapter.copy(id = ChapterId(id(34)), sourceFolder = "/photos/second")
-    val photo  = Spread.PhotosOnly(
-      SpreadId(id(35)),
-      SpreadTemplateId(id(36)),
-      NonEmptyList.one(SpreadSlot.Photo(PhotoSpreadSlotId(id(37)), box, bleed = Set.empty)),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    val photos = Vector.tabulate(63): index =>
-      photo.copy(id = SpreadId(id(100 + index.toLong)), photoSlots = photo.photoSlots.map(_.copy(id = PhotoSpreadSlotId(id(200 + index.toLong)))))
-    val atCapacity = album.copy(chapters = Vector(chapter.copy(spreads = photos)))
-    val scenarios  = Vector(
-      (album, Option.empty[ChapterConflict]),
-      (album.copy(chapters = Vector(home)), Option.empty[ChapterConflict]),
-      (atCapacity, Option.empty[ChapterConflict]),
-      (atCapacity.copy(chapters = atCapacity.chapters :+ second), ChapterConflict.AtCapacity.some),
-      (album.copy(chapters = Vector(home, home.copy(id = second.id))), ChapterConflict.HomeExists.some),
-      (album.copy(chapters = Vector(home.copy(period = period))), ChapterConflict.HomePeriodMismatch.some),
-      (album.copy(chapters = Vector(home.copy(period = VisitPeriod(LocalDate.of(2026, 1, 1), 366)))), ChapterConflict.HomePeriodMismatch.some),
-      (album.copy(chapters = Vector(chapter, second.copy(sourceFolder = chapter.sourceFolder))), ChapterConflict.FolderAssigned.some)
-    )
-    val rules = ChapterManager.rules
-
-    val results  = scenarios.map { case (candidate, _) => rules.conflict(candidate) }
-    val expected = scenarios.map { case (_, conflict) => conflict }
-
-    assertEquals(results, expected)
-    assertEquals(atCapacity.spreads.length, 65)
-
-  test(s"should order chapter blocks by dates and identity with $homeName last"):
-    val opening = Spread.ChapterStart(
-      SpreadId(id(60)),
-      template.id,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      SpreadSlot.Text(TextSpreadSlotId(id(61)), box),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    val chapter = Chapter(
-      ChapterId(id(62)),
-      Destination(DestinationId(id(63)), "Asian capitals", countries),
-      VisitPeriod(LocalDate.of(2026, 5, 1), 2),
-      "",
-      "/photos/capitals",
-      opening,
-      spreads = Vector.empty[Spread.PhotosOnly]
-    )
-    val home = chapter.copy(
-      id = ChapterId(id(64)),
-      destination = chapter.destination.copy(name = homeName),
-      period = VisitPeriod(LocalDate.of(2026, 1, 1), 365),
-      sourceFolder = "/photos/home"
-    )
-    val earlierEnd = chapter.copy(id = ChapterId(id(50)), period = chapter.period.copy(days = 1), sourceFolder = "/photos/earlier")
-    val tied       = earlierEnd.copy(id = ChapterId(id(51)), sourceFolder = "/photos/tied")
-    val laterStart = chapter.copy(id = ChapterId(id(52)), period = VisitPeriod(LocalDate.of(2026, 5, 2), 1), sourceFolder = "/photos/later")
-
-    val ordered = ChapterManager.rules.ordered(Vector(home, laterStart, chapter, tied, earlierEnd))
-
-    assertEquals(ordered.map(_.id), Vector(earlierEnd.id, tied.id, chapter.id, laterStart.id, home.id))
+      assertEquals(absent, UpdateResult.ChapterNotFound)
+      assertEquals(failed, CreateResult.Failed)
 
   final private case class Refs():
-    val creations: Ref[IO, Vector[(album: AlbumId, chapter: Chapter)]] = Ref.unsafe(Vector.empty)
+    val creations: Ref[IO, Vector[(album: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId])]] = Ref.unsafe(Vector.empty)
 
-    val updates: Ref[IO, Vector[(AlbumId, ChapterId, DestinationName, NonEmptyList[Country], VisitPeriod, SourceFolder)]] = Ref.unsafe(Vector.empty)
+    val updates: Ref[
+      IO,
+      Vector[(
+          album: AlbumId,
+          chapter: ChapterId,
+          name: DestinationName,
+          countries: NonEmptyList[Country],
+          period: VisitPeriod,
+          folder: SourceFolder,
+          order: NonEmptyList[ChapterId]
+      )]
+    ] = Ref.unsafe(Vector.empty)
 
   // scalafix:off DisableSyntax.defaultArgs
-  private def buildService(
+  private def buildManager(
       refs: Refs,
-      read: AlbumRepository.GetResult = AlbumRepository.GetResult.Found(album),
+      current: Album = album,
+      maybeRead: Option[IO[AlbumRepository.GetResult]] = None,
       createWrite: ChapterRepository.CreateResult = ChapterRepository.CreateResult.Saved,
       updateWrite: ChapterRepository.UpdateResult = ChapterRepository.UpdateResult.Saved,
       templates: ListChapterStartTemplatesResult = ListChapterStartTemplatesResult.Listed(NonEmptyList.one(template)),
-      expectedYear: AlbumYear = 2026,
-      albumYearPeriod: VisitPeriod = VisitPeriod(LocalDate.of(2026, 1, 1), 365)
+      save: Chapter => IO[Unit] = _ => IO.unit
   ) =
     given IdGenerator[IO] with
       private val next              = Ref.unsafe[IO, Long](10L)
       override def nextId: IO[UUID] = next.getAndUpdate(_ + 1L).map(id)
     val albums = new AlbumRepository[IO]:
-      override def get(value: AlbumId): IO[AlbumRepository.GetResult]            = read.pure[IO]
+      override def get(value: AlbumId): IO[AlbumRepository.GetResult] =
+        maybeRead.getOrElse((AlbumRepository.GetResult.Found(current): AlbumRepository.GetResult).pure[IO])
       override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
         IO.raiseError[AlbumRepository.ListResult](new AssertionError("Unexpected list"))
       override def create(value: Album, cover: Cover): IO[AlbumRepository.CreateResult] =
@@ -291,30 +306,25 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       override def delete(value: AlbumId): IO[AlbumRepository.DeleteResult] =
         IO.raiseError[AlbumRepository.DeleteResult](new AssertionError("Unexpected deletion"))
     val repository = new ChapterRepository[IO]:
-      override def create(parent: AlbumId, chapter: Chapter): IO[ChapterRepository.CreateResult] =
-        refs.creations.update(_ :+ (parent -> chapter)).as(createWrite)
+      override def create(parent: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId]): IO[ChapterRepository.CreateResult] =
+        refs.creations.update(_ :+ (parent, chapter, order)) >> save(chapter).as(createWrite)
       override def update(
           parent: AlbumId,
           chapter: ChapterId,
           name: DestinationName,
           countries: NonEmptyList[Country],
           period: VisitPeriod,
-          sourceFolder: SourceFolder
+          sourceFolder: SourceFolder,
+          order: NonEmptyList[ChapterId]
       ): IO[ChapterRepository.UpdateResult] =
-        refs.updates.update(_ :+ (parent, chapter, name, countries, period, sourceFolder)).as(updateWrite)
+        refs.updates.update(_ :+ (parent, chapter, name, countries, period, sourceFolder, order)).as(updateWrite)
     val catalog = new SpreadTemplateManager[IO]:
       override def listAlbumStartTemplates: IO[SpreadTemplateManager.ListAlbumStartTemplatesResult] =
         IO.raiseError[SpreadTemplateManager.ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
       override def listChapterStartTemplates: IO[ListChapterStartTemplatesResult] = templates.pure[IO]
-    val policy = new ChapterManager.Rules:
-      override def ordered(value: Vector[Chapter]): Vector[Chapter] =
-        fail("The current-state writer owns ordering")
-      override def yearPeriod(year: AlbumYear): VisitPeriod =
-        assertEquals(year, expectedYear)
-        albumYearPeriod
-      override def conflict(value: Album): Option[ChapterConflict] =
-        fail("The current-state writer owns policy checks")
-    ChapterManager.make(albums, repository, catalog, policy)
+    Mutex[IO].map: mutex =>
+      given Mutex[IO] = mutex
+      ChapterManager.make(albums, repository, catalog)
   // scalafix:on DisableSyntax.defaultArgs
 
   private def id(value: Long) = new UUID(0L, value)
