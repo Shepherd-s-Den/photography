@@ -6,7 +6,6 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import org.typelevel.doobie.{ConnectionIO, Meta, Transactor}
 import org.typelevel.doobie.implicits.*
-import org.typelevel.doobie.util.invariant.InvariantViolation
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.domain.layout.*
@@ -21,33 +20,37 @@ object SqliteSpreadTemplateRepository:
 
   final private class LiveSpreadTemplateRepository[F[_]: Async: Logger](transactor: Transactor[F]) extends SpreadTemplateRepository[F]:
     override def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult] =
-      loadAlbumStarts.transact(transactor).attempt.flatMap:
-        case Right(templates) => ListAlbumStartTemplatesResult.Listed(templates).pure[F]
-        case Left(error)      =>
-          val reason = error match
-            case _: IllegalArgumentException | _: InvariantViolation => Failure.InvalidSpreadData
-            case _                                                   => Failure.DatabaseFailure
-          Logger[F].error(error)("Could not list AlbumStart templates").as(ListAlbumStartTemplatesResult.Failed(reason))
+      loadOpenings("album_start").transact(transactor).attempt.flatMap:
+        case Right(rows) =>
+          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.AlbumStart(id, name, photos, text) }
+          ListAlbumStartTemplatesResult.Listed(templates).pure[F]
+        case Left(error) =>
+          Logger[F].error(error)("Could not list album opening templates").as(ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure))
 
-    private def loadAlbumStarts =
-      val select = sql"SELECT id, name, kind FROM spread_template WHERE kind = 'album_start' ORDER BY id"
+    override def listChapterStartTemplates: F[ListChapterStartTemplatesResult] =
+      loadOpenings("chapter_start").transact(transactor).attempt.flatMap:
+        case Right(rows) =>
+          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.ChapterStart(id, name, photos, text) }
+          ListChapterStartTemplatesResult.Listed(templates).pure[F]
+        case Left(error) =>
+          Logger[F].error(error)("Could not list chapter opening templates").as(ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
+
+    private def loadOpenings(kind: String) =
+      val select = sql"SELECT id, name FROM spread_template WHERE kind = $kind ORDER BY id"
       for
-        rows      <- select.query[(UUID, SpreadTemplateName, SpreadTemplateKind)].to[List]
-        templates <- rows.traverse { case (id, name, kind) => loadSlots(id).map(slots => SpreadTemplate(SpreadTemplateId(id), name, kind, slots)) }
-        nonEmpty  <- NonEmptyList.fromList(templates).toRight(new IllegalArgumentException("No AlbumStart templates")).liftTo[ConnectionIO]
+        rows      <- select.query[(UUID, SpreadTemplateName)].to[List]
+        templates <- rows.traverse { case (id, name) => loadSlots(id).map { case (photos, text) => (SpreadTemplateId(id), name, photos, text) } }
+        nonEmpty  <- NonEmptyList.fromList(templates).toRight(new IllegalArgumentException(s"No $kind templates")).liftTo[ConnectionIO]
       yield nonEmpty
 
     private def loadSlots(id: UUID) =
       val select = sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $id ORDER BY id"
-      select.query[(String, SlotBox)].to[List].flatMap(rows => decodeSlots(id, rows).liftTo[ConnectionIO])
-
-    private def decodeSlots(id: UUID, rows: List[(String, SlotBox)]) =
-      rows.traverse { case (slotKind, slotBox) =>
-        slotKind match
-          case "photo" => SpreadTemplateSlot.Photo(slotBox).asRight[IllegalArgumentException]
-          case "text"  => SpreadTemplateSlot.Text(slotBox).asRight[IllegalArgumentException]
-          case other   => new IllegalArgumentException(s"Unknown slot kind $other").asLeft[SpreadTemplateSlot]
-      }.flatMap(slots => NonEmptyList.fromList(slots).toRight(new IllegalArgumentException(s"Template $id has no slots")))
+      select.query[(String, SlotBox)].to[List].flatMap: rows =>
+        val photos = rows.collect { case ("photo", box) => box }.toVector
+        val texts  = rows.collect { case ("text", box) => box }
+        texts match
+          case text :: Nil if photos.size + 1 === rows.size => (photos, text).pure[ConnectionIO]
+          case _ => new IllegalArgumentException(s"Invalid opening slots for template $id").raiseError[ConnectionIO, (Vector[SlotBox], SlotBox)]
 
     private given Meta[SpreadTemplateName] =
       Meta[String].tiemap[SpreadTemplateName](_.refineEither)(value => value: String)

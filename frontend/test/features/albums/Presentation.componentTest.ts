@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { AlbumRequestError, type AlbumPage } from "../../../src/features/albums/model/Album";
-import { failureMessage, isMissingAlbum, pagination, validateTitle } from "../../../src/features/albums/model/Presentation";
+import { failureMessage, isMissingAlbum, pagination, validateYear } from "../../../src/features/albums/model/Presentation";
 
 describe("album presentation rules", () => {
   it.each([
-    ["", "Enter an album title."],
-    ["   ", "Enter an album title."],
-    ["\t\n", "Enter an album title."],
-    ["  Coast  ", undefined],
-  ])("should validate title %j", (value, expected) => {
-    expect(validateTitle(value)).toBe(expected);
+    ["", "Choose a year from 1900 to 2100."],
+    ["   ", "Choose a year from 1900 to 2100."],
+    ["2026.5", "Choose a year from 1900 to 2100."],
+    ["2e3", "Choose a year from 1900 to 2100."],
+    ["1899", "Choose a year from 1900 to 2100."],
+    ["2101", "Choose a year from 1900 to 2100."],
+    ["1900", undefined],
+    ["2100", undefined],
+    [" 2026 ", undefined],
+  ])("should validate album year %j", (value, expected) => {
+    expect(validateYear(value)).toBe(expected);
   });
 
   it.each([

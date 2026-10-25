@@ -216,7 +216,7 @@ def run_local_backend(project_root: Path, environment: Mapping[str, str] | None 
         if has_frontend:
             subprocess.run(["npm", "ci"], cwd=frontend, env=launch_environment, check=True)
             subprocess.run(["npm", "run", "build"], cwd=frontend, env=launch_environment, check=True)
-        launch_environment["PHOTOGRAPHY_SQLITE_PATH"] = str(state.database)
+        launch_environment.setdefault("PHOTOGRAPHY_SQLITE_PATH", str(state.database))
         process = subprocess.Popen(
             ["sbt", "-batch", "run"],
             cwd=project_root / "backend",

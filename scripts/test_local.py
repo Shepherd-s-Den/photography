@@ -129,40 +129,41 @@ class LocalRunnerComponentTest(unittest.TestCase):
         self.assertEqual(kill_process_group.call_args_list, expected_signals)
 
     def test_should_launcher_pass_overrides_to_the_child_and_stop_it(self):
-        process = mock.Mock()
-        process.pid = 44
-        process.poll.return_value = None
-        process.wait.return_value = 0
+        for database_override in (None, "/isolated/album-year.sqlite"):
+            with self.subTest(database_override=database_override), tempfile.TemporaryDirectory() as temporary_directory:
+                process = mock.Mock()
+                process.pid = 44
+                process.poll.return_value = None
+                process.wait.return_value = 0
+                environment = {"PHOTOGRAPHY_HOST": "0.0.0.0", "PHOTOGRAPHY_PORT": "8090"}
+                if database_override is not None:
+                    environment["PHOTOGRAPHY_SQLITE_PATH"] = database_override
+                with (
+                    mock.patch.object(local, "preflight") as preflight,
+                    mock.patch.object(local.subprocess, "Popen", return_value=process) as start,
+                    mock.patch.object(local, "wait_for_readiness") as ready,
+                    mock.patch.object(local, "stop_process_tree") as stop,
+                    mock.patch("builtins.print") as output,
+                ):
+                    result = local.run_local_backend(Path(temporary_directory), environment)
 
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            with mock.patch.object(local, "preflight") as preflight:
-                with mock.patch.object(local.subprocess, "Popen", return_value=process) as start:
-                    with mock.patch.object(local, "wait_for_readiness") as ready:
-                        with mock.patch.object(local, "stop_process_tree") as stop:
-                            with mock.patch("builtins.print") as output:
-                                result = local.run_local_backend(
-                                    Path(temporary_directory),
-                                    {"PHOTOGRAPHY_HOST": "0.0.0.0", "PHOTOGRAPHY_PORT": "8090"},
-                                )
+                state = local.make_local_state(Path(temporary_directory))
+                next_lock = local.acquire_instance_lock(state.lock)
+                next_lock.close()
+                expected_database = database_override or str(state.database)
+                actual_database = start.call_args.kwargs["env"]["PHOTOGRAPHY_SQLITE_PATH"]
 
-            state = local.make_local_state(Path(temporary_directory))
-            next_lock = local.acquire_instance_lock(state.lock)
-            next_lock.close()
-
-        self.assertEqual(result, 0)
-        preflight.assert_called_once_with("0.0.0.0", 8090, None)
-        self.assertEqual(start.call_args.args[0], ["sbt", "-batch", "run"])
-        self.assertEqual(start.call_args.kwargs["cwd"], Path(temporary_directory) / "backend")
-        self.assertTrue(start.call_args.kwargs["start_new_session"])
-        self.assertEqual(start.call_args.kwargs["env"]["PHOTOGRAPHY_HOST"], "0.0.0.0")
-        self.assertEqual(start.call_args.kwargs["env"]["PHOTOGRAPHY_PORT"], "8090")
-        expected_database = str(Path(temporary_directory) / ".local" / "photography.db")
-        actual_database = start.call_args.kwargs["env"]["PHOTOGRAPHY_SQLITE_PATH"]
-
-        self.assertEqual(actual_database, expected_database)
-        ready.assert_called_once_with(process, "http://127.0.0.1:8090/health")
-        stop.assert_called_once_with(process)
-        output.assert_called_once_with("Photography backend ready at http://127.0.0.1:8090")
+                self.assertEqual(result, 0)
+                preflight.assert_called_once_with("0.0.0.0", 8090, None)
+                self.assertEqual(start.call_args.args[0], ["sbt", "-batch", "run"])
+                self.assertEqual(start.call_args.kwargs["cwd"], Path(temporary_directory) / "backend")
+                self.assertTrue(start.call_args.kwargs["start_new_session"])
+                self.assertEqual(start.call_args.kwargs["env"]["PHOTOGRAPHY_HOST"], "0.0.0.0")
+                self.assertEqual(start.call_args.kwargs["env"]["PHOTOGRAPHY_PORT"], "8090")
+                self.assertEqual(actual_database, expected_database)
+                ready.assert_called_once_with(process, "http://127.0.0.1:8090/health")
+                stop.assert_called_once_with(process)
+                output.assert_called_once_with("Photography backend ready at http://127.0.0.1:8090")
 
     def test_should_readiness_timeout_stop_the_child_and_release_the_lock(self):
         process = mock.Mock()

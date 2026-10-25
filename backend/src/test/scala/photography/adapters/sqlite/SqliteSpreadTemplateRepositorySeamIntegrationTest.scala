@@ -1,5 +1,6 @@
 package photography.adapters.sqlite
 
+import cats.data.NonEmptyList
 import cats.effect.{IO, Resource}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
@@ -13,6 +14,7 @@ import photography.domain.layout.*
 import photography.ports.SpreadTemplateRepository.*
 
 import java.nio.file.Files
+import java.util.UUID
 
 final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]        = Slf4jLogger.getLogger[IO]
@@ -20,49 +22,71 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
 
   test(s"should preserve the complete synopsis-right catalog with $defaultTemplateName first"):
     buildTransactor.use: xa =>
-      val repository = SqliteSpreadTemplateRepository.make[IO](xa)
+      val repository     = SqliteSpreadTemplateRepository.make[IO](xa)
+      val expectedPhotos = List(
+        Vector(
+          buildBox(0.293982, 0.914609, 24.695519, 48.758744),
+          buildBox(25.199487, 0.914609, 24.695519, 48.758744),
+          buildBox(0.293982, 50.326646, 24.695519, 48.758744),
+          buildBox(25.199487, 50.326646, 24.695519, 48.758744)
+        ),
+        Vector(buildBox(0.293982, 0.914609, 49.601025, 98.170781)),
+        Vector(
+          buildBox(0.293982, 0.914609, 16.393684, 38.870004),
+          buildBox(16.897652, 0.914609, 16.393684, 38.870004),
+          buildBox(33.501323, 0.914609, 16.393684, 38.870004),
+          buildBox(0.293982, 40.437905, 24.695519, 58.553948),
+          buildBox(25.199487, 40.437905, 24.695519, 58.553948)
+        ),
+        Vector(
+          buildBox(0.293982, 0.914609, 24.695519, 98.170781),
+          buildBox(25.199487, 0.914609, 24.695519, 48.758744),
+          buildBox(25.199487, 50.326646, 24.695519, 48.758744)
+        )
+      )
+      val expectedNames = List(defaultTemplateName, "1 Full L + Synopsis R", "3+2 L + Synopsis R", "P+2L L + Synopsis R")
+      val expectedText  = buildBox(50.104993, 0.914609, 49.601025, 98.170781)
 
       repository.listAlbumStartTemplates.map:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          val synopsis      = SpreadTemplateSlot.Text(buildBox(50.104993, 0.914609, 49.601025, 98.170781))
-          val expectedSlots = List(
-            List(
-              SpreadTemplateSlot.Photo(buildBox(0.293982, 0.914609, 24.695519, 48.758744)),
-              SpreadTemplateSlot.Photo(buildBox(25.199487, 0.914609, 24.695519, 48.758744)),
-              SpreadTemplateSlot.Photo(buildBox(0.293982, 50.326646, 24.695519, 48.758744)),
-              SpreadTemplateSlot.Photo(buildBox(25.199487, 50.326646, 24.695519, 48.758744)),
-              synopsis
-            ),
-            List(SpreadTemplateSlot.Photo(buildBox(0.293982, 0.914609, 49.601025, 98.170781)), synopsis),
-            List(
-              SpreadTemplateSlot.Photo(buildBox(0.293982, 0.914609, 16.393684, 38.870004)),
-              SpreadTemplateSlot.Photo(buildBox(16.897652, 0.914609, 16.393684, 38.870004)),
-              SpreadTemplateSlot.Photo(buildBox(33.501323, 0.914609, 16.393684, 38.870004)),
-              SpreadTemplateSlot.Photo(buildBox(0.293982, 40.437905, 24.695519, 58.553948)),
-              SpreadTemplateSlot.Photo(buildBox(25.199487, 40.437905, 24.695519, 58.553948)),
-              synopsis
-            ),
-            List(
-              SpreadTemplateSlot.Photo(buildBox(0.293982, 0.914609, 24.695519, 98.170781)),
-              SpreadTemplateSlot.Photo(buildBox(25.199487, 0.914609, 24.695519, 48.758744)),
-              SpreadTemplateSlot.Photo(buildBox(25.199487, 50.326646, 24.695519, 48.758744)),
-              synopsis
-            )
-          )
-          val expectedNames = List(defaultTemplateName, "1 Full L + Synopsis R", "3+2 L + Synopsis R", "P+2L L + Synopsis R")
           assertEquals(templates.toList.map(_.name), expectedNames)
-          assertEquals(templates.toList.map(_.kind), List.fill(4)(SpreadTemplateKind.AlbumStart))
-          assertEquals(templates.toList.map(_.slots.toList), expectedSlots)
+          assertEquals(templates.toList.map(_.photoSlots), expectedPhotos)
+          assertEquals(templates.toList.map(_.textSlot), List.fill(4)(expectedText))
         case result => fail(s"Expected migrated templates, obtained $result")
 
-  test("should reject an empty or malformed template catalog and distinguish database failures"):
+  test("should load complete chapter openings in identity order and reject an unavailable catalog"):
+    buildTransactor.use: xa =>
+      val repository = SqliteSpreadTemplateRepository.make[IO](xa)
+      val id         = new UUID(0L, 20L).toString
+      val seed       =
+        for
+          _ <- sql"INSERT INTO spread_template VALUES ($id, 'Chapter opening', 'chapter_start')".update.run
+          _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($id, 'photo', 0, 0, 50, 100)".update.run
+          _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($id, 'text', 50, 0, 50, 100)".update.run
+        yield ()
+      val expected =
+        SpreadTemplate.ChapterStart(SpreadTemplateId(new UUID(0L, 20L)), "Chapter opening", Vector(buildBox(0, 0, 50, 100)), buildBox(50, 0, 50, 100))
+
+      for
+        unavailable <- repository.listChapterStartTemplates
+        _           <- seed.transact(xa)
+        loaded      <- repository.listChapterStartTemplates
+        _           <- sql"DELETE FROM spread_template_slot WHERE template_id = $id AND kind = 'text'".update.run.transact(xa)
+        malformed   <- repository.listChapterStartTemplates
+      yield
+        assertEquals(unavailable, ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
+        assertEquals(loaded, ListChapterStartTemplatesResult.Listed(NonEmptyList.one(expected)))
+        assertEquals(malformed, ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
+
+  test("should reject malformed template catalogs and report database failures explicitly"):
     Vector(
-      "DELETE FROM spread_template_slot"                 -> Failure.InvalidSpreadData,
-      "UPDATE spread_template_slot SET width = -1"       -> Failure.InvalidSpreadData,
-      "UPDATE spread_template SET name = ''"             -> Failure.InvalidSpreadData,
-      "UPDATE spread_template_slot SET kind = 'unknown'" -> Failure.InvalidSpreadData,
-      "DROP TABLE spread_template_slot"                  -> Failure.DatabaseFailure
-    ).traverse_ { case (corruption, expectedFailure) =>
+      "DELETE FROM spread_template_slot",
+      "UPDATE spread_template_slot SET width = -1",
+      "UPDATE spread_template SET name = ''",
+      "UPDATE spread_template_slot SET kind = 'unknown'",
+      "UPDATE spread_template_slot SET kind = 'photo' WHERE kind = 'text'",
+      "DROP TABLE spread_template_slot"
+    ).traverse_ { corruption =>
       buildTransactor.use: xa =>
         val repository = SqliteSpreadTemplateRepository.make[IO](xa)
         val corrupt    = sql"PRAGMA ignore_check_constraints = ON".update.run >>
@@ -71,7 +95,7 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
         for
           _      <- corrupt.transact(xa)
           result <- repository.listAlbumStartTemplates
-        yield assertEquals(result, ListAlbumStartTemplatesResult.Failed(expectedFailure))
+        yield assertEquals(result, ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure))
     }
 
   private def buildTransactor =

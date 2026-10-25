@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { readAlbum, readFailureMessage, readPage, readSummary } from "../../../src/features/albums/api/Wire";
 
 describe("album wire representations", () => {
-  const summary = { id: "00000000-0000-0000-0000-000000000001", title: "Coastal light", createdAt: "2026-10-24T12:00:00Z" };
+  const summary = {
+    id: "00000000-0000-0000-0000-000000000001",
+    year: 2026,
+    title: "Journey of the Shepherds 2026",
+    createdAt: "2026-10-24T12:00:00Z",
+  };
   const page = { albums: [summary], page: 1, pageSize: 6, totalAlbums: 1, totalPages: 1 };
 
   it("should retain exact album metadata and pagination", () => {
@@ -13,7 +18,17 @@ describe("album wire representations", () => {
     expect(readPage(page)).toEqual(page);
   });
 
-  it.each([null, [], 42, { ...summary, title: 42 }])("should reject invalid summary %j", (value) => {
+  it.each([
+    null,
+    [],
+    42,
+    { ...summary, title: 42 },
+    { ...summary, year: undefined },
+    { ...summary, year: "2026" },
+    { ...summary, year: 2026.5 },
+    { ...summary, year: 1899 },
+    { ...summary, year: 2101 },
+  ])("should reject invalid summary %j", (value) => {
     expect(() => readSummary(value)).toThrow();
   });
 

@@ -6,7 +6,7 @@ import io.circe.Encoder
 import org.http4s.HttpRoutes
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
-import photography.domain.layout.{SpreadTemplate, SpreadTemplateSlot}
+import photography.domain.layout.{SlotBox, SpreadTemplate}
 import photography.usecases.SpreadTemplateService
 import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
@@ -25,13 +25,12 @@ object SpreadTemplateApi:
           case listed: ListAlbumStartTemplatesResult.Listed => Ok(listed)
           case ListAlbumStartTemplatesResult.Failed         => InternalServerError(Map("code" -> "service_failure"))
 
-    private given Encoder[SpreadTemplateSlot] = Encoder.forProduct5("kind", "x", "y", "width", "height"): slot =>
-      val (kind, box) = slot match
-        case SpreadTemplateSlot.Photo(box) => ("photo", box)
-        case SpreadTemplateSlot.Text(box)  => ("text", box)
+    private given Encoder[(String, SlotBox)] = Encoder.forProduct5("kind", "x", "y", "width", "height"): slot =>
+      val (kind, box) = slot
       (kind, box.x: Double, box.y: Double, box.width: Double, box.height: Double)
 
-    private given Encoder[SpreadTemplate] = Encoder.forProduct3("id", "name", "slots"): template =>
-      (template.id.value.toString, template.name: String, template.slots.toList)
+    private given Encoder[SpreadTemplate.AlbumStart] = Encoder.forProduct3("id", "name", "slots"): template =>
+      val slots = template.photoSlots.map(box => "photo" -> box) :+ ("text" -> template.textSlot)
+      (template.id.value.toString, template.name: String, slots)
 
     private given Encoder[ListAlbumStartTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)

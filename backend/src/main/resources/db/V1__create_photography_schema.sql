@@ -13,7 +13,7 @@ CREATE TABLE destination (
 
 CREATE TABLE album (
     id TEXT PRIMARY KEY NOT NULL,
-    title TEXT NOT NULL,
+    year INTEGER NOT NULL UNIQUE CHECK (year BETWEEN 1900 AND 2100),
     synopsis TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL
 ) STRICT;

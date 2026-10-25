@@ -13,17 +13,6 @@ private[sqlite] object SqliteCodecs:
       Either.cond(id.toString === value, id, s"Noncanonical UUID: $value")
   }(_.toString)
 
-  given Meta[SpreadTemplateKind] = Meta[String].tiemap[SpreadTemplateKind] {
-    case "album_start"   => SpreadTemplateKind.AlbumStart.asRight[String]
-    case "chapter_start" => SpreadTemplateKind.ChapterStart.asRight[String]
-    case "photos_only"   => SpreadTemplateKind.PhotosOnly.asRight[String]
-    case other           => s"Unknown spread kind $other".asLeft[SpreadTemplateKind]
-  } {
-    case SpreadTemplateKind.AlbumStart   => "album_start"
-    case SpreadTemplateKind.ChapterStart => "chapter_start"
-    case SpreadTemplateKind.PhotosOnly   => "photos_only"
-  }
-
   private given Meta[PositionOnSpread] =
     Meta[Double].tiemap[PositionOnSpread](_.refineEither)(value => value: Double)
 

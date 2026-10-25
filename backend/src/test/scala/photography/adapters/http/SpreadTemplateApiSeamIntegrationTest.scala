@@ -18,16 +18,16 @@ import java.util.UUID
 final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
   private val photoBox      = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
   private val synopsisBox   = SlotBox(21.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
-  private val firstTemplate = SpreadTemplate(
+  private val firstTemplate = SpreadTemplate.AlbumStart(
     SpreadTemplateId(new UUID(0L, 2L)),
     "Synopsis right".refineUnsafe,
-    SpreadTemplateKind.AlbumStart,
-    NonEmptyList.of(SpreadTemplateSlot.Photo(photoBox), SpreadTemplateSlot.Text(synopsisBox))
+    Vector(photoBox),
+    synopsisBox
   )
   private val secondTemplate = firstTemplate.copy(id = SpreadTemplateId(new UUID(0L, 4L)), name = "Second".refineUnsafe)
   private val catalog        = NonEmptyList.of(firstTemplate, secondTemplate)
 
-  test(s"should list ${SpreadTemplateKind.AlbumStart} templates with ordered geometry and report catalog failures"):
+  test("should list album opening templates with ordered geometry and report catalog failures"):
     val server            = buildSpreadTemplateApi(ListAlbumStartTemplatesResult.Listed(catalog))
     val unavailableServer = buildSpreadTemplateApi(ListAlbumStartTemplatesResult.Failed)
     val request           = Request[IO](Method.GET, Uri.unsafeFromString("/api/templates/album-start"))
@@ -51,5 +51,7 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
 
   private def buildSpreadTemplateApi(result: ListAlbumStartTemplatesResult) =
     val templates = new SpreadTemplateService[IO]:
-      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = result.pure[IO]
+      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = result.pure[IO]
+      override def listChapterStartTemplates: IO[SpreadTemplateService.ListChapterStartTemplatesResult] =
+        SpreadTemplateService.ListChapterStartTemplatesResult.Failed.pure[IO]
     SpreadTemplateApi.make(templates).routes.orNotFound

@@ -2,7 +2,9 @@ import type { Album, AlbumPage, AlbumSummary } from "../model/Album";
 
 export function readSummary(value: unknown): AlbumSummary {
   const fields = record(value);
-  return { id: text(fields["id"]), title: text(fields["title"]), createdAt: text(fields["createdAt"]) };
+  const year = integer(fields["year"], 1900);
+  if (year > 2100) throw new Error("Expected an album year from 1900 to 2100");
+  return { id: text(fields["id"]), year, title: text(fields["title"]), createdAt: text(fields["createdAt"]) };
 }
 
 export function readAlbum(value: unknown): Album {

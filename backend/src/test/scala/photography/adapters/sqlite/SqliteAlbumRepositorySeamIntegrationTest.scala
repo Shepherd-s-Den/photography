@@ -11,24 +11,25 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.app.config.SqliteConfig
-import photography.domain.album.{Album, AlbumId, ChapterId, PhotoId}
+import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.AlbumRepository.*
 
-import java.time.Instant
+import java.time.{Instant, LocalDate, ZoneOffset}
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.UUID
 
 final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
-  private given Logger[IO]     = Slf4jLogger.getLogger[IO]
-  private val createdAt        = Instant.parse("2026-10-07T12:00:00.123Z")
-  private val renamedTitle     = "Renamed album".refineUnsafe[Not[Empty] & Not[Blank]]
-  private val countInitialRows = sql"""SELECT (SELECT count(*) FROM album) + (SELECT count(*) FROM spread) +
+  private given Logger[IO]           = Slf4jLogger.getLogger[IO]
+  private val createdAt              = Instant.parse("2026-10-07T12:00:00.123Z")
+  private val changedYear: AlbumYear = 2026
+  private val countInitialRows       = sql"""SELECT (SELECT count(*) FROM album) + (SELECT count(*) FROM spread) +
                                       (SELECT count(*) FROM spread_photo_slot) + (SELECT count(*) FROM spread_text_slot) +
                                       (SELECT count(*) FROM spread_photo_slot_bleed) +
                                       (SELECT count(*) FROM cover) + (SELECT count(*) FROM cover_slot)""".query[Long].unique
 
-  test("should persist the complete initial Album and cover atomically and preserve metadata when renamed"):
+  test("should persist the complete initial Album and cover atomically and preserve composition when its year changes"):
     Vector(SpineOwner.Front -> "front", SpineOwner.Back -> "back").traverse_ { case (spineOwner, expectedSpine) =>
       buildTransactor.use: xa =>
         val repository = SqliteAlbumRepository.make[IO](xa)
@@ -40,15 +41,15 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           found    <- repository.get(album.id)
           spine    <- sql"SELECT spine_owner FROM cover".query[String].unique.transact(xa)
           sides    <- sql"SELECT side FROM cover_slot ORDER BY side".query[String].to[Vector].transact(xa)
-          renamed  <- repository.rename(album.id, renamedTitle)
+          renamed  <- repository.changeYear(album.id, _ => YearDecision.Replace(changedYear))
           reloaded <- repository.get(album.id)
         yield
           assertEquals(created, CreateResult.Created)
           assertEquals(found, GetResult.Found(album))
           assertEquals(spine, expectedSpine)
           assertEquals(sides, Vector("back", "front"))
-          assertEquals(renamed, RenameResult.Renamed(album.copy(title = renamedTitle)))
-          assertEquals(reloaded, GetResult.Found(album.copy(title = renamedTitle)))
+          assertEquals(renamed, ChangeYearResult.Changed(album.copy(year = changedYear)))
+          assertEquals(reloaded, GetResult.Found(album.copy(year = changedYear)))
     }
 
   test("should list newest-first slices with stable ordering for equal creation instants and an empty collection"):
@@ -69,6 +70,31 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(last, ListResult.Listed(AlbumPageSlice(3, newestFirst.drop(2))))
         assertEquals(beyond, ListResult.Listed(AlbumPageSlice(3, Vector.empty)))
 
+  test("should enforce unique required years atomically under concurrent creation and roll back conflicting year changes"):
+    buildTransactor.use: xa =>
+      val repository = SqliteAlbumRepository.make[IO](xa)
+      val first      = buildAlbum(1)
+      val second     = buildAlbum(2).copy(year = first.year)
+      val later      = buildAlbum(3)
+
+      for
+        results   <- Vector(first, second).parTraverse(album => repository.create(album, buildCover(album)))
+        before    <- countInitialRows.transact(xa)
+        _         <- repository.create(later, buildCover(later))
+        rejected  <- repository.changeYear(later.id, _ => YearDecision.Replace(first.year))
+        loaded    <- repository.get(later.id)
+        unchanged <- repository.changeYear(later.id, _ => YearDecision.Keep)
+        fixed     <- repository.changeYear(later.id, _ => YearDecision.Reject)
+        after     <- countInitialRows.transact(xa)
+      yield
+        assertEquals(results.collect { case CreateResult.Created => () }.size, 1)
+        assertEquals(results.collect { case CreateResult.Failed(Failure.YearAlreadyUsed) => () }.size, 1)
+        assertEquals(rejected, ChangeYearResult.Failed(Failure.YearAlreadyUsed))
+        assertEquals(loaded, GetResult.Found(later))
+        assertEquals(unchanged, ChangeYearResult.Changed(later))
+        assertEquals(fixed, ChangeYearResult.HasChapters)
+        assertEquals(after, before * 2L)
+
   test("should report unknown albums consistently and delete all initial owned rows without deleting shared templates"):
     buildTransactor.use: xa =>
       val repository = SqliteAlbumRepository.make[IO](xa)
@@ -78,7 +104,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       for
         _             <- repository.create(album, buildCover(album))
         missing       <- repository.get(unknownId)
-        missingRename <- repository.rename(unknownId, renamedTitle)
+        missingRename <- repository.changeYear(unknownId, _ => YearDecision.Replace(changedYear))
         missingDelete <- repository.delete(unknownId)
         deleted       <- repository.delete(album.id)
         removed       <- repository.get(album.id)
@@ -86,12 +112,57 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         templates     <- sql"SELECT count(*) FROM spread_template".query[Long].unique.transact(xa)
       yield
         assertEquals(missing, GetResult.NotFound)
-        assertEquals(missingRename, RenameResult.NotFound)
+        assertEquals(missingRename, ChangeYearResult.NotFound)
         assertEquals(missingDelete, DeleteResult.NotFound)
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(removed, GetResult.NotFound)
         assertEquals(owned, 0L)
         assertEquals(templates, 4L)
+
+  test("should load a 21st persisted chapter and its opening while interior spread capacity remains"):
+    buildTransactor.use: xa =>
+      val repository    = SqliteAlbumRepository.make[IO](xa)
+      val album         = buildAlbum(1)
+      val albumId       = album.id.value.toString
+      val countryId     = buildUuid(400).toString
+      val destinationId = buildUuid(401).toString
+      val templateId    = buildUuid(404).toString
+      val seed          =
+        for
+          _ <- sql"INSERT INTO country VALUES ($countryId, 'IS', 'Iceland', '/flags/is.svg')".update.run
+          _ <- sql"INSERT INTO destination VALUES ($destinationId, 'Coast', $countryId)".update.run
+          _ <- sql"INSERT INTO spread_template VALUES ($templateId, 'Chapter', 'chapter_start')".update.run
+          _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($templateId, 'photo', 0, 0, 50, 100)".update.run
+          _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($templateId, 'text', 50, 0, 50, 100)".update.run
+        yield ()
+      val addChapters = Vector.range(0, 21).traverse_ { index =>
+        val chapterId   = buildUuid(500 + index).toString
+        val spreadId    = buildUuid(600 + index).toString
+        val photoSlotId = buildUuid(700 + index).toString
+        val textSlotId  = buildUuid(800 + index).toString
+        val start       = LocalDate.of(2026, 1, index + 1).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
+        val end         = start + 86400000L
+        val folder      = s"chapter-$index"
+        for
+          _ <- sql"INSERT INTO chapter VALUES ($chapterId, $albumId, $destinationId, '', $start, $end, $index, $folder)".update.run
+          _ <-
+            sql"INSERT INTO spread (id, template_id, kind, chapter_id, position) VALUES ($spreadId, $templateId, 'chapter_start', $chapterId, 0)".update.run
+          _ <- sql"INSERT INTO spread_photo_slot VALUES ($photoSlotId, $spreadId, 0, 0, 50, 100)".update.run
+          _ <- sql"INSERT INTO spread_text_slot VALUES ($textSlotId, $spreadId, 50, 0, 50, 100)".update.run
+        yield ()
+      }
+
+      for
+        _      <- repository.create(album, buildCover(album))
+        _      <- (seed >> addChapters).transact(xa)
+        result <- repository.get(album.id)
+      yield
+        val persisted = result match
+          case GetResult.Found(value) => value
+          case other                  => fail(s"Expected all persisted chapters, obtained $other")
+        assertEquals(persisted.chapters.size, 21)
+        assertEquals(persisted.spreads.length, 22)
+        assertEquals(persisted.chapters.lastOption.map(_.id.value), buildUuid(520).some)
 
   test("should roll back every album-owned row when a late cover write fails"):
     buildTransactor.use: xa =>
@@ -108,20 +179,29 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(result, CreateResult.Failed(Failure.DatabaseFailure))
         assertEquals(count, 0L)
 
-  test("should reject invalid initial composition without writing owned rows"):
+  test("should reject noninitial composition or a foreign cover without writing owned rows"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa)
-      val album      = buildAlbum(1)
+      val repository     = SqliteAlbumRepository.make[IO](xa)
+      val album          = buildAlbum(1)
+      val chapterOpening = Spread.ChapterStart(
+        SpreadId(buildUuid(10)),
+        SpreadTemplateId(buildUuid(1)),
+        Vector.empty,
+        SpreadSlot.Text(TextSpreadSlotId(buildUuid(11)), SlotBox(0.0, 0.0, 100.0, 100.0)),
+        Vector.empty
+      )
+      val country = Country(CountryId(buildUuid(12)), "RO", "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
+      val home    = Chapter.Home(ChapterId(buildUuid(13)), country, "", maybeSourceFolder = None, chapterOpening, Vector.empty)
 
       Vector(
-        album.copy(spreads = NonEmptyList.of(album.spreads.head, album.spreads.head)) -> buildCover(album),
-        album                                                                         -> buildCover(album).copy(album = AlbumId(buildUuid(999)))
+        album.copy(maybeHome = home.some) -> buildCover(album),
+        album                             -> buildCover(album).copy(album = AlbumId(buildUuid(999)))
       ).traverse_ { case (invalidAlbum, invalidCover) =>
         for
           result <- repository.create(invalidAlbum, invalidCover)
           count  <- countInitialRows.transact(xa)
         yield
-          assertEquals(result, CreateResult.Failed(Failure.InvalidAlbumData))
+          assertEquals(result, CreateResult.Failed(Failure.DatabaseFailure))
           assertEquals(count, 0L)
       }
 
@@ -131,7 +211,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       "DELETE FROM cover_slot WHERE side = 'front'",
       "DELETE FROM cover_slot WHERE side = 'back'",
       "DELETE FROM spread_text_slot",
-      "UPDATE album SET title = ' '",
+      "UPDATE album SET year = 1899",
       "UPDATE spread_photo_slot SET x = x + 1",
       "UPDATE spread_template SET kind = 'photos_only' WHERE id = '00000000-0000-0000-0000-000000000001'",
       "DELETE FROM spread",
@@ -144,16 +224,16 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
         for
           _       <- repository.create(album, buildCover(album))
-          _       <- Fragment.const(corruption).update.run.transact(xa)
+          _       <- (sql"PRAGMA ignore_check_constraints=ON".update.run >> Fragment.const(corruption).update.run).transact(xa)
           found   <- repository.get(album.id)
           listed  <- repository.list(offset = 0, limit = 6)
-          renamed <- repository.rename(album.id, renamedTitle)
+          renamed <- repository.changeYear(album.id, _ => YearDecision.Replace(changedYear))
           deleted <- repository.delete(album.id)
           removed <- repository.get(album.id)
         yield
-          assertEquals(found, GetResult.Failed(Failure.InvalidAlbumData))
-          assertEquals(listed, ListResult.Failed(Failure.InvalidAlbumData))
-          assertEquals(renamed, RenameResult.Failed(Failure.InvalidAlbumData))
+          assertEquals(found, GetResult.Failed(Failure.DatabaseFailure))
+          assertEquals(listed, ListResult.Failed(Failure.DatabaseFailure))
+          assertEquals(renamed, ChangeYearResult.Failed(Failure.DatabaseFailure))
           assertEquals(deleted, DeleteResult.Deleted)
           assertEquals(removed, GetResult.NotFound)
     }
@@ -168,13 +248,13 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         listed  <- repository.list(offset = 0, limit = 6)
         created <- repository.create(album, buildCover(album))
         found   <- repository.get(album.id)
-        renamed <- repository.rename(album.id, renamedTitle)
+        renamed <- repository.changeYear(album.id, _ => YearDecision.Replace(changedYear))
         deleted <- repository.delete(album.id)
       yield
         assertEquals(listed, ListResult.Failed(Failure.DatabaseFailure))
         assertEquals(created, CreateResult.Failed(Failure.DatabaseFailure))
         assertEquals(found, GetResult.Failed(Failure.DatabaseFailure))
-        assertEquals(renamed, RenameResult.Failed(Failure.DatabaseFailure))
+        assertEquals(renamed, ChangeYearResult.Failed(Failure.DatabaseFailure))
         assertEquals(deleted, DeleteResult.Failed(Failure.DatabaseFailure))
 
   test("should preserve persisted photo-slot bleed when reading an album"):
@@ -188,14 +268,10 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         _      <- sql"INSERT INTO spread_photo_slot_bleed (slot_id, edge) VALUES ($slotId, 'left')".update.run.transact(xa)
         found  <- repository.get(album.id)
       yield
-        val expectedSlots = album.spreads.head.slots.map:
-          case SpreadSlot.Photo(id, spread, box, bleed) if id.value.toString === slotId =>
-            SpreadSlot.Photo(id, spread, box, bleed + SpreadEdge.Left)
-          case slot => slot
-        val expectedStart = album.spreads.head match
-          case start: Spread.AlbumStart => start.copy(slots = expectedSlots)
-          case other                    => fail(s"Expected AlbumStart fixture, obtained $other")
-        val expectedAlbum = album.copy(spreads = NonEmptyList.one(expectedStart: Spread))
+        val expectedSlots = album.opening.photoSlots.map:
+          case slot if slot.id.value.toString === slotId => slot.copy(bleed = slot.bleed + SpreadEdge.Left)
+          case slot                                      => slot
+        val expectedAlbum = album.copy(opening = album.opening.copy(photoSlots = expectedSlots))
         assertEquals(found, GetResult.Found(expectedAlbum))
 
   test("should read chapter spreads and placements in domain order and cascade deletion through the owned graph"):
@@ -234,14 +310,16 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         .query[(Long, Long, Long, Long)].unique
       val initialiseChapter =
         for
-          _ <- sql"INSERT INTO country VALUES ($countryId, 'IS', 'Iceland', 'IS')".update.run
+          _ <- sql"INSERT INTO country VALUES ($countryId, 'IS', 'Iceland', '/flags/is.svg')".update.run
           _ <- sql"INSERT INTO destination VALUES ($destinationId, 'Coast', $countryId)".update.run
-          _ <- sql"INSERT INTO chapter VALUES ($chapterId, $albumId, $destinationId, '', 0, 1, 0, 'coast')".update.run
+          _ <- sql"INSERT INTO chapter VALUES ($chapterId, $albumId, $destinationId, '', 0, 86400000, 0, 'coast')".update.run
           _ <- sql"INSERT INTO photo VALUES ($photoId, $chapterId, 'photo.jpg', NULL, NULL, 100, 100, NULL)".update.run
           _ <- sql"INSERT INTO spread_template VALUES ($templateId, 'Chapter', 'chapter_start')".update.run
           _ <- insertTemplateSlot.update.run
+          _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($templateId, 'text', 0, 0, 100, 100)".update.run
           _ <- insertChapterStart.update.run
           _ <- sql"INSERT INTO spread_photo_slot VALUES ($slotId, $spreadId, 0, 0, 100, 100)".update.run
+          _ <- sql"INSERT INTO spread_text_slot VALUES (${buildUuid(412).toString}, $spreadId, 0, 0, 100, 100)".update.run
           _ <- insertPlacement.update.run
           _ <- sql"INSERT INTO spread_template VALUES ($photosTemplateId, 'Photos', 'photos_only')".update.run
           _ <- insertPhotosTemplateSlot.update.run
@@ -252,7 +330,6 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           _ <- sql"INSERT INTO cover_editing_lock VALUES ($albumId, $sessionId)".update.run
         yield ()
       val corruptions = Vector(
-        ("UPDATE chapter SET position = 20", "UPDATE chapter SET position = 0"),
         ("UPDATE chapter SET position = -1", "UPDATE chapter SET position = 0"),
         (
           "UPDATE spread_template SET kind = 'photos_only' WHERE name = 'Chapter'",
@@ -269,7 +346,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
             _       <- Fragment.const(corruption).update.run.transact(xa)
             invalid <- repository.get(album.id)
             _       <- Fragment.const(repair).update.run.transact(xa)
-          yield assertEquals(invalid, GetResult.Failed(Failure.InvalidAlbumData))
+          yield assertEquals(invalid, GetResult.Failed(Failure.DatabaseFailure))
         }
       val album = buildAlbum(1)
 
@@ -283,7 +360,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         shared  <- countShared.transact(xa)
       yield
         val box               = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 100.0.refineUnsafe, 100.0.refineUnsafe)
-        val expectedSlot      = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(406)), SpreadId(buildUuid(405)), box, bleed = Set.empty[SpreadEdge])
+        val expectedSlot      = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(406)), box, bleed = Set.empty[SpreadEdge])
         val transform         = PhotoTransform(Shift(0.0.refineUnsafe, 0.0.refineUnsafe), mirrored = false, 1.0.refineUnsafe)
         val expectedPlacement =
           SpreadPlacement(
@@ -295,23 +372,32 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           )
         val expectedChapter = Spread.ChapterStart(
           SpreadId(buildUuid(405)),
-          ChapterId(buildUuid(402)),
           SpreadTemplateId(buildUuid(404)),
           Vector(expectedSlot),
+          SpreadSlot.Text(TextSpreadSlotId(buildUuid(412)), box),
           Vector(expectedPlacement)
         )
         val expectedPhotosSlot =
-          SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(411)), SpreadId(buildUuid(410)), box, bleed = Set.empty[SpreadEdge])
+          SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(411)), box, bleed = Set.empty[SpreadEdge])
         val expectedPhotos = Spread.PhotosOnly(
           SpreadId(buildUuid(410)),
-          ChapterId(buildUuid(402)),
-          1.refineUnsafe,
           SpreadTemplateId(buildUuid(409)),
-          Vector(expectedPhotosSlot),
+          NonEmptyList.one(expectedPhotosSlot),
           placements = Vector.empty[SpreadPlacement]
         )
-        val expectedSpreads = album.spreads.append(expectedChapter: Spread).append(expectedPhotos: Spread)
-        val expectedAlbum   = album.copy(spreads = expectedSpreads)
+        val expectedCountry = Country(CountryId(buildUuid(400)), "IS", "Iceland", AbsoluteLocation(Path.of("/flags/is.svg")))
+        val destination     = Destination(DestinationId(buildUuid(401)), "Coast", expectedCountry)
+        val chapter         =
+          Chapter.Vacation(
+            ChapterId(buildUuid(402)),
+            destination,
+            VisitPeriod(LocalDate.of(1970, 1, 1), 1),
+            "",
+            "coast".refineUnsafe[RelativeLocationConstraint].some,
+            expectedChapter,
+            Vector(expectedPhotos)
+          )
+        val expectedAlbum = album.copy(vacations = Vector(chapter))
         assertEquals(found, GetResult.Found(expectedAlbum))
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(owned, 0L)
@@ -327,23 +413,19 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   private def buildAlbum(index: Int) =
     val albumId  = AlbumId(buildUuid(index))
     val spreadId = SpreadId(buildUuid(index + 100))
-    val slots    = Vector(
-      ("photo", 0.293982, 0.914609, 24.695519, 48.758744),
-      ("photo", 25.199487, 0.914609, 24.695519, 48.758744),
-      ("photo", 0.293982, 50.326646, 24.695519, 48.758744),
-      ("photo", 25.199487, 50.326646, 24.695519, 48.758744),
-      ("text", 50.104993, 0.914609, 49.601025, 98.170781)
+    val boxes    = Vector(
+      SlotBox(0.293982, 0.914609, 24.695519, 48.758744),
+      SlotBox(25.199487, 0.914609, 24.695519, 48.758744),
+      SlotBox(0.293982, 50.326646, 24.695519, 48.758744),
+      SlotBox(25.199487, 50.326646, 24.695519, 48.758744)
     )
-    val spreadSlots = slots.zipWithIndex.map { case (slot, position) =>
-      val (kind, x, y, width, height) = slot
-      val box                         = SlotBox(x.refineUnsafe, y.refineUnsafe, width.refineUnsafe, height.refineUnsafe)
-      val id                          = buildUuid(index * 1000 + position)
-      if kind === "photo" then SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, bleed = Set.empty[SpreadEdge])
-      else SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box)
+    val photos = boxes.zipWithIndex.map { case (box, position) =>
+      SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index * 1000 + position)), box, bleed = Set.empty[SpreadEdge])
     }
-    val start          = Spread.AlbumStart(spreadId, albumId, SpreadTemplateId(buildUuid(1)), spreadSlots, placements = Vector.empty[SpreadPlacement])
+    val text           = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index * 1000 + 4)), SlotBox(50.104993, 0.914609, 49.601025, 98.170781))
+    val start          = Spread.AlbumStart(spreadId, SpreadTemplateId(buildUuid(1)), photos, text, placements = Vector.empty[SpreadPlacement])
     val albumCreatedAt = if index === 1 then createdAt.plusSeconds(1) else createdAt
-    Album(albumId, s"Album $index".refineUnsafe, synopsis = "", albumCreatedAt, NonEmptyList.one(start: Spread))
+    Album(albumId, (1900 + index).refineUnsafe[AlbumYearConstraint], synopsis = "", albumCreatedAt, start, Vector.empty, maybeHome = None)
 
   private def buildCover(album: Album) =
     val index = album.id.value.getLeastSignificantBits.toInt
