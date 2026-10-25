@@ -43,7 +43,8 @@ flowchart LR
 | At most one Home per album | Database partial unique constraint |
 | Unique non-null chapter folder and chapter position within an album | Database unique constraints |
 | Valid identities and country/album/chapter associations | Database primary/foreign keys and application ownership validation |
-| At most 20 chapters, valid calendar periods, Home's derived period, contained relative folders | Application validation |
+| At most 65 interior spreads (130 pages), counting album/chapter openings and photo spreads, excluding Cover | Application validation |
+| Valid calendar periods, Home's derived period, contained relative folders | Application validation |
 | Chronological positions and complete opening slots | Application transaction |
 
 ### HTTP contract
@@ -73,7 +74,7 @@ Album metadata reads remain separate from workspace reads.
 
 - IDs are canonical UUID strings; absent folders are `null`, and empty collections are `[]`. Chapter `name` is `Home` for Home; its returned dates span its year.
 - Spread kinds are `"album_start"`, `"chapter_start"` and `"photos_only"`; chapter blocks follow their chapter opening with photo spreads in persisted order.
-- Malformed JSON, invalid fields/references, duplicate year/Home/folder and chapter-limit violations return `400 {message}` with readable feedback.
+- Malformed JSON, invalid fields/references, duplicate year/Home/folder and spread-capacity violations return `400 {message}` with readable feedback.
 - Malformed or missing album IDs return `404 {code: "album_not_found"}`; missing or foreign chapter targets return `404 {code: "chapter_not_found"}`.
 - Infrastructure or incomplete-composition failures return `500 {code: "service_failure"}`. JSON uses `application/json`; failed writes leave persisted state unchanged.
 
@@ -117,7 +118,8 @@ Album metadata reads remain separate from workspace reads.
 - Selecting a chapter establishes its workspace context. Clicking a metadata value opens chapter details; there is no separate Edit chapter action.
 - Save/reload preserves chapter identity, type, metadata and composition; editing uses saved country/folder values rather than new-chapter defaults.
 - Failed saves retain entered values with inline, legible errors. Pending saves expose status and prevent duplicate submissions.
-- Dialogs support keyboard/pointer use, Escape/cancel and focus restoration; a twentieth chapter leaves creation unavailable with its reason visible.
+- Dialogs support keyboard/pointer use, Escape/cancel and focus restoration.
+- At 64 interior spreads, chapter creation can add its opening; at 65, creation is unavailable with a visible reason and rejected saves leave state unchanged.
 
 ### Selection and canvas
 
@@ -147,8 +149,9 @@ Album metadata reads remain separate from workspace reads.
 ## Doc Sync
 
 - `specs/design.md` — Album workflow: record year setup, chapter details, workspace selection, reader behavior and the site favicon.
+- `specs/design.md` — Domain model and Album composition: replace the chapter cap with the 65-spread/130-page capacity, excluding Cover.
 - `specs/design.md` — Album composition and Values: record year-based identity, vacation/Home ordering, optional folders and inclusive calendar-date semantics.
-- `specs/design.md` — Templates and covers: record the default chapter opening, percentage geometry and cover title/credits.
+- `specs/design.md` — Templates and covers: record the default chapter opening, percentage geometry, cover title/credits and the supported page ceiling.
 - `specs/contracts.md` — Contract inventory: include chapter-start/country seeds and point to the expanded HTTP contract.
 - `specs/http-api.openapi.json` — Paths and schemas: add workspace, year and chapter operations, including generated-title validation on existing rename.
 - `specs/operational.md` — Local service: identify `/photos` as the backend-visible photo root used for workspace folder display.
