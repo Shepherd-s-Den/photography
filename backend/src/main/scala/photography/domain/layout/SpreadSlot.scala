@@ -5,9 +5,11 @@ import java.util.UUID
 enum SpreadEdge derives CanEqual:
   case Top, Bottom, Left, Right
 
-enum SpreadSlot derives CanEqual:
-  case Photo(id: PhotoSpreadSlotId, spread: SpreadId, box: SlotBox, bleed: Set[SpreadEdge])
-  case Text(id: TextSpreadSlotId, spread: SpreadId, box: SlotBox)
+sealed trait SpreadSlot derives CanEqual
+
+object SpreadSlot:
+  final case class Photo(id: PhotoSpreadSlotId, box: SlotBox, bleed: Set[SpreadEdge]) extends SpreadSlot
+  final case class Text(id: TextSpreadSlotId, box: SlotBox)                           extends SpreadSlot
 
 opaque type PhotoSpreadSlotId = UUID
 object PhotoSpreadSlotId:

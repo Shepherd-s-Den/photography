@@ -1,12 +1,11 @@
 package photography.usecases
 
 import cats.Monad
-import cats.data.NonEmptyList
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import photography.capabilities.{Clock, IdGenerator}
-import photography.domain.album.{Album, AlbumId, AlbumName}
+import photography.domain.album.{Album, AlbumId, AlbumYear, Chapter}
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
 import photography.usecases.AlbumService.*
@@ -16,9 +15,9 @@ import java.time.temporal.ChronoUnit
 
 trait AlbumService[F[_]]:
   def list(page: Int): F[ListAlbumsResult]
-  def create(title: AlbumName): F[CreateAlbumResult]
+  def create(year: AlbumYear): F[CreateAlbumResult]
   def get(id: AlbumId): F[GetAlbumResult]
-  def rename(id: AlbumId, title: AlbumName): F[RenameAlbumResult]
+  def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult]
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
 type AlbumPageSize = Int :| Positive
@@ -46,13 +45,14 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_)                 => ListAlbumsResult.Failed.pure[F]
         case firstPage @ AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice.totalAlbums, firstPage)
 
-    override def create(title: AlbumName): F[CreateAlbumResult] =
+    override def create(year: AlbumYear): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          buildInitialComposition(title, templates.head).flatMap { case (album, cover) =>
+          buildInitialComposition(year, templates.head).flatMap { case (album, cover) =>
             repository.create(album, cover).map:
-              case AlbumRepository.CreateResult.Created   => CreateAlbumResult.Created(album)
-              case AlbumRepository.CreateResult.Failed(_) => CreateAlbumResult.Failed
+              case AlbumRepository.CreateResult.Created                                         => CreateAlbumResult.Created(album)
+              case AlbumRepository.CreateResult.Failed(AlbumRepository.Failure.YearAlreadyUsed) => CreateAlbumResult.YearAlreadyUsed
+              case AlbumRepository.CreateResult.Failed(_)                                       => CreateAlbumResult.Failed
           }
         case ListAlbumStartTemplatesResult.Failed => CreateAlbumResult.Failed.pure[F]
 
@@ -62,17 +62,24 @@ object AlbumService:
         case AlbumRepository.GetResult.NotFound     => GetAlbumResult.NotFound
         case AlbumRepository.GetResult.Failed(_)    => GetAlbumResult.Failed
 
-    override def rename(id: AlbumId, title: AlbumName): F[RenameAlbumResult] =
-      repository.rename(id, title).map:
-        case AlbumRepository.RenameResult.Renamed(album) => RenameAlbumResult.Renamed(album)
-        case AlbumRepository.RenameResult.NotFound       => RenameAlbumResult.NotFound
-        case AlbumRepository.RenameResult.Failed(_)      => RenameAlbumResult.Failed
+    override def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult] =
+      repository.changeYear(id, album => yearDecision(album, year)).map:
+        case AlbumRepository.ChangeYearResult.Changed(album)                                  => ChangeYearResult.Changed(album)
+        case AlbumRepository.ChangeYearResult.HasChapters                                     => ChangeYearResult.HasChapters
+        case AlbumRepository.ChangeYearResult.NotFound                                        => ChangeYearResult.NotFound
+        case AlbumRepository.ChangeYearResult.Failed(AlbumRepository.Failure.YearAlreadyUsed) => ChangeYearResult.YearAlreadyUsed
+        case AlbumRepository.ChangeYearResult.Failed(_)                                       => ChangeYearResult.Failed
 
     override def delete(id: AlbumId): F[DeleteAlbumResult] =
       repository.delete(id).map:
         case AlbumRepository.DeleteResult.Deleted   => DeleteAlbumResult.Deleted
         case AlbumRepository.DeleteResult.NotFound  => DeleteAlbumResult.NotFound
         case AlbumRepository.DeleteResult.Failed(_) => DeleteAlbumResult.Failed
+
+    private def yearDecision(album: Album, year: AlbumYear) =
+      if album.year.compare(year) === 0 then AlbumRepository.YearDecision.Keep
+      else if album.chapters.nonEmpty then AlbumRepository.YearDecision.Reject
+      else AlbumRepository.YearDecision.Replace(year)
 
     private def buildListResult(requestedPage: Int, totalAlbums: Long, firstPage: AlbumRepository.ListResult) =
       val totalPages    = ((totalAlbums + pageSize - 1) / pageSize).toInt
@@ -84,25 +91,20 @@ object AlbumService:
           ListAlbumsResult.Listed(AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
-    private def buildInitialComposition(title: AlbumName, template: SpreadTemplate) =
+    private def buildInitialComposition(year: AlbumYear, template: SpreadTemplate.AlbumStart) =
       for
         albumId   <- identifiers.nextId.map(AlbumId(_))
         spreadId  <- identifiers.nextId.map(SpreadId(_))
-        slots     <- template.slots.toList.traverse(buildInitialSlot(spreadId, _))
+        photos    <- template.photoSlots.traverse(box => identifiers.nextId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, Set.empty)))
+        text      <- identifiers.nextId.map(id => SpreadSlot.Text(TextSpreadSlotId(id), template.textSlot))
         frontId   <- identifiers.nextId.map(CoverSlotId(_))
         backId    <- identifiers.nextId.map(CoverSlotId(_))
         createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
-        val start = Spread.AlbumStart(spreadId, albumId, template.id, slots.toVector, placements = Vector.empty[SpreadPlacement])
-        val album = Album(albumId, title, synopsis = "", createdAt, NonEmptyList.one(start: Spread))
+        val start = Spread.AlbumStart(spreadId, template.id, photos, text, placements = Vector.empty[SpreadPlacement])
+        val album = Album(albumId, year, synopsis = "", createdAt, start, Vector.empty[Chapter.Vacation], maybeHome = None)
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
-
-    private def buildInitialSlot(spreadId: SpreadId, slot: SpreadTemplateSlot) =
-      identifiers.nextId.map: id =>
-        slot match
-          case SpreadTemplateSlot.Photo(box) => SpreadSlot.Photo(PhotoSpreadSlotId(id), spreadId, box, bleed = Set.empty[SpreadEdge]): SpreadSlot
-          case SpreadTemplateSlot.Text(box)  => SpreadSlot.Text(TextSpreadSlotId(id), spreadId, box): SpreadSlot
 
   final case class AlbumPage(albums: Vector[Album], page: Int, pageSize: Int, totalAlbums: Long, totalPages: Int)
 
@@ -112,17 +114,16 @@ object AlbumService:
 
   enum CreateAlbumResult derives CanEqual:
     case Created(album: Album)
-    case Failed
+    case YearAlreadyUsed, Failed
 
   enum GetAlbumResult derives CanEqual:
     case Found(album: Album)
     case NotFound
     case Failed
 
-  enum RenameAlbumResult derives CanEqual:
-    case Renamed(album: Album)
-    case NotFound
-    case Failed
+  enum ChangeYearResult derives CanEqual:
+    case Changed(album: Album)
+    case HasChapters, YearAlreadyUsed, NotFound, Failed
 
   enum DeleteAlbumResult derives CanEqual:
     case Deleted

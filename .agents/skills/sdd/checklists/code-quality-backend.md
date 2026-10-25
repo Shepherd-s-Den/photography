@@ -2,6 +2,15 @@
 
 Load only for a PR that changes `backend/**`. `CONTRIBUTING.md` §Scala composition and `DESIGN-PRINCIPLES.md` §1/§4/§5 own the general rules; the shared items live in [`code-quality.md`](code-quality.md).
 
+## Model and boundary audit
+
+- [ ] Before projecting tests, inventory each changed aggregate's required facts, authoritative relationships and derived values against `DESIGN-PRINCIPLES.md` §2–§4. Attempt contradictory values through every public constructor and copy path; record concrete examples and how the representation rules them out.
+- [ ] Trace every external input from its source decoder to the application signature. Record the adapter that parses, normalizes and refines it; core signatures use the resulting strong types. Separate application projections and selectable reference catalogs from domain-owned state.
+- [ ] Map every changed application operation to the business capability that owns it and its existing service. Each new service or port has an independently named responsibility rather than a screen or response shape.
+- [ ] Inventory every added or changed comment against `DESIGN-PRINCIPLES.md` §8. Each retained comment identifies a non-obvious constraint that clearer types, names or structure cannot express.
+
+## Implementation
+
 - [ ] Effectful application boundaries are expressed as Tagless Final algebras parameterized by `F[_]`; pure domain logic stays independent of runtime effects.
 - [ ] Concrete interpreters and effect runtimes are composed at the application boundary, not selected from inside domain code.
 - [ ] In runtime composition, keep constructor/factory calls on one physical line; extract nested dependency construction into meaningfully named vals to fit the line limit.

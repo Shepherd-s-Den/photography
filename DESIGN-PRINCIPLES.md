@@ -53,6 +53,8 @@ External models are translated into internal ones at the edge, so no foreign sha
 
 Keep **wire representations** and **domain models** distinct. Adapters translate between them, and validators reject malformed input before it crosses inward. Driven ports return data already valid for the domain: adapters enforce the port's contract (for example, non-empty lists, allowed kinds, ordering), and use cases and domain types trust it rather than re-checking or handling invalid input.
 
+Domain types declare the strongest constraints available. Parsing, normalization, refinement and representation validation belong to the adapter that owns the source; application services receive typed values. A screen's setup state, selectable catalog or response envelope does not define a domain aggregate.
+
 Boundary encodings must preserve domain semantics used outside the core. If storage compares encoded values, their canonical representation must preserve domain ordering, including across migrated data.
 
 ## 5. Indirection Layers

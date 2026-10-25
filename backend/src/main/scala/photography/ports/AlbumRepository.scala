@@ -1,16 +1,21 @@
 package photography.ports
 
-import photography.domain.album.{Album, AlbumId, AlbumName}
+import photography.domain.album.{Album, AlbumId, AlbumYear}
 import photography.domain.layout.Cover
 
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
   def create(album: Album, cover: Cover): F[AlbumRepository.CreateResult]
   def get(id: AlbumId): F[AlbumRepository.GetResult]
-  def rename(id: AlbumId, title: AlbumName): F[AlbumRepository.RenameResult]
+  def changeYear(id: AlbumId, decide: Album => AlbumRepository.YearDecision): F[AlbumRepository.ChangeYearResult]
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
 
 object AlbumRepository:
+  enum YearDecision:
+    case Keep
+    case Replace(year: AlbumYear)
+    case Reject
+
   enum ListResult derives CanEqual:
     case Listed(slice: AlbumPageSlice)
     case Failed(reason: Failure)
@@ -24,8 +29,9 @@ object AlbumRepository:
     case NotFound
     case Failed(reason: Failure)
 
-  enum RenameResult derives CanEqual:
-    case Renamed(album: Album)
+  enum ChangeYearResult derives CanEqual:
+    case Changed(album: Album)
+    case HasChapters
     case NotFound
     case Failed(reason: Failure)
 
@@ -37,4 +43,4 @@ object AlbumRepository:
   final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
 
   enum Failure derives CanEqual:
-    case InvalidAlbumData, DatabaseFailure
+    case YearAlreadyUsed, DatabaseFailure

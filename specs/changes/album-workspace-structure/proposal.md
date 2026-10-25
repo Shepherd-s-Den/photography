@@ -17,10 +17,9 @@ Replace the metadata-only album page with a chapter workspace where an editor ca
 
 ```mermaid
 flowchart LR
-  Open["Open album"] --> Year{"Year assigned?"}
-  Year -->|No| Setup["Choose year in chapter area"]
-  Setup --> Workspace["Workspace"]
-  Year -->|Yes| Workspace
+  Create["Choose an unused year"] --> Album["Create album"]
+  Album --> Workspace["Workspace"]
+  Open["Open album"] --> Workspace
   Workspace --> Spreads["Album opening → vacation blocks → Home"]
   Workspace --> Cover["Cover"]
   Spreads <--> Cover
@@ -30,8 +29,9 @@ flowchart LR
 
 ### Album and chapters
 
-- A year identifies at most one album. Assigning it sets the stored title to `Journey of the Shepherds <year>`; the year stays fixed once chapters exist.
-- Existing yearless albums retain their identity, synopsis and composition when a year is assigned. Year-based titles are generated rather than freely renamed.
+- Every album has a year, supplied at creation, identifying at most one album. Its title is `Journey of the Shepherds <year>`; the year stays fixed once chapters exist.
+- Existing yearless records require separate explicit resolution; this change preserves them without inventing years. Album reads return complete year-bearing values or an explicit failure.
+- Album countries are derived from its chapter destinations. The complete selectable country catalog is independent reference data.
 - Vacations sort by first day, then last day, then chapter ID. Home is optional, explicitly added, unique within its album and always last.
 - The chapter name is its entered location/name. Home has country and folder metadata, with its period derived from the album year.
 - Wire dates are inclusive calendar days, `YYYY-MM-DD`; stored visit periods run from UTC midnight on the first day to midnight after the last day.
@@ -44,18 +44,20 @@ flowchart LR
 | Unique non-null chapter folder and chapter position within an album | Database unique constraints |
 | Valid identities and country/album/chapter associations | Database primary/foreign keys and application ownership validation |
 | At most 65 interior spreads (130 pages), counting album/chapter openings and photo spreads, excluding Cover | Application validation |
-| Valid calendar periods, Home's derived period, contained relative folders | Application validation |
+| Calendar/date and contained-folder representations | Source-boundary decoding and refinement |
+| Home's year-derived period | Application rule |
 | Chronological positions and complete opening slots | Application transaction |
 
 ### HTTP contract
 
 Album metadata reads remain separate from workspace reads.
 
-- Album list/read entries additionally expose `year`, nullable before assignment; existing fields retain their meanings.
-- For an assigned year, the existing rename operation accepts only the generated title; another title returns `400 {message}`. Yearless-album rename is unchanged.
+- Album creation accepts `{year}` and returns its generated title. Album list/read entries additionally expose the required `year`.
+- The existing rename operation accepts only the generated title; another title returns `400 {message}`.
 
 | Method and path | Request | Success |
 |---|---|---|
+| `POST /api/albums` | `{year}` | `201 {id, year, title, createdAt}` |
 | `GET /api/albums/{id}/workspace` | — | `200 {year, photoRoot, chapters, spreads, countries}` |
 | `PUT /api/albums/{id}/year` | `{year}` | `200 {year, title}` |
 | `POST /api/albums/{id}/chapters` | `{kind, ...details}` | `201 {id}` |
@@ -63,7 +65,7 @@ Album metadata reads remain separate from workspace reads.
 
 | Value | Shape |
 |---|---|
-| `year` | Integer `1900..2100`, or `null` before assignment |
+| `year` | Integer `1900..2100` |
 | Vacation details | `{name, country, start, end, sourceFolder}` |
 | Home details | `{country, sourceFolder}` |
 | `kind` | `"vacation"` or `"home"`; selected on creation |
@@ -73,6 +75,7 @@ Album metadata reads remain separate from workspace reads.
 | Country | `{id, name, code}`; chapter/request `country` identifies one of these records |
 
 - IDs are canonical UUID strings; absent folders are `null`, and empty collections are `[]`. Chapter `name` is `Home` for Home; its returned dates span its year.
+- Workspace `countries` is the complete selectable reference catalog, distinct from the countries represented by the album's chapters.
 - Spread kinds are `"album_start"`, `"chapter_start"` and `"photos_only"`; chapter blocks follow their chapter opening with photo spreads in persisted order.
 - Malformed JSON, invalid fields/references, duplicate year/Home/folder and spread-capacity violations return `400 {message}` with readable feedback.
 - Malformed or missing album IDs return `404 {code: "album_not_found"}`; missing or foreign chapter targets return `404 {code: "chapter_not_found"}`.
@@ -91,10 +94,10 @@ Album metadata reads remain separate from workspace reads.
 
 ### Year and workspace
 
-- A yearless album shows year setup in the chapter area, defaulting to the browser's current year.
-- Saving a valid unused year replaces setup with the chapter outline and persists the canonical album title.
-- Year-assigned albums display that title on the dashboard and omit free-form rename; yearless albums retain the existing dashboard controls.
-- Invalid or duplicate years retain the setup value with readable feedback; an album with chapters rejects a changed year.
+- Creation asks for a year, defaulting to the browser's current year, before persisting an album.
+- Saving a valid unused year creates the album with its canonical title; opening it shows the chapter outline.
+- Albums display their canonical title on the dashboard and omit free-form rename.
+- Invalid or duplicate years retain the entered value with readable feedback; an album with chapters rejects a changed year.
 - Show one workspace heading, `A year in photographs / <year>`, beneath Back to albums.
 - The browser tab displays a site favicon served by the application.
 - The outline starts with Album opening, then numbered chapter blocks; an album without chapters still opens its initial spread.
@@ -148,9 +151,10 @@ Album metadata reads remain separate from workspace reads.
 
 ## Doc Sync
 
-- `specs/design.md` — Album workflow: record year setup, chapter details, workspace selection, reader behavior and the site favicon.
-- `specs/design.md` — Domain model and Album composition: replace the chapter cap with the 65-spread/130-page capacity, excluding Cover.
-- `specs/design.md` — Album composition and Values: record year-based identity, vacation/Home ordering, optional folders and inclusive calendar-date semantics.
+- `specs/design.md` — Album workflow: record year-required creation, chapter details, workspace selection, reader behavior and the site favicon.
+- `specs/design.md` — Domain model: record required album years and chapter-derived countries; remove the 20-chapter cardinality.
+- `specs/design.md` — Album composition: record 65-spread/130-page capacity excluding Cover, chronological vacation/Home blocks and atomic chapter changes.
+- `specs/design.md` — Values: record the year range, optional contained folders and inclusive calendar-date semantics.
 - `specs/design.md` — Templates and covers: record the default chapter opening, percentage geometry, cover title/credits and the supported page ceiling.
 - `specs/contracts.md` — Contract inventory: include chapter-start/country seeds and point to the expanded HTTP contract.
 - `specs/http-api.openapi.json` — Paths and schemas: add workspace, year and chapter operations, including generated-title validation on existing rename.
