@@ -16,7 +16,7 @@ Make the smallest change that satisfies the request. Keep each rule in one ownin
 
 ## Setup
 
-**Single-checkout feature lifecycle:** execute the entire feature sequentially in the primary worktree on one `feature/<slug>` branch named for the overall feature/spec, from spike and spec through implementation and archive. Keep existing local edits intact. Use this checkout for gates and the local app; additional execution agents, worktrees, and clones are unnecessary. Fresh review agents follow `reviewer.md`.
+**Feature lifecycle:** keep spec, implementation and archive on one `feature/<slug>` branch in the primary worktree, preserving existing edits. Spikes follow the procedure below; fresh review agents follow `reviewer.md`.
 
 **Slice loop:** complete the current slice and the PR-opening gate below, then open its PR against `main`. Wait for the maintainer-authorized merge, fetch updated `main`, and rebase the same feature branch onto it before starting the next slice. Retain only work not already merged; after a squash merge, reconcile the merged slice's commits rather than replaying them. Verify that the branch includes updated `main` with no already-merged slice commits remaining, and record the new baseline in the local checklist. Continue the next slice on that same branch through the final archive PR.
 
@@ -30,9 +30,13 @@ Re-read that checklist before every phase's work, including after any interrupti
 
 ## Spike
 
-Record the stable `main` commit. Explore in the primary checkout's normal source paths with scratch data under `.agent-work/<slug>/spike/`, leaving spike code uncommitted. `python3 scripts/local.py` runs the current checkout as-is; it does not select, inject, or configure spike code. After confirmation, retain a local snapshot under `.agent-work/<slug>/spike/` and remove only the exploratory edits before authoring the spec and tests.
+Create a dedicated spike worktree at the pinned `main` revision before exploration. Run the real app there through `python3 scripts/local.py`, leaving spike code uncommitted.
 
-Build against the same compiler, type, lint, format, test, and app-start checks used by the product. Skip only coverage during exploration: run frontend tests with `npx vitest run` rather than the coverage-enabled package script, and run backend tests without the coverage task. Iterate on the real journey until the user confirms it. Record the base commit, command, URL, decision, and findings in `.agent-work/<slug>/checklist.md`; carry the findings into the Spec PR. Retain the snapshot until implementation has merged.
+Keep scratch data and evidence under ignored `.agent-work/<slug>/spike/` in the primary checkout. Record the worktree's absolute path, base, launch command, URL and findings in the primary checklist for orchestrator inspection and reruns.
+
+Build against the same compiler, type, lint, format, test, and app-start checks used by the product. Skip only coverage during exploration: run frontend tests with `npx vitest run` rather than the coverage-enabled package script, and run backend tests without the coverage task. Carry confirmed findings into the Spec PR.
+
+Retain the runnable spike through implementation and final local comparison. After the Archive + Living Docs PR merges, stop its owned services and remove that feature's spike worktree.
 
 ## Adjudication
 
