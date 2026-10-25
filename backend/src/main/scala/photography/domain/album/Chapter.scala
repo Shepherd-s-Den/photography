@@ -12,7 +12,6 @@ object ChapterId:
   def apply(value: UUID): ChapterId         = value
   extension (id: ChapterId) def value: UUID = id
 
-type ChapterName                = DestinationName
 type RelativeLocationConstraint = Not[Blank] & Match["(?!/)(?!.*[:\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
 type RelativeLocation           = String :| RelativeLocationConstraint
 type SourceFolderConstraint     = Match["/(?!.*[\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
@@ -32,4 +31,4 @@ final case class Chapter(
 )
 
 enum ChapterConflict:
-  case AtCapacity, HomeExists, FolderAssigned, ChapterNotFound
+  case AtCapacity, HomeExists, HomePeriodMismatch, FolderAssigned

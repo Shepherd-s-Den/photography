@@ -1,3 +1,6 @@
+export const minimumAlbumYear = 1900;
+export const maximumAlbumYear = 2100;
+
 export interface AlbumSummary {
   readonly id: string;
   readonly year: number;

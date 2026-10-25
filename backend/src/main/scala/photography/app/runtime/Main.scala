@@ -11,7 +11,7 @@ import photography.adapters.http.{AlbumApi, HealthRoutes, SpreadTemplateApi, Sta
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteSpreadTemplateRepository}
 import photography.app.config.AppConfig
 import photography.capabilities.{Clock, IdGenerator}
-import photography.usecases.{AlbumService, SpreadTemplateService}
+import photography.usecases.{AlbumService, ChapterPolicy, SpreadTemplateService}
 import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
@@ -32,7 +32,8 @@ object Main extends IOApp.Simple:
   private def buildHttpApp(config: AppConfig, resources: AppResourcesBuilder.AppResources[IO]) =
     val templateRepository = SqliteSpreadTemplateRepository.make[IO](resources.sqlite)
     val templates          = SpreadTemplateService.make(templateRepository)
-    val albumRepository    = SqliteAlbumRepository.make[IO](resources.sqlite)
+    val chapterPolicy      = ChapterPolicy.make
+    val albumRepository    = SqliteAlbumRepository.make[IO](resources.sqlite, chapterPolicy)
     val albums             = AlbumService.make(albumRepository, templates, config.albums.pageSize)
     val api                = HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes
     StaticSite.make(api, "frontend").app

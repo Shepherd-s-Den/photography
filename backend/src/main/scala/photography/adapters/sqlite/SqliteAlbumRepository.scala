@@ -14,17 +14,18 @@ import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
 import photography.ports.AlbumRepository.*
+import photography.usecases.ChapterPolicy
 
 import java.nio.file.{InvalidPathException, Path}
-import java.time.{Instant, LocalDate, ZoneOffset}
+import java.time.{Instant, ZoneOffset}
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 object SqliteAlbumRepository:
-  def make[F[_]: Async: Logger](transactor: Transactor[F]): AlbumRepository[F] =
-    new LiveAlbumRepository(transactor)
+  def make[F[_]: Async: Logger](transactor: Transactor[F], policy: ChapterPolicy): AlbumRepository[F] =
+    new LiveAlbumRepository(transactor, policy)
 
-  final private class LiveAlbumRepository[F[_]: Async: Logger](transactor: Transactor[F]) extends AlbumRepository[F]:
+  final private class LiveAlbumRepository[F[_]: Async: Logger](transactor: Transactor[F], policy: ChapterPolicy) extends AlbumRepository[F]:
     override def list(offset: Int, limit: Int): F[ListResult] =
       val query =
         for
@@ -83,16 +84,11 @@ object SqliteAlbumRepository:
         chapters: Vector[Chapter]
     ) =
       val album         = Album(AlbumId(id), year, synopsis, createdAt, opening, chapters)
-      val chronological = chapters.sortBy(chapter =>
+      val chronological = chapters.sortBy { chapter =>
         (chapter.destination.isHome, chapter.period.firstDay.toEpochDay, chapter.period.days: Long, chapter.id.value.toString)
-      )
-      val home      = chapters.filter(_.destination.isHome)
-      val yearStart = LocalDate.of(year, 1, 1)
-      val yearDays  = ChronoUnit.DAYS.between(yearStart, yearStart.plusYears(1))
+      }
       Either.cond(
-        album.spreads.length <= 65 && chapters.map(_.id.value) === chronological.map(_.id.value) &&
-          home.sizeIs <= 1 &&
-          home.forall(chapter => chapter.period.firstDay.compareTo(yearStart) === 0 && chapter.period.days.compare(yearDays) === 0),
+        policy.conflict(album).isEmpty && chapters.map(_.id.value) === chronological.map(_.id.value),
         album,
         new IllegalArgumentException("Invalid album capacity or chapter order")
       ).liftTo[ConnectionIO]
@@ -106,8 +102,9 @@ object SqliteAlbumRepository:
 
     private def decodeChapter(row: ChapterRow) =
       val (id, destination, name, countryId, code, countryName, flag, description, start, end, folder) = row
-      val days                                                                                         = ChronoUnit.DAYS.between(start, end)
-      val calendarDays                                                                                 = Either.cond(
+
+      val days         = ChronoUnit.DAYS.between(start, end)
+      val calendarDays = Either.cond(
         start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0,
         (),
         "Expected UTC calendar days"
@@ -119,7 +116,8 @@ object SqliteAlbumRepository:
         composition <- loadChapterSpreads(id)
       yield
         val (opening, photos) = composition
-        val country           = Country(CountryId(countryId), code, countryName, flag)
+
+        val country = Country(CountryId(countryId), code, countryName, flag)
         Chapter(ChapterId(id), Destination(DestinationId(destination), name, country), visit, description, folder, opening, photos)
 
     private def loadRequired(id: UUID) =
@@ -135,10 +133,9 @@ object SqliteAlbumRepository:
         case (opening: Spread.ChapterStart) :: rest =>
           val photos = rest.collect { case photo: Spread.PhotosOnly => photo }.toVector
           Either.cond(photos.size === rest.size, (opening, photos), new IllegalArgumentException("Invalid chapter composition")).liftTo[ConnectionIO]
-        case _ => new IllegalArgumentException("Chapter must begin with its opening").raiseError[
-            ConnectionIO,
-            (Spread.ChapterStart, Vector[Spread.PhotosOnly])
-          ]
+        case _ =>
+          val error = new IllegalArgumentException("Chapter must begin with its opening")
+          error.raiseError[ConnectionIO, (Spread.ChapterStart, Vector[Spread.PhotosOnly])]
 
     private def loadSpreads(owner: Fragment) =
       val select =
@@ -195,8 +192,9 @@ object SqliteAlbumRepository:
 
     private def decodeSpread(row: SpreadRow, slots: Vector[SpreadSlot], placements: Vector[SpreadPlacement]) =
       val (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) = row
-      val photos                                                                      = slots.collect { case photo: SpreadSlot.Photo => photo }
-      val texts                                                                       = slots.collect { case text: SpreadSlot.Text => text }
+
+      val photos = slots.collect { case photo: SpreadSlot.Photo => photo }
+      val texts  = slots.collect { case text: SpreadSlot.Text => text }
       (kind, maybeTemplateKind, maybeAlbum, maybeChapter, texts) match
         case ("album_start", Some("album_start"), Some(_), None, Vector(text)) if position === 0 =>
           (Spread.AlbumStart(SpreadId(id), SpreadTemplateId(template), photos, text, placements): Spread).asRight[String]

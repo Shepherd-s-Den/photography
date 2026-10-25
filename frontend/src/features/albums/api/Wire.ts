@@ -1,9 +1,9 @@
-import type { Album, AlbumPage, AlbumSummary } from "../model/Album";
+import { maximumAlbumYear, minimumAlbumYear, type Album, type AlbumPage, type AlbumSummary } from "../model/Album";
 
 export function readSummary(value: unknown): AlbumSummary {
   const fields = record(value);
-  const year = integer(fields["year"], 1900);
-  if (year > 2100) throw new Error("Expected an album year from 1900 to 2100");
+  const year = integer(fields["year"], minimumAlbumYear);
+  if (year > maximumAlbumYear) throw new Error(`Expected an album year from ${minimumAlbumYear.toString()} to ${maximumAlbumYear.toString()}`);
   return { id: text(fields["id"]), year, title: text(fields["title"]), createdAt: text(fields["createdAt"]) };
 }
 
