@@ -6,15 +6,15 @@ import cats.syntax.all.*
 import photography.domain.layout.SpreadTemplate
 import photography.ports.SpreadTemplateRepository
 
-trait SpreadTemplateService[F[_]]:
-  def listAlbumStartTemplates: F[SpreadTemplateService.ListAlbumStartTemplatesResult]
-  def listChapterStartTemplates: F[SpreadTemplateService.ListChapterStartTemplatesResult]
+trait SpreadTemplateManager[F[_]]:
+  def listAlbumStartTemplates: F[SpreadTemplateManager.ListAlbumStartTemplatesResult]
+  def listChapterStartTemplates: F[SpreadTemplateManager.ListChapterStartTemplatesResult]
 
-object SpreadTemplateService:
-  def make[F[_]: Functor](repository: SpreadTemplateRepository[F]): SpreadTemplateService[F] =
-    new LiveSpreadTemplateService(repository)
+object SpreadTemplateManager:
+  def make[F[_]: Functor](repository: SpreadTemplateRepository[F]): SpreadTemplateManager[F] =
+    new LiveSpreadTemplateManager(repository)
 
-  final private class LiveSpreadTemplateService[F[_]: Functor](repository: SpreadTemplateRepository[F]) extends SpreadTemplateService[F]:
+  final private class LiveSpreadTemplateManager[F[_]: Functor](repository: SpreadTemplateRepository[F]) extends SpreadTemplateManager[F]:
     override def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult] =
       repository.listAlbumStartTemplates.map:
         case SpreadTemplateRepository.ListAlbumStartTemplatesResult.Listed(templates) => ListAlbumStartTemplatesResult.Listed(templates)

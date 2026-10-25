@@ -7,13 +7,21 @@ CREATE TABLE country (
 
 CREATE TABLE destination (
     id TEXT PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL,
-    country_id TEXT NOT NULL REFERENCES country (id)
+    name TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE destination_country (
+    destination_id TEXT NOT NULL REFERENCES destination (id) ON DELETE CASCADE,
+    country_id TEXT NOT NULL REFERENCES country (id),
+    position INTEGER NOT NULL CHECK (position >= 0),
+    PRIMARY KEY (destination_id, country_id),
+    UNIQUE (destination_id, position)
 ) STRICT;
 
 CREATE TABLE album (
     id TEXT PRIMARY KEY NOT NULL,
     year INTEGER NOT NULL UNIQUE CHECK (year BETWEEN 1900 AND 2100),
+    title TEXT NOT NULL CHECK (length(trim(title)) > 0),
     synopsis TEXT NOT NULL,
     created_at_ms INTEGER NOT NULL
 ) STRICT;

@@ -14,7 +14,7 @@ import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
 import photography.ports.AlbumRepository.*
-import photography.usecases.ChapterPolicy
+import photography.usecases.ChapterManager
 
 import java.nio.file.{InvalidPathException, Path}
 import java.time.{Instant, ZoneOffset}
@@ -22,10 +22,10 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 object SqliteAlbumRepository:
-  def make[F[_]: Async: Logger](transactor: Transactor[F], policy: ChapterPolicy): AlbumRepository[F] =
-    new LiveAlbumRepository(transactor, policy)
+  def make[F[_]: Async: Logger](transactor: Transactor[F], rules: ChapterManager.Rules): AlbumRepository[F] =
+    new LiveAlbumRepository(transactor, rules)
 
-  final private class LiveAlbumRepository[F[_]: Async: Logger](transactor: Transactor[F], policy: ChapterPolicy) extends AlbumRepository[F]:
+  final private class LiveAlbumRepository[F[_]: Async: Logger](transactor: Transactor[F], rules: ChapterManager.Rules) extends AlbumRepository[F]:
     override def list(offset: Int, limit: Int): F[ListResult] =
       val query =
         for
@@ -49,15 +49,13 @@ object SqliteAlbumRepository:
     override def get(id: AlbumId): F[GetResult] =
       execute(load(id.value).map(_.fold[GetResult](GetResult.NotFound)(GetResult.Found(_))), GetResult.Failed(_))
 
-    override def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult] =
-      val update = sql"""UPDATE album SET year = $year WHERE id = ${id.value}
-                         AND (year = $year OR NOT EXISTS (SELECT 1 FROM chapter WHERE album_id = ${id.value}))"""
-      val query = load(id.value).flatMap:
-        case None        => ChangeYearResult.NotFound.pure[ConnectionIO]
+    override def rename(id: AlbumId, title: AlbumTitle): F[RenameResult] =
+      val update = sql"UPDATE album SET title = $title WHERE id = ${id.value}"
+      val query  = load(id.value).flatMap:
+        case None        => RenameResult.NotFound.pure[ConnectionIO]
         case Some(album) =>
-          update.update.run.map: count =>
-            if count > 0 then ChangeYearResult.Changed(album.copy(year = year)) else ChangeYearResult.HasChapters
-      execute(query, ChangeYearResult.Failed(_))
+          update.update.run.as(RenameResult.Renamed(album.copy(title = title)))
+      execute(query, RenameResult.Failed(_))
 
     override def delete(id: AlbumId): F[DeleteResult] =
       val query = sql"DELETE FROM album WHERE id = ${id.value}".update.run.map: deleted =>
@@ -65,43 +63,42 @@ object SqliteAlbumRepository:
       execute(query, DeleteResult.Failed(_))
 
     private def load(id: UUID) =
-      sql"SELECT year, synopsis, created_at_ms FROM album WHERE id = $id".query[(AlbumYear, String, Instant)].option.flatMap:
-        case None                              => Option.empty[Album].pure[ConnectionIO]
-        case Some((year, synopsis, createdAt)) =>
+      sql"SELECT year, title, synopsis, created_at_ms FROM album WHERE id = $id".query[(AlbumYear, AlbumTitle, String, Instant)].option.flatMap:
+        case None                                     => Option.empty[Album].pure[ConnectionIO]
+        case Some((year, title, synopsis, createdAt)) =>
           for
             chapters <- loadChapters(id)
             opening  <- loadAlbumOpening(id)
             _        <- validateCover(id)
-            album    <- decodeAlbum(id, year, synopsis, createdAt, opening, chapters)
+            album    <- decodeAlbum(id, year, title, synopsis, createdAt, opening, chapters)
           yield album.some
 
     private def decodeAlbum(
         id: UUID,
         year: AlbumYear,
+        title: AlbumTitle,
         synopsis: String,
         createdAt: Instant,
         opening: Spread.AlbumStart,
         chapters: Vector[Chapter]
     ) =
-      val album         = Album(AlbumId(id), year, synopsis, createdAt, opening, chapters)
-      val chronological = chapters.sortBy { chapter =>
-        (chapter.destination.isHome, chapter.period.firstDay.toEpochDay, chapter.period.days: Long, chapter.id.value.toString)
-      }
+      val album         = Album(AlbumId(id), year, title, synopsis, createdAt, opening, chapters)
+      val chronological = rules.ordered(chapters)
       Either.cond(
-        policy.conflict(album).isEmpty && chapters.map(_.id.value) === chronological.map(_.id.value),
+        rules.conflict(album).isEmpty && chapters.map(_.id.value) === chronological.map(_.id.value),
         album,
         new IllegalArgumentException("Invalid album capacity or chapter order")
       ).liftTo[ConnectionIO]
 
     private def loadChapters(albumId: UUID) =
-      val select = sql"""SELECT c.id, d.id, d.name, k.id, k.code, k.name, k.flag, c.description,
+      val select = sql"""SELECT c.id, d.id, d.name, c.description,
                                c.start_ms, c.end_ms, c.source_folder
-                        FROM chapter c LEFT JOIN destination d ON d.id = c.destination_id LEFT JOIN country k ON k.id = d.country_id
+                        FROM chapter c LEFT JOIN destination d ON d.id = c.destination_id
                         WHERE c.album_id = $albumId ORDER BY c.position"""
       validateChapters(albumId) >> select.query[ChapterRow].to[Vector].flatMap(_.traverse(decodeChapter))
 
     private def decodeChapter(row: ChapterRow) =
-      val (id, destination, name, countryId, code, countryName, flag, description, start, end, folder) = row
+      val (id, destination, name, description, start, end, folder) = row
 
       val days         = ChronoUnit.DAYS.between(start, end)
       val calendarDays = Either.cond(
@@ -114,11 +111,18 @@ object SqliteAlbumRepository:
       for
         visit       <- period.leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
         composition <- loadChapterSpreads(id)
+        countries   <- loadCountries(destination)
       yield
         val (opening, photos) = composition
 
-        val country = Country(CountryId(countryId), code, countryName, flag)
-        Chapter(ChapterId(id), Destination(DestinationId(destination), name, country), visit, description, folder, opening, photos)
+        Chapter(ChapterId(id), Destination(DestinationId(destination), name, countries), visit, description, folder, opening, photos)
+
+    private def loadCountries(destination: UUID) =
+      val select = sql"""SELECT k.id, k.code, k.name, k.flag FROM destination_country d
+                         LEFT JOIN country k ON k.id = d.country_id WHERE d.destination_id = $destination ORDER BY d.position"""
+      select.query[(UUID, CountryCode, CountryName, AbsoluteLocation)].to[List].flatMap: rows =>
+        val countries = rows.map { case (id, code, name, flag) => Country(CountryId(id), code, name, flag) }
+        NonEmptyList.fromList(countries).toRight(new IllegalArgumentException("Destination must have countries")).liftTo[ConnectionIO]
 
     private def loadRequired(id: UUID) =
       load(id).flatMap(_.toRight(new IllegalArgumentException(s"Missing required album $id")).liftTo[ConnectionIO])
@@ -234,8 +238,8 @@ object SqliteAlbumRepository:
       ).liftTo[ConnectionIO]
 
     private def insertAlbum(album: Album) =
-      sql"""INSERT INTO album (id, year, synopsis, created_at_ms)
-            VALUES (${album.id.value}, ${album.year}, ${album.synopsis}, ${album.createdAt})""".update.run.void
+      sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
+            VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, ${album.createdAt})""".update.run.void
 
     private def insertInitialSpread(albumId: AlbumId, start: Spread.AlbumStart) =
       val insert = sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
@@ -279,7 +283,7 @@ object SqliteAlbumRepository:
           Logger[F].error(error)("SQLite album operation failed").as(failed(reason))
 
     private given Meta[AlbumYear]        = Meta[Int].tiemap[AlbumYear](_.refineEither)(value => value: Int)
-    private given Meta[DestinationName]  = Meta[String].tiemap[DestinationName](_.refineEither)(value => value: String)
+    private given Meta[AlbumTitle]       = Meta[String].tiemap[AlbumTitle](_.refineEither)(value => value: String)
     private given Meta[CountryCode]      = Meta[String].tiemap[CountryCode](_.refineEither)(value => value: String)
     private given Meta[CountryName]      = Meta[String].tiemap[CountryName](_.refineEither)(value => value: String)
     private given Meta[SourceFolder]     = Meta[String].tiemap[SourceFolder](_.refineEither)(value => value: String)
@@ -336,6 +340,6 @@ object SqliteAlbumRepository:
       maybeTemplateKind: Option[String]
   )
   private type ChapterRow =
-    (UUID, UUID, DestinationName, UUID, CountryCode, CountryName, AbsoluteLocation, String, Instant, Instant, SourceFolder)
+    (UUID, UUID, DestinationName, String, Instant, Instant, SourceFolder)
   private type SlotRow      = (id: UUID, kind: String, box: SlotBox)
   private type PlacementRow = (UUID, UUID, UUID, InDesignPoints, InDesignPoints, Boolean, Zoom, CaptionCorner)

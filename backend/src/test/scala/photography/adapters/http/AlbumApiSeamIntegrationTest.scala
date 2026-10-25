@@ -8,10 +8,10 @@ import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
 import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
 import org.http4s.headers.`Content-Type`
-import photography.domain.album.{Album, AlbumId, AlbumYear, Chapter}
+import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, Chapter}
 import photography.domain.layout.*
-import photography.usecases.AlbumService
-import photography.usecases.AlbumService.*
+import photography.usecases.AlbumManager
+import photography.usecases.AlbumManager.*
 
 import java.time.Instant
 import java.util.UUID
@@ -25,7 +25,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(0.0, 0.0, 100.0, 100.0)),
     Vector.empty
   )
-  private val album         = Album(id, 2026, "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), start, chapters = Vector.empty[Chapter])
+  private val album =
+    Album(id, 2026, "Journey of the Shepherds 2026", "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), start, chapters = Vector.empty[Chapter])
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
@@ -64,19 +65,19 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       assert(responses.forall(hasValidationFeedback))
       assertEquals(calls, Vector.empty)
 
-  test("should create with a required year and decode the canonical rename title at the HTTP boundary"):
+  test("should create with a required year and accept a trimmed free-form rename"):
     val refs             = Refs()
     val server           = buildAlbumApi(refs)
     val expectedMetadata = parse(metadata).fold(error => fail(error.message), identity).some
 
     for
       created <- send(server, Method.POST, "/api/albums", """{"year":2026}""")
-      renamed <- send(server, Method.PATCH, albumPath, """{"title":"\tJourney of the Shepherds 2026\n"}""")
+      renamed <- send(server, Method.PATCH, albumPath, """{"title":"\tAsian capitals\n"}""")
       calls   <- refs.calls.get
     yield
       assertEquals(created, ApiResponse(Status.Created, jsonMediaType, expectedMetadata))
       assertEquals(renamed, ApiResponse(Status.Ok, jsonMediaType, expectedMetadata))
-      assertEquals(calls, Vector("create:2026", s"get:${id.value}"))
+      assertEquals(calls, Vector("create:2026:Journey of the Shepherds 2026", s"rename:${id.value}:Asian capitals"))
 
   test("should return validation feedback for invalid title bodies without calling the application"):
     val refs         = Refs()
@@ -88,11 +89,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       """{"title":""}""",
       """{"title":" \t\n "}""",
       """{"title":null}""",
-      """{"title":3}""",
-      """{"title":"Coast"}""",
-      """{"title":"Journey of the Shepherds 02026"}""",
-      """{"title":"Journey of the Shepherds 2101"}""",
-      """{"title":"Journey of the Shepherds no"}"""
+      """{"title":3}"""
     )
     val requests = (malformed ++ invalidYears).map(body => (Method.POST, "/api/albums", body)) ++
       (malformed ++ invalidTitles).map(body => (Method.PATCH, albumPath, body))
@@ -128,12 +125,11 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val server = buildAlbumApi(
       refs,
       getAlbumResult = GetAlbumResult.NotFound,
-      changeYearResult = ChangeYearResult.NotFound,
+      renameResult = RenameResult.NotFound,
       deleteAlbumResult = DeleteAlbumResult.NotFound
     )
-    val paths    = Vector(albumPath, "/api/albums/not-a-uuid", "/api/albums/1-1-1-1-1")
-    val requests = Vector(Method.GET, Method.PATCH, Method.DELETE).flatMap(method => paths.map(method -> _)) ++
-      paths.map(path => Method.PUT -> s"$path/year")
+    val paths        = Vector(albumPath, "/api/albums/not-a-uuid", "/api/albums/1-1-1-1-1")
+    val requests     = Vector(Method.GET, Method.PATCH, Method.DELETE).flatMap(method => paths.map(method -> _))
     val expectedBody = parse("""{"code":"album_not_found"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(requests.size)(ApiResponse(Status.NotFound, jsonMediaType, expectedBody.some))
     val responses    = requests.traverse { case (method, path) =>
@@ -145,7 +141,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       calls  <- refs.calls.get
     yield
       assertEquals(actual, expected)
-      assertEquals(calls, Vector(s"get:${id.value}", s"get:${id.value}", s"delete:${id.value}", s"year:${id.value}:2026"))
+      assertEquals(calls, Vector(s"get:${id.value}", s"rename:${id.value}:Journey of the Shepherds 2026", s"delete:${id.value}"))
 
   test("should translate every application's service failure to the same JSON error"):
     val server = buildAlbumApi(
@@ -153,7 +149,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       listAlbumsResult = ListAlbumsResult.Failed,
       createAlbumResult = CreateAlbumResult.Failed,
       getAlbumResult = GetAlbumResult.Failed,
-      changeYearResult = ChangeYearResult.Failed,
+      renameResult = RenameResult.Failed,
       deleteAlbumResult = DeleteAlbumResult.Failed
     )
     val operations = Vector(
@@ -161,8 +157,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       Method.POST   -> "/api/albums",
       Method.GET    -> albumPath,
       Method.PATCH  -> albumPath,
-      Method.DELETE -> albumPath,
-      Method.PUT    -> s"$albumPath/year"
+      Method.DELETE -> albumPath
     )
     val expectedBody = parse("""{"code":"service_failure"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(operations.size)(ApiResponse(Status.InternalServerError, jsonMediaType, expectedBody.some))
@@ -170,28 +165,21 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     operations.traverse { case (method, path) => send(server, method, path, """{"year":2026,"title":"Journey of the Shepherds 2026"}""") }
       .map(responses => assertEquals(responses, expected))
 
-  test("should return year title and readable feedback for business conflicts"):
-    val server          = buildAlbumApi(Refs())
-    val conflicts       = Vector(ChangeYearResult.HasChapters, ChangeYearResult.YearAlreadyUsed)
-    val taken           = buildAlbumApi(Refs(), createAlbumResult = CreateAlbumResult.YearAlreadyUsed)
-    val rename          = buildAlbumApi(Refs())
-    val rejectedChanges = conflicts.traverse { result =>
-      val failedServer = buildAlbumApi(Refs(), changeYearResult = result)
-      send(failedServer, Method.PUT, s"$albumPath/year", """{"year":2027}""")
-    }
+  test("should reject duplicate years and expose no year-edit operation"):
+    val refs     = Refs()
+    val server   = buildAlbumApi(refs)
+    val taken    = buildAlbumApi(Refs(), createAlbumResult = CreateAlbumResult.YearAlreadyUsed)
+    val yearEdit = Request[IO](Method.PUT, Uri.unsafeFromString(s"$albumPath/year")).withEntity("""{"year":2027}""")
 
     for
-      changed   <- send(server, Method.PUT, s"$albumPath/year", """{"year":2026}""")
-      invalid   <- send(server, Method.PUT, s"$albumPath/year", """{"year":null}""")
-      rejected  <- rejectedChanges
+      changed   <- server.run(yearEdit)
       duplicate <- send(taken, Method.POST, "/api/albums", """{"year":2026}""")
-      renamed   <- send(rename, Method.PATCH, albumPath, """{"title":"Journey of the Shepherds 2027"}""")
+      calls     <- refs.calls.get
     yield
-      val expectedYear = parse("""{"year":2026,"title":"Journey of the Shepherds 2026"}""").fold(error => fail(error.message), identity)
-      val errors       = rejected ++ Vector(invalid, duplicate, renamed)
-      assertEquals(changed, ApiResponse(Status.Ok, jsonMediaType, expectedYear.some))
-      assertEquals(errors.map(_.status), Vector.fill(errors.size)(Status.BadRequest))
-      assert(errors.forall(hasValidationFeedback))
+      assertEquals(changed.status, Status.NotFound)
+      assertEquals(duplicate.status, Status.BadRequest)
+      assert(hasValidationFeedback(duplicate))
+      assertEquals(calls, Vector.empty)
 
   final private case class Refs():
     val calls: Ref[IO, Vector[String]] = Ref.unsafe(Vector.empty)
@@ -204,15 +192,16 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       listAlbumsResult: ListAlbumsResult = ListAlbumsResult.Listed(AlbumPage(Vector.empty, 1, 6, 0, 0)),
       createAlbumResult: CreateAlbumResult = CreateAlbumResult.Created(album),
       getAlbumResult: GetAlbumResult = GetAlbumResult.Found(album),
-      changeYearResult: ChangeYearResult = ChangeYearResult.Changed(album),
+      renameResult: RenameResult = RenameResult.Renamed(album),
       deleteAlbumResult: DeleteAlbumResult = DeleteAlbumResult.Deleted
   ) =
-    val albums = new AlbumService[IO]:
-      override def list(page: Int): IO[ListAlbumsResult]          = refs.calls.update(_ :+ s"list:$page").as(listAlbumsResult)
-      override def create(year: AlbumYear): IO[CreateAlbumResult] = refs.calls.update(_ :+ s"create:$year").as(createAlbumResult)
-      override def get(albumId: AlbumId): IO[GetAlbumResult]      = refs.calls.update(_ :+ s"get:${albumId.value}").as(getAlbumResult)
-      override def changeYear(albumId: AlbumId, year: AlbumYear): IO[ChangeYearResult] =
-        refs.calls.update(_ :+ s"year:${albumId.value}:$year").as(changeYearResult)
+    val albums = new AlbumManager[IO]:
+      override def list(page: Int): IO[ListAlbumsResult]                             = refs.calls.update(_ :+ s"list:$page").as(listAlbumsResult)
+      override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] =
+        refs.calls.update(_ :+ s"create:$year:$title").as(createAlbumResult)
+      override def get(albumId: AlbumId): IO[GetAlbumResult]                     = refs.calls.update(_ :+ s"get:${albumId.value}").as(getAlbumResult)
+      override def rename(albumId: AlbumId, title: AlbumTitle): IO[RenameResult] =
+        refs.calls.update(_ :+ s"rename:${albumId.value}:$title").as(renameResult)
       override def delete(albumId: AlbumId): IO[DeleteAlbumResult] = refs.calls.update(_ :+ s"delete:${albumId.value}").as(deleteAlbumResult)
     AlbumApi.make(albums).routes.orNotFound
   // scalafix:on DisableSyntax.defaultArgs

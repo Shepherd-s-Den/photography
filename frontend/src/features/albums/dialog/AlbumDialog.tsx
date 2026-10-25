@@ -1,8 +1,8 @@
-import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import type { AlbumClient, AlbumSummary } from "../model/Album";
-import { failureMessage, validateYear } from "../model/Presentation";
+import { failureMessage, validateTitle, validateYear } from "../model/Presentation";
 
-export type AlbumAction = { kind: "create" } | { kind: "delete"; album: AlbumSummary };
+export type AlbumAction = { kind: "create" } | { kind: "rename"; album: AlbumSummary } | { kind: "delete"; album: AlbumSummary };
 
 export function AlbumDialog(props: {
   client: AlbumClient;
@@ -12,11 +12,15 @@ export function AlbumDialog(props: {
   returnFocus: () => void;
 }) {
   const [year, setYear] = createSignal(String(new Date().getFullYear()));
+  const [title, setTitle] = createSignal(untrack(() => (props.action.kind === "create" ? "" : props.action.album.title)));
   const [error, setError] = createSignal<string>();
   const [pending, setPending] = createSignal(false);
   const [closing, setClosing] = createSignal(false);
   const deleting = createMemo(() => props.action.kind === "delete");
-  const heading = createMemo(() => (props.action.kind === "delete" ? `Delete ${props.action.album.title}?` : "Create an album"));
+  const creating = createMemo(() => props.action.kind === "create");
+  const heading = createMemo(() =>
+    props.action.kind === "delete" ? `Delete ${props.action.album.title}?` : creating() ? "Create an album" : "Edit album name",
+  );
   const unavailable = createMemo(() => (pending() ? "Saving album. Please wait." : closing() ? "Closing album dialog." : undefined));
   let dialog: HTMLDialogElement;
   let input: HTMLInputElement;
@@ -43,7 +47,7 @@ export function AlbumDialog(props: {
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
-    const validation = deleting() ? undefined : validateYear(year());
+    const validation = deleting() ? undefined : creating() ? validateYear(year()) : validateTitle(title());
     if (validation !== undefined) {
       setError(validation);
       return;
@@ -53,6 +57,7 @@ export function AlbumDialog(props: {
     try {
       const action = props.action;
       if (action.kind === "create") await props.client.create(Number(year()));
+      else if (action.kind === "rename") await props.client.rename(action.album.id, title().trim());
       else await props.client.remove(action.album.id);
       await props.onSaved();
       await close();
@@ -108,16 +113,17 @@ export function AlbumDialog(props: {
           when={deleting()}
           fallback={
             <label>
-              Album year
+              {creating() ? "Album year" : "Album name"}
               <input
                 ref={(element) => {
                   input = element;
                 }}
-                value={year()}
-                inputmode="numeric"
+                value={creating() ? year() : title()}
+                inputmode={creating() ? "numeric" : "text"}
                 disabled={unavailable() !== undefined}
                 onInput={(event) => {
-                  setYear(event.currentTarget.value);
+                  if (creating()) setYear(event.currentTarget.value);
+                  else setTitle(event.currentTarget.value);
                   setError(undefined);
                 }}
                 aria-describedby="album-dialog-feedback"
@@ -147,7 +153,7 @@ export function AlbumDialog(props: {
             Cancel
           </button>
           <button type="submit" classList={{ danger: deleting() }} disabled={unavailable() !== undefined} aria-describedby="album-dialog-feedback">
-            {deleting() ? "Delete permanently" : "Create"}
+            {deleting() ? "Delete permanently" : creating() ? "Create" : "Save"}
           </button>
         </div>
       </form>

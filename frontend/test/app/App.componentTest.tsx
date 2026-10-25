@@ -70,7 +70,7 @@ describe("album dashboard and open", () => {
     expect(screen.getByRole("banner")).toContainElement(screen.getByRole("link", { name: "Album Layout Studio" }));
     expect(screen.getByRole("heading", { name: "Album dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Rename/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Rename ${firstAlbum.title}` })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("link", { name: firstAlbum.title })).toBeInTheDocument();
     resolveNext(secondPage);
@@ -240,6 +240,40 @@ describe("album dashboard and open", () => {
     expect(add).toHaveFocus();
   });
 
+  it("should preserve rename input on failure, save a correction and restore focus", async () => {
+    const renamedAlbum = { ...firstAlbum, title: "Asian capitals" };
+    const client = buildClient({
+      rename: vi.fn().mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(renamedAlbum),
+      list: vi
+        .fn()
+        .mockResolvedValueOnce(firstPage)
+        .mockResolvedValueOnce({ ...firstPage, albums: [renamedAlbum, ...firstPage.albums.slice(1)] }),
+    });
+    render(() => <App client={client} />);
+    const rename = await screen.findByRole("button", { name: `Rename ${firstAlbum.title}` });
+
+    fireEvent.click(rename);
+    const input = screen.getByRole("textbox", { name: "Album name" });
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue(firstAlbum.title);
+    fireEvent.input(input, { target: { value: "   " } });
+    fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter an album title.");
+    expect(client.rename).not.toHaveBeenCalled();
+    fireEvent.input(input, { target: { value: "Asian capitals" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not");
+    expect(input).toHaveValue("Asian capitals");
+    fireEvent.input(input, { target: { value: "  Asian capitals  " } });
+    fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(client.rename).toHaveBeenLastCalledWith(firstAlbum.id, renamedAlbum.title);
+    expect(await screen.findByRole("button", { name: `Rename ${renamedAlbum.title}` })).toHaveFocus();
+  });
+
   it("should protect a pending delete, preserve confirmation on failure and fall back after the last page disappears", async () => {
     let rejectDelete: (error: Error) => void = () => {
       throw new Error("Delete was not requested");
@@ -324,6 +358,7 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
   return {
     list: vi.fn().mockResolvedValue(firstPage),
     create: vi.fn().mockResolvedValue(firstAlbum),
+    rename: vi.fn().mockResolvedValue(firstAlbum),
     open: vi.fn().mockResolvedValue({ ...firstAlbum, synopsis: "The sea at dawn." }),
     remove: vi.fn().mockResolvedValue(undefined),
     ...overrides,

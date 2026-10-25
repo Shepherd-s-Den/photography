@@ -1,11 +1,13 @@
 package photography.ports
 
+import cats.data.NonEmptyList
+
 import photography.domain.album.*
 
 trait ChapterRepository[F[_]]:
   /**
-   * Saved commits references, opening and chronological positions together, checking ChapterPolicy against the same current state. Rejected,
-   * AlbumNotFound and Failed leave persisted state unchanged; concurrent writes cannot bypass capacity, Home or folder rules.
+   * Saved commits references, opening and chronological positions together, checking the chapter manager's rules against the same current state.
+   * Rejected, AlbumNotFound and Failed leave persisted state unchanged; concurrent writes cannot bypass capacity, Home or folder rules.
    */
   def create(album: AlbumId, chapter: Chapter): F[ChapterRepository.CreateResult]
 
@@ -17,7 +19,7 @@ trait ChapterRepository[F[_]]:
       album: AlbumId,
       chapter: ChapterId,
       name: DestinationName,
-      country: Country,
+      countries: NonEmptyList[Country],
       period: VisitPeriod,
       sourceFolder: SourceFolder
   ): F[ChapterRepository.UpdateResult]

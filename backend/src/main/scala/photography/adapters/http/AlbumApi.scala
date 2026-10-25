@@ -2,33 +2,32 @@ package photography.adapters.http
 
 import cats.effect.Async
 import cats.syntax.all.*
-import io.circe.{Decoder, Encoder, Json}
+import io.circe.{Decoder, Encoder}
 import io.github.iltotore.iron.*
 import org.http4s.{HttpRoutes, MessageBodyFailure, Query, QueryParamDecoder, QueryParameterValue, Request}
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
-import photography.domain.album.{Album, AlbumId, AlbumYear, AlbumYearConstraint}
-import photography.usecases.AlbumService
-import photography.usecases.AlbumService.*
+import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, AlbumYearConstraint}
+import io.github.iltotore.iron.constraint.all.*
+import photography.usecases.AlbumManager
+import photography.usecases.AlbumManager.*
 
 trait AlbumApi[F[_]]:
   def routes: HttpRoutes[F]
 
 object AlbumApi:
-  def make[F[_]: Async](albums: AlbumService[F]): AlbumApi[F] =
+  def make[F[_]: Async](albums: AlbumManager[F]): AlbumApi[F] =
     new LiveAlbumApi(albums)
 
-  final private class LiveAlbumApi[F[_]: Async](albums: AlbumService[F]) extends AlbumApi[F] with Http4sDsl[F]:
+  final private class LiveAlbumApi[F[_]: Async](albums: AlbumManager[F]) extends AlbumApi[F] with Http4sDsl[F]:
     override def routes: HttpRoutes[F] =
       HttpRoutes.of[F] {
-        case request @ GET -> Root / "api" / "albums"                           => list(request.uri.query)
-        case request @ POST -> Root / "api" / "albums"                          => create(request)
-        case GET -> Root / "api" / "albums" / AlbumIdVar(id)                    => get(id)
-        case request @ PATCH -> Root / "api" / "albums" / AlbumIdVar(id)        => rename(id, request)
-        case DELETE -> Root / "api" / "albums" / AlbumIdVar(id)                 => delete(id)
-        case request @ PUT -> Root / "api" / "albums" / AlbumIdVar(id) / "year" => changeYear(id, request)
-        case PUT -> Root / "api" / "albums" / _ / "year"                        => albumNotFound
-        case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _              => albumNotFound
+        case request @ GET -> Root / "api" / "albums"                    => list(request.uri.query)
+        case request @ POST -> Root / "api" / "albums"                   => create(request)
+        case GET -> Root / "api" / "albums" / AlbumIdVar(id)             => get(id)
+        case request @ PATCH -> Root / "api" / "albums" / AlbumIdVar(id) => rename(id, request)
+        case DELETE -> Root / "api" / "albums" / AlbumIdVar(id)          => delete(id)
+        case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _       => albumNotFound
       }
 
     private def list(query: Query) = query match
@@ -39,7 +38,7 @@ object AlbumApi:
       case _ => BadRequest(Map("message" -> "Supply page once as a 32-bit integer"))
 
     private def create(request: Request[F]) =
-      request.as[AlbumYear].flatMap(albums.create).flatMap {
+      request.as[(AlbumYear, AlbumTitle)].flatMap { case (year, title) => albums.create(year, title) }.flatMap {
         case CreateAlbumResult.Created(album)  => Created(album)
         case CreateAlbumResult.YearAlreadyUsed => BadRequest(Map("message" -> "An album already exists for that year"))
         case CreateAlbumResult.Failed          => serviceFailure
@@ -52,23 +51,11 @@ object AlbumApi:
         case GetAlbumResult.Failed       => serviceFailure
 
     private def rename(id: AlbumId, request: Request[F]) =
-      given Decoder[AlbumYear] = Decoder.decodeString.emap(canonicalYear).prepare(_.downField("title"))
-      request.as[AlbumYear].flatMap { proposed =>
-        albums.get(id).flatMap:
-          case GetAlbumResult.Found(album) if album.year.compare(proposed) === 0 => Ok(album)
-          case GetAlbumResult.Found(_)                                           => BadRequest(invalidTitle)
-          case GetAlbumResult.NotFound                                           => albumNotFound
-          case GetAlbumResult.Failed                                             => serviceFailure
+      request.as[AlbumTitle].flatMap(albums.rename(id, _)).flatMap {
+        case RenameResult.Renamed(album) => Ok(album)
+        case RenameResult.NotFound       => albumNotFound
+        case RenameResult.Failed         => serviceFailure
       }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidTitle) }
-
-    private def changeYear(id: AlbumId, request: Request[F]) =
-      request.as[AlbumYear].flatMap(albums.changeYear(id, _)).flatMap {
-        case ChangeYearResult.Changed(album)  => Ok(Map("year" -> Json.fromInt(album.year), "title" -> Json.fromString(renderTitle(album.year))))
-        case ChangeYearResult.HasChapters     => BadRequest(Map("message" -> "An album with chapters cannot change year"))
-        case ChangeYearResult.YearAlreadyUsed => BadRequest(Map("message" -> "An album already exists for that year"))
-        case ChangeYearResult.NotFound        => albumNotFound
-        case ChangeYearResult.Failed          => serviceFailure
-      }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidYear) }
 
     private def delete(id: AlbumId) =
       albums.delete(id).flatMap:
@@ -78,17 +65,8 @@ object AlbumApi:
 
     private def albumNotFound  = NotFound(Map("code" -> "album_not_found"))
     private def serviceFailure = InternalServerError(Map("code" -> "service_failure"))
-    private val invalidTitle   = Map("message" -> "Album titles must match Journey of the Shepherds followed by the album year")
+    private val invalidTitle   = Map("message" -> "Supply a non-blank album title")
     private val invalidYear    = Map("message" -> "Choose a year from 1900 to 2100")
-
-    private def canonicalYear(title: String) =
-      title.trim match
-        case s"Journey of the Shepherds $value" =>
-          value.toIntOption.toRight("Expected a canonical album title").flatMap(_.refineEither[AlbumYearConstraint])
-            .filterOrElse(year => title.trim === renderTitle(year), "Expected a canonical album title")
-        case _ => "Expected a canonical album title".asLeft[AlbumYear]
-
-    private def renderTitle(year: AlbumYear) = s"Journey of the Shepherds $year"
 
     private object Page:
       def unapply(query: Query): Option[Int] =
@@ -105,12 +83,17 @@ object AlbumApi:
     private given Decoder[AlbumYear] = Decoder.decodeJsonNumber.emap(_.toInt.toRight("Expected an integer year"))
       .emap(_.refineEither[AlbumYearConstraint]).prepare(_.downField("year"))
 
+    private given Decoder[AlbumTitle] = Decoder.decodeString.emap(_.trim.refineEither[Not[Empty] & Not[Blank]]).prepare(_.downField("title"))
+
+    private given Decoder[(AlbumYear, AlbumTitle)] = Decoder[AlbumYear].emap: year =>
+      s"Journey of the Shepherds $year".refineEither[Not[Empty] & Not[Blank]].map(title => (year, title))
+
     private given Encoder[Album] = Encoder.forProduct4("id", "year", "title", "createdAt"): album =>
-      (album.id.value.toString, album.year: Int, renderTitle(album.year), album.createdAt.toString)
+      (album.id.value.toString, album.year: Int, album.title: String, album.createdAt.toString)
 
     private given Encoder[GetAlbumResult.Found] = Encoder.forProduct5("id", "year", "title", "synopsis", "createdAt"): found =>
       val album = found.album
-      (album.id.value.toString, album.year: Int, renderTitle(album.year), album.synopsis, album.createdAt.toString)
+      (album.id.value.toString, album.year: Int, album.title: String, album.synopsis, album.createdAt.toString)
 
     private given Encoder[AlbumPage] = Encoder.forProduct5("albums", "page", "pageSize", "totalAlbums", "totalPages"): page =>
       (page.albums, page.page, page.pageSize, page.totalAlbums, page.totalPages)

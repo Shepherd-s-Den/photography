@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { AlbumRequestError, type AlbumPage } from "../../../src/features/albums/model/Album";
-import { failureMessage, isMissingAlbum, pagination, validateYear } from "../../../src/features/albums/model/Presentation";
+import { failureMessage, isMissingAlbum, pagination, validateTitle, validateYear } from "../../../src/features/albums/model/Presentation";
 
 describe("album presentation rules", () => {
+  it.each([
+    ["", "Enter an album title."],
+    [" \t\n", "Enter an album title."],
+    ["Asian capitals", undefined],
+    ["  Asian capitals  ", undefined],
+  ])("should validate a free-form album title %j", (value, expected) => {
+    expect(validateTitle(value)).toBe(expected);
+  });
   it.each([
     ["", "Choose a year from 1900 to 2100."],
     ["   ", "Choose a year from 1900 to 2100."],

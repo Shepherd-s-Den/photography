@@ -22,6 +22,7 @@ export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
   return {
     list: (page) => request(`/api/albums?page=${String(page)}`, "GET", undefined, 200, readPage),
     create: (year) => request("/api/albums", "POST", { year }, 201, readSummary),
+    rename: (id, title) => request(`/api/albums/${encodeURIComponent(id)}`, "PATCH", { title }, 200, readSummary),
     open: (id) => request(`/api/albums/${encodeURIComponent(id)}`, "GET", undefined, 200, readAlbum),
     remove: (id) => request(`/api/albums/${encodeURIComponent(id)}`, "DELETE", undefined, 204, () => undefined),
   };

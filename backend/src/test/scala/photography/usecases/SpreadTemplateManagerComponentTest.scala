@@ -8,11 +8,11 @@ import munit.CatsEffectSuite
 import photography.domain.layout.*
 import photography.ports.SpreadTemplateRepository
 import photography.ports.SpreadTemplateRepository.Failure
-import photography.usecases.SpreadTemplateService.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
+import photography.usecases.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
 
 import java.util.UUID
 
-final class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
+final class SpreadTemplateManagerComponentTest extends CatsEffectSuite:
   private val box            = SlotBox(0.0, 0.0, 50.0, 100.0)
   private val albumTemplates = NonEmptyList.of(
     SpreadTemplate.AlbumStart(SpreadTemplateId(new UUID(0L, 20L)), "Album first", Vector(box), box.copy(x = 50.0)),
@@ -56,4 +56,4 @@ final class SpreadTemplateServiceComponentTest extends CatsEffectSuite:
     val repository = new SpreadTemplateRepository[IO]:
       override def listAlbumStartTemplates: IO[SpreadTemplateRepository.ListAlbumStartTemplatesResult]     = albums.pure[IO]
       override def listChapterStartTemplates: IO[SpreadTemplateRepository.ListChapterStartTemplatesResult] = chapters.pure[IO]
-    SpreadTemplateService.make(repository)
+    SpreadTemplateManager.make(repository)

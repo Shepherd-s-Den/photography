@@ -1,6 +1,6 @@
 import type { AlbumSummary } from "../model/Album";
 
-export function AlbumCard(props: { album: AlbumSummary; onDelete: () => void }) {
+export function AlbumCard(props: { album: AlbumSummary; onRename: () => void; onDelete: () => void }) {
   return (
     <article class="album-card">
       <a class="album-card-open" href={`/albums/${encodeURIComponent(props.album.id)}`}>
@@ -10,6 +10,19 @@ export function AlbumCard(props: { album: AlbumSummary; onDelete: () => void }) 
         <h2>{props.album.title}</h2>
       </a>
       <div class="album-card-actions">
+        <button
+          id={`rename-${props.album.id}`}
+          type="button"
+          class="icon-button"
+          aria-label={`Rename ${props.album.title}`}
+          onClick={() => {
+            props.onRename();
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 14z" />
+          </svg>
+        </button>
         <button
           id={`delete-${props.album.id}`}
           type="button"

@@ -5,46 +5,46 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import photography.capabilities.{Clock, IdGenerator}
-import photography.domain.album.{Album, AlbumId, AlbumYear, Chapter}
+import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, Chapter}
 import photography.domain.layout.*
 import photography.ports.AlbumRepository
-import photography.usecases.AlbumService.*
-import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
+import photography.usecases.AlbumManager.*
+import photography.usecases.SpreadTemplateManager.ListAlbumStartTemplatesResult
 
 import java.time.temporal.ChronoUnit
 
-trait AlbumService[F[_]]:
+trait AlbumManager[F[_]]:
   def list(page: Int): F[ListAlbumsResult]
-  def create(year: AlbumYear): F[CreateAlbumResult]
+  def create(year: AlbumYear, title: AlbumTitle): F[CreateAlbumResult]
   def get(id: AlbumId): F[GetAlbumResult]
-  def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult]
+  def rename(id: AlbumId, title: AlbumTitle): F[RenameResult]
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
 type AlbumPageSize = Int :| Positive
 
-object AlbumService:
+object AlbumManager:
   def make[F[_]: Monad: IdGenerator: Clock](
       repository: AlbumRepository[F],
-      spreads: SpreadTemplateService[F],
+      spreads: SpreadTemplateManager[F],
       pageSize: AlbumPageSize
-  ): AlbumService[F] =
-    new LiveAlbumService(repository, spreads, pageSize)
+  ): AlbumManager[F] =
+    new LiveAlbumManager(repository, spreads, pageSize)
 
-  final private class LiveAlbumService[F[_]: Monad: IdGenerator: Clock](
+  final private class LiveAlbumManager[F[_]: Monad: IdGenerator: Clock](
       repository: AlbumRepository[F],
-      spreads: SpreadTemplateService[F],
+      spreads: SpreadTemplateManager[F],
       pageSize: AlbumPageSize
-  ) extends AlbumService[F]:
+  ) extends AlbumManager[F]:
 
     override def list(page: Int): F[ListAlbumsResult] =
       repository.list(offset = 0, limit = pageSize).flatMap:
         case AlbumRepository.ListResult.Failed(_)                 => ListAlbumsResult.Failed.pure[F]
         case firstPage @ AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice.totalAlbums, firstPage)
 
-    override def create(year: AlbumYear): F[CreateAlbumResult] =
+    override def create(year: AlbumYear, title: AlbumTitle): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          buildInitialComposition(year, templates.head).flatMap { case (album, cover) =>
+          buildInitialComposition(year, title, templates.head).flatMap { case (album, cover) =>
             repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created                                         => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(AlbumRepository.Failure.YearAlreadyUsed) => CreateAlbumResult.YearAlreadyUsed
@@ -58,13 +58,11 @@ object AlbumService:
         case AlbumRepository.GetResult.NotFound     => GetAlbumResult.NotFound
         case AlbumRepository.GetResult.Failed(_)    => GetAlbumResult.Failed
 
-    override def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult] =
-      repository.changeYear(id, year).map:
-        case AlbumRepository.ChangeYearResult.Changed(album)                                  => ChangeYearResult.Changed(album)
-        case AlbumRepository.ChangeYearResult.HasChapters                                     => ChangeYearResult.HasChapters
-        case AlbumRepository.ChangeYearResult.NotFound                                        => ChangeYearResult.NotFound
-        case AlbumRepository.ChangeYearResult.Failed(AlbumRepository.Failure.YearAlreadyUsed) => ChangeYearResult.YearAlreadyUsed
-        case AlbumRepository.ChangeYearResult.Failed(_)                                       => ChangeYearResult.Failed
+    override def rename(id: AlbumId, title: AlbumTitle): F[RenameResult] =
+      repository.rename(id, title).map:
+        case AlbumRepository.RenameResult.Renamed(album) => RenameResult.Renamed(album)
+        case AlbumRepository.RenameResult.NotFound       => RenameResult.NotFound
+        case AlbumRepository.RenameResult.Failed(_)      => RenameResult.Failed
 
     override def delete(id: AlbumId): F[DeleteAlbumResult] =
       repository.delete(id).map:
@@ -82,7 +80,7 @@ object AlbumService:
           ListAlbumsResult.Listed(AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
-    private def buildInitialComposition(year: AlbumYear, template: SpreadTemplate.AlbumStart) =
+    private def buildInitialComposition(year: AlbumYear, title: AlbumTitle, template: SpreadTemplate.AlbumStart) =
       val newPhotos =
         template.photoSlots.traverse(box => IdGenerator[F].nextId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, bleed = Set.empty)))
       for
@@ -95,7 +93,7 @@ object AlbumService:
         createdAt <- Clock[F].now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
         val start = Spread.AlbumStart(spreadId, template.id, photos, text, placements = Vector.empty[SpreadPlacement])
-        val album = Album(albumId, year, synopsis = "", createdAt, start, chapters = Vector.empty[Chapter])
+        val album = Album(albumId, year, title, synopsis = "", createdAt, start, chapters = Vector.empty[Chapter])
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
 
@@ -114,9 +112,9 @@ object AlbumService:
     case NotFound
     case Failed
 
-  enum ChangeYearResult derives CanEqual:
-    case Changed(album: Album)
-    case HasChapters, YearAlreadyUsed, NotFound, Failed
+  enum RenameResult derives CanEqual:
+    case Renamed(album: Album)
+    case NotFound, Failed
 
   enum DeleteAlbumResult derives CanEqual:
     case Deleted

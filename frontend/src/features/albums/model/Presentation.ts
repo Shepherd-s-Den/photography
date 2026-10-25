@@ -1,5 +1,9 @@
 import { AlbumRequestError, maximumAlbumYear, minimumAlbumYear, type AlbumPage } from "./Album";
 
+export function validateTitle(value: string): string | undefined {
+  return value.trim() === "" ? "Enter an album title." : undefined;
+}
+
 export function validateYear(value: string): string | undefined {
   const year = Number(value);
   return /^[0-9]{4}$/.test(value.trim()) && year >= minimumAlbumYear && year <= maximumAlbumYear

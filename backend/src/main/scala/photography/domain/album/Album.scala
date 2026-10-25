@@ -9,17 +9,19 @@ import java.util.UUID
 
 type AlbumYearConstraint = GreaterEqual[1900] & LessEqual[2100]
 type AlbumYear           = Int :| AlbumYearConstraint
+type AlbumTitle          = String :| (Not[Empty] & Not[Blank])
 
 final case class Album(
     id: AlbumId,
     year: AlbumYear,
+    title: AlbumTitle,
     synopsis: String,
     createdAt: Instant,
     opening: Spread.AlbumStart,
     chapters: Vector[Chapter]
 ):
   def spreads: NonEmptyList[Spread] = NonEmptyList(opening, chapters.flatMap(chapter => chapter.opening +: chapter.spreads).toList)
-  def countries: Vector[Country]    = chapters.map(_.destination.country).distinctBy(_.id)
+  def countries: Vector[Country]    = chapters.flatMap(_.destination.countries.toList).distinctBy(_.id)
 
 opaque type AlbumId = UUID
 object AlbumId:

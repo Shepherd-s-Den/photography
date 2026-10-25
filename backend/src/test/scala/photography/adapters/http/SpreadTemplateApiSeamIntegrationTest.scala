@@ -10,8 +10,8 @@ import munit.CatsEffectSuite
 import org.http4s.{MediaType, Method, Request, Status, Uri}
 import org.http4s.circe.CirceEntityCodec.*
 import photography.domain.layout.*
-import photography.usecases.SpreadTemplateService
-import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
+import photography.usecases.SpreadTemplateManager
+import photography.usecases.SpreadTemplateManager.ListAlbumStartTemplatesResult
 
 import java.util.UUID
 
@@ -50,8 +50,8 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(unavailable.contentType.map(_.mediaType), MediaType.application.json.some)
 
   private def buildSpreadTemplateApi(result: ListAlbumStartTemplatesResult) =
-    val templates = new SpreadTemplateService[IO]:
+    val templates = new SpreadTemplateManager[IO]:
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = result.pure[IO]
-      override def listChapterStartTemplates: IO[SpreadTemplateService.ListChapterStartTemplatesResult] =
-        SpreadTemplateService.ListChapterStartTemplatesResult.Failed.pure[IO]
+      override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] =
+        SpreadTemplateManager.ListChapterStartTemplatesResult.Failed.pure[IO]
     SpreadTemplateApi.make(templates).routes.orNotFound
