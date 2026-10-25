@@ -2,6 +2,7 @@ package photography.domain.album
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import cats.syntax.all.*
 import java.util.UUID
 
 opaque type DestinationId = UUID
@@ -11,4 +12,5 @@ object DestinationId:
 
 type DestinationName = String :| (Not[Empty] & Not[Blank])
 
-final case class Destination(id: DestinationId, name: DestinationName, country: Country)
+final case class Destination(id: DestinationId, name: DestinationName, country: Country):
+  def isHome: Boolean = (name: String) === "Home"

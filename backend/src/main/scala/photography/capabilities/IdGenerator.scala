@@ -8,6 +8,8 @@ trait IdGenerator[F[_]]:
   def nextId: F[UUID]
 
 object IdGenerator:
+  def apply[F[_]: IdGenerator]: IdGenerator[F] = summon[IdGenerator[F]]
+
   def make[F[_]: Sync]: IdGenerator[F] = LiveIdGenerator[F]
 
   final private class LiveIdGenerator[F[_]: Sync] extends IdGenerator[F]:

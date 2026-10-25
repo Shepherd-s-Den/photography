@@ -15,7 +15,6 @@ import photography.usecases.AlbumService.*
 import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
 
 import java.time.Instant
-import java.nio.file.Path
 import java.util.UUID
 
 final class AlbumServiceComponentTest extends CatsEffectSuite:
@@ -74,8 +73,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
         synopsis = "",
         Instant.parse("2026-10-07T12:00:00.123Z"),
         expectedStart,
-        Vector.empty[Chapter.Vacation],
-        maybeHome = None
+        chapters = Vector.empty[Chapter]
       )
     val expectedCover =
       Cover(AlbumId(buildUuid(10)), SpineOwner.Front, CoverSlot(CoverSlotId(buildUuid(14))), CoverSlot(CoverSlotId(buildUuid(15))))
@@ -121,9 +119,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
 
     service.create(selectedYear).map(assertEquals(_, CreateAlbumResult.YearAlreadyUsed))
 
-  test("should change an unused year only before chapters without losing explicit failure states"):
-    val refs                                                                                    = Refs()
-    val album                                                                                   = buildAlbum(1).copy(year = selectedYear)
+  test("should report the year change, a conflict, a missing album or a persistence failure"):
+    val refs  = Refs()
+    val album = buildAlbum(1).copy(year = selectedYear)
+
     val cases: Vector[(response: AlbumRepository.ChangeYearResult, expected: ChangeYearResult)] = Vector(
       AlbumRepository.ChangeYearResult.Changed(album)                  -> ChangeYearResult.Changed(album),
       AlbumRepository.ChangeYearResult.HasChapters                     -> ChangeYearResult.HasChapters,
@@ -137,35 +136,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       changed <- refs.maybeChangedYear.get
     yield
       assertEquals(results, cases.map(_.expected))
-      assertEquals(changed, AlbumRepository.YearDecision.Replace(selectedYear).some)
-
-  test("should keep the same year and refuse a different year once a chapter exists"):
-    val original = buildAlbum(1)
-    val country  = Country(CountryId(buildUuid(70)), "RO", "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
-    val opening  = Spread.ChapterStart(
-      SpreadId(buildUuid(72)),
-      SpreadTemplateId(buildUuid(73)),
-      Vector.empty,
-      SpreadSlot.Text(TextSpreadSlotId(buildUuid(74)), fullBox),
-      Vector.empty
-    )
-    val chapter     = Chapter.Home(ChapterId(buildUuid(71)), country, "", maybeSourceFolder = None, opening, Vector.empty)
-    val withChapter = original.copy(maybeHome = chapter.some)
-    val scenarios   = Vector(
-      (original, original.year, AlbumRepository.YearDecision.Keep),
-      (withChapter, selectedYear, AlbumRepository.YearDecision.Reject),
-      (withChapter, original.year, AlbumRepository.YearDecision.Keep)
-    )
-
-    scenarios.traverse_ { case (current, requested, expected) =>
-      val refs    = Refs()
-      val service = buildService(refs, yearDecisionAlbum = current)
-
-      for
-        _        <- service.changeYear(current.id, requested)
-        decision <- refs.maybeChangedYear.get
-      yield assertEquals(decision, expected.some)
-    }
+      assertEquals(changed, selectedYear.some)
 
   test("should delete an existing Album by id, report not found, and report failure when persistence fails"):
     val refs = Refs()
@@ -182,11 +153,11 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       assertEquals(failed, DeleteAlbumResult.Failed)
 
   final private case class Refs():
-    val listCalls: Ref[IO, Vector[(Int, Int)]]                          = Ref.unsafe(Vector.empty)
-    val maybeCreated: Ref[IO, Option[(Album, Cover)]]                   = Ref.unsafe(None)
-    val maybeLastReadId: Ref[IO, Option[AlbumId]]                       = Ref.unsafe(None)
-    val maybeChangedYear: Ref[IO, Option[AlbumRepository.YearDecision]] = Ref.unsafe(None)
-    val maybeDeletedId: Ref[IO, Option[AlbumId]]                        = Ref.unsafe(None)
+    val listCalls: Ref[IO, Vector[(Int, Int)]]        = Ref.unsafe(Vector.empty)
+    val maybeCreated: Ref[IO, Option[(Album, Cover)]] = Ref.unsafe(None)
+    val maybeLastReadId: Ref[IO, Option[AlbumId]]     = Ref.unsafe(None)
+    val maybeChangedYear: Ref[IO, Option[AlbumYear]]  = Ref.unsafe(None)
+    val maybeDeletedId: Ref[IO, Option[AlbumId]]      = Ref.unsafe(None)
 
   // scalafix:off DisableSyntax.defaultArgs
   private def buildService(
@@ -196,7 +167,6 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       createResult: AlbumRepository.CreateResult = AlbumRepository.CreateResult.Created,
       getResult: AlbumRepository.GetResult = AlbumRepository.GetResult.NotFound,
       changeYearResult: AlbumRepository.ChangeYearResult = AlbumRepository.ChangeYearResult.NotFound,
-      yearDecisionAlbum: Album = buildAlbum(1),
       deleteResult: AlbumRepository.DeleteResult = AlbumRepository.DeleteResult.NotFound,
       listResult: ListAlbumStartTemplatesResult =
         ListAlbumStartTemplatesResult.Listed(NonEmptyList.of(buildAlbumStartTemplate(20), buildAlbumStartTemplate(21))),
@@ -206,10 +176,10 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = listResult.pure[IO]
       override def listChapterStartTemplates: IO[SpreadTemplateService.ListChapterStartTemplatesResult] =
         SpreadTemplateService.ListChapterStartTemplatesResult.Failed.pure[IO]
-    val identifiers = new IdGenerator[IO]:
+    given IdGenerator[IO] with
       private val nextValue         = Ref.unsafe[IO, Int](10)
       override def nextId: IO[UUID] = nextValue.getAndUpdate(_ + 1).map(buildUuid)
-    val clock = new Clock[IO]:
+    given Clock[IO] with
       override def now: IO[Instant] = currentTime.pure[IO]
     val repository = new AlbumRepository[IO]:
       override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
@@ -224,12 +194,12 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       override def get(id: AlbumId): IO[AlbumRepository.GetResult] =
         refs.maybeLastReadId.set(id.some).as(getResult)
 
-      override def changeYear(id: AlbumId, decide: Album => AlbumRepository.YearDecision): IO[AlbumRepository.ChangeYearResult] =
-        refs.maybeChangedYear.set(decide(yearDecisionAlbum).some).as(changeYearResult)
+      override def changeYear(id: AlbumId, year: AlbumYear): IO[AlbumRepository.ChangeYearResult] =
+        refs.maybeChangedYear.set(year.some).as(changeYearResult)
 
       override def delete(id: AlbumId): IO[AlbumRepository.DeleteResult] =
         refs.maybeDeletedId.set(id.some).as(deleteResult)
-    AlbumService.make(repository, spreads, identifiers, clock, pageSize)
+    AlbumService.make(repository, spreads, pageSize)
   // scalafix:on DisableSyntax.defaultArgs
 
   private def buildAlbumStartTemplate(index: Int) =
@@ -255,8 +225,7 @@ final class AlbumServiceComponentTest extends CatsEffectSuite:
       s"Synopsis $index",
       createdAt.plusSeconds(index.toLong),
       start,
-      Vector.empty[Chapter.Vacation],
-      maybeHome = None
+      chapters = Vector.empty[Chapter]
     )
 
   private def buildUuid(index: Int) =

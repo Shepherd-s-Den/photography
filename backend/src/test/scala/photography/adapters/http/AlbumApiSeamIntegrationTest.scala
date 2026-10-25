@@ -8,7 +8,7 @@ import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
 import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
 import org.http4s.headers.`Content-Type`
-import photography.domain.album.{Album, AlbumId, AlbumYear}
+import photography.domain.album.{Album, AlbumId, AlbumYear, Chapter}
 import photography.domain.layout.*
 import photography.usecases.AlbumService
 import photography.usecases.AlbumService.*
@@ -25,7 +25,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(0.0, 0.0, 100.0, 100.0)),
     Vector.empty
   )
-  private val album         = Album(id, 2026, "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), start, Vector.empty, maybeHome = None)
+  private val album         = Album(id, 2026, "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), start, chapters = Vector.empty[Chapter])
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
@@ -136,14 +136,15 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       paths.map(path => Method.PUT -> s"$path/year")
     val expectedBody = parse("""{"code":"album_not_found"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(requests.size)(ApiResponse(Status.NotFound, jsonMediaType, expectedBody.some))
+    val responses    = requests.traverse { case (method, path) =>
+      send(server, method, path, """{"year":2026,"title":"Journey of the Shepherds 2026"}""")
+    }
 
     for
-      responses <- requests.traverse { case (method, path) =>
-        send(server, method, path, """{"year":2026,"title":"Journey of the Shepherds 2026"}""")
-      }
-      calls <- refs.calls.get
+      actual <- responses
+      calls  <- refs.calls.get
     yield
-      assertEquals(responses, expected)
+      assertEquals(actual, expected)
       assertEquals(calls, Vector(s"get:${id.value}", s"get:${id.value}", s"delete:${id.value}", s"year:${id.value}:2026"))
 
   test("should translate every application's service failure to the same JSON error"):
@@ -170,16 +171,19 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       .map(responses => assertEquals(responses, expected))
 
   test("should return year title and readable feedback for business conflicts"):
-    val server    = buildAlbumApi(Refs())
-    val conflicts = Vector(ChangeYearResult.HasChapters, ChangeYearResult.YearAlreadyUsed)
-    val taken     = buildAlbumApi(Refs(), createAlbumResult = CreateAlbumResult.YearAlreadyUsed)
-    val rename    = buildAlbumApi(Refs())
+    val server          = buildAlbumApi(Refs())
+    val conflicts       = Vector(ChangeYearResult.HasChapters, ChangeYearResult.YearAlreadyUsed)
+    val taken           = buildAlbumApi(Refs(), createAlbumResult = CreateAlbumResult.YearAlreadyUsed)
+    val rename          = buildAlbumApi(Refs())
+    val rejectedChanges = conflicts.traverse { result =>
+      val failedServer = buildAlbumApi(Refs(), changeYearResult = result)
+      send(failedServer, Method.PUT, s"$albumPath/year", """{"year":2027}""")
+    }
 
     for
-      changed  <- send(server, Method.PUT, s"$albumPath/year", """{"year":2026}""")
-      invalid  <- send(server, Method.PUT, s"$albumPath/year", """{"year":null}""")
-      rejected <-
-        conflicts.traverse(result => send(buildAlbumApi(Refs(), changeYearResult = result), Method.PUT, s"$albumPath/year", """{"year":2027}"""))
+      changed   <- send(server, Method.PUT, s"$albumPath/year", """{"year":2026}""")
+      invalid   <- send(server, Method.PUT, s"$albumPath/year", """{"year":null}""")
+      rejected  <- rejectedChanges
       duplicate <- send(taken, Method.POST, "/api/albums", """{"year":2026}""")
       renamed   <- send(rename, Method.PATCH, albumPath, """{"title":"Journey of the Shepherds 2027"}""")
     yield

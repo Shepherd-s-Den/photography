@@ -7,15 +7,10 @@ trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
   def create(album: Album, cover: Cover): F[AlbumRepository.CreateResult]
   def get(id: AlbumId): F[AlbumRepository.GetResult]
-  def changeYear(id: AlbumId, decide: Album => AlbumRepository.YearDecision): F[AlbumRepository.ChangeYearResult]
+  def changeYear(id: AlbumId, year: AlbumYear): F[AlbumRepository.ChangeYearResult]
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
 
 object AlbumRepository:
-  enum YearDecision:
-    case Keep
-    case Replace(year: AlbumYear)
-    case Reject
-
   enum ListResult derives CanEqual:
     case Listed(slice: AlbumPageSlice)
     case Failed(reason: Failure)

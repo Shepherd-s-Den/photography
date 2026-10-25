@@ -1,15 +1,12 @@
 package photography.ports
 
-import photography.domain.album.{Album, AlbumId, ChapterConflict}
+import photography.domain.album.{AlbumId, Chapter, ChapterConflict}
 
 trait ChapterRepository[F[_]]:
-  def modifyAtomically(album: AlbumId, decide: Album => ChapterRepository.Decision): F[ChapterRepository.SaveResult]
+  def create(album: AlbumId, chapter: Chapter): F[ChapterRepository.SaveResult]
+  def update(album: AlbumId, chapter: Chapter): F[ChapterRepository.SaveResult]
 
 object ChapterRepository:
-  enum Decision:
-    case Save(album: Album)
-    case Reject(reason: ChapterConflict)
-
   enum SaveResult:
     case Saved
     case Rejected(reason: ChapterConflict)

@@ -17,6 +17,8 @@ import pureconfig.ConfigSource
 object Main extends IOApp.Simple:
 
   implicit val logger: StructuredLogger[IO] = Slf4jLogger.getLoggerFromName("[Photography]")
+  private given IdGenerator[IO]             = IdGenerator.make[IO]
+  private given Clock[IO]                   = Clock.make[IO]
 
   override def run: IO[Unit] =
     AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
@@ -28,10 +30,11 @@ object Main extends IOApp.Simple:
         yield ()
 
   private def buildHttpApp(config: AppConfig, resources: AppResourcesBuilder.AppResources[IO]) =
-    val templates       = SpreadTemplateService.make(SqliteSpreadTemplateRepository.make[IO](resources.sqlite))
-    val albumRepository = SqliteAlbumRepository.make[IO](resources.sqlite)
-    val albums          = AlbumService.make(albumRepository, templates, IdGenerator.make[IO], Clock.make[IO], config.albums.pageSize)
-    val api             = HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes
+    val templateRepository = SqliteSpreadTemplateRepository.make[IO](resources.sqlite)
+    val templates          = SpreadTemplateService.make(templateRepository)
+    val albumRepository    = SqliteAlbumRepository.make[IO](resources.sqlite)
+    val albums             = AlbumService.make(albumRepository, templates, config.albums.pageSize)
+    val api                = HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes
     StaticSite.make(api, "frontend").app
 
   private def buildHttpServer(config: AppConfig, app: HttpApp[IO]) =

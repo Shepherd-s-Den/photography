@@ -20,7 +20,7 @@ flowchart LR
   Create["Choose an unused year"] --> Album["Create album"]
   Album --> Workspace["Workspace"]
   Open["Open album"] --> Workspace
-  Workspace --> Spreads["Album opening → vacation blocks → Home"]
+  Workspace --> Spreads["Album opening → chapter blocks → Home"]
   Workspace --> Cover["Cover"]
   Spreads <--> Cover
   Spreads --> Reader["Fullscreen reader"]
@@ -32,8 +32,9 @@ flowchart LR
 - Every album has a year, supplied at creation, identifying at most one album. Its title is `Journey of the Shepherds <year>`; the year stays fixed once chapters exist.
 - Existing yearless records require separate explicit resolution; this change preserves them without inventing years. Album reads return complete year-bearing values or an explicit failure.
 - Album countries are derived from its chapter destinations. The complete selectable country catalog is independent reference data.
-- Vacations sort by first day, then last day, then chapter ID. Home is optional, explicitly added, unique within its album and always last.
-- The chapter name is its entered location/name. Home has country and folder metadata, with its period derived from the album year.
+- An album has chapters; each chapter has a destination with a free-form name and a catalog country.
+- Chapters sort by first day, then last day, then chapter ID. A destination named `Home` is unique within its album and its chapter is always last.
+- The chapter name is its destination name. A `Home` destination gives its chapter a period spanning the album year.
 - Wire dates are inclusive calendar days, `YYYY-MM-DD`; stored visit periods run from UTC midnight on the first day to midnight after the last day.
 - A chapter save, its reference associations, initial opening and chronological positions commit atomically; metadata changes preserve existing composition.
 
@@ -41,10 +42,10 @@ flowchart LR
 |---|---|
 | Unique album year | Database unique constraint |
 | At most one Home per album | Database partial unique constraint |
-| Unique non-null chapter folder and chapter position within an album | Database unique constraints |
+| Unique required chapter folder and chapter position within an album | Database unique constraints |
 | Valid identities and country/album/chapter associations | Database primary/foreign keys and application ownership validation |
 | At most 65 interior spreads (130 pages), counting album/chapter openings and photo spreads, excluding Cover | Application validation |
-| Calendar/date and contained-folder representations | Source-boundary decoding and refinement |
+| Calendar/date and absolute-folder representations | Source-boundary decoding and refinement |
 | Home's year-derived period | Application rule |
 | Chronological positions and complete opening slots | Application transaction |
 
@@ -74,7 +75,7 @@ Album metadata reads remain separate from workspace reads.
 | Slot | `{id, kind, x, y, width, height}`; `kind` is `"photo"` or `"text"` |
 | Country | `{id, name, code}`; chapter/request `country` identifies one of these records |
 
-- IDs are canonical UUID strings; absent folders are `null`, and empty collections are `[]`. Chapter `name` is `Home` for Home; its returned dates span its year.
+- IDs are canonical UUID strings, source folders are required absolute paths, and empty collections are `[]`. Chapter `name` is `Home` for Home; its returned dates span its year.
 - Workspace `countries` is the complete selectable reference catalog, distinct from the countries represented by the album's chapters.
 - Spread kinds are `"album_start"`, `"chapter_start"` and `"photos_only"`; chapter blocks follow their chapter opening with photo spreads in persisted order.
 - Malformed JSON, invalid fields/references, duplicate year/Home/folder and spread-capacity violations return `400 {message}` with readable feedback.
@@ -87,8 +88,8 @@ Album metadata reads remain separate from workspace reads.
 - Seed the 27 Saal chapter-start layouts from the existing catalog. The lowest-ID default is `Text + 2P + 2L`: four photo slots and one text column.
 - Chapter creation copies the default template's complete geometry into an empty opening. Existing spreads retain their matching templates, slot IDs and geometry.
 - Coordinates are percentages of the full spread axes; preview at the physical `2381.102 × 765.354` aspect ratio, independently of occupied-slot extrema.
-- Persist folders relative to the backend-visible `/photos` root. Suggest `<year>/selection/<location>` or `<year>/selection/Home`; display the joined full path.
-- Folders may be unset or not yet exist. Accept contained relative paths; reject absolute paths, parent traversal and duplicate assigned chapter folders.
+- Each chapter stores one full backend-visible source-folder path. Suggest `/photos/<year>/selection/<destination>` and allow an override.
+- A source folder is required but need not exist yet. Reject relative paths, parent traversal and duplicate chapter folders; photo discovery remains separate.
 
 ## Acceptance Criteria
 
@@ -153,12 +154,12 @@ Album metadata reads remain separate from workspace reads.
 
 - `specs/design.md` — Album workflow: record year-required creation, chapter details, workspace selection, reader behavior and the site favicon.
 - `specs/design.md` — Domain model: record required album years and chapter-derived countries; remove the 20-chapter cardinality.
-- `specs/design.md` — Album composition: record 65-spread/130-page capacity excluding Cover, chronological vacation/Home blocks and atomic chapter changes.
-- `specs/design.md` — Values: record the year range, optional contained folders and inclusive calendar-date semantics.
+- `specs/design.md` — Album composition: record 65-spread/130-page capacity excluding Cover, chronological chapter blocks with Home last and atomic chapter changes.
+- `specs/design.md` — Values: record the year range, required full source-folder paths and inclusive calendar-date semantics.
 - `specs/design.md` — Templates and covers: record the default chapter opening, percentage geometry, cover title/credits and the supported page ceiling.
 - `specs/contracts.md` — Contract inventory: include chapter-start/country seeds and point to the expanded HTTP contract.
 - `specs/http-api.openapi.json` — Paths and schemas: add workspace, year and chapter operations, including generated-title validation on existing rename.
-- `specs/operational.md` — Local service: identify `/photos` as the backend-visible photo root used for workspace folder display.
+- `specs/operational.md` — Local service: identify `/photos` as the default root for suggested chapter folders, with full-path overrides.
 
 ## Out of Scope
 

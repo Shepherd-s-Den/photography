@@ -23,20 +23,16 @@ trait AlbumService[F[_]]:
 type AlbumPageSize = Int :| Positive
 
 object AlbumService:
-  def make[F[_]: Monad](
+  def make[F[_]: Monad: IdGenerator: Clock](
       repository: AlbumRepository[F],
       spreads: SpreadTemplateService[F],
-      identifiers: IdGenerator[F],
-      clock: Clock[F],
       pageSize: AlbumPageSize
   ): AlbumService[F] =
-    new LiveAlbumService(repository, spreads, identifiers, clock, pageSize)
+    new LiveAlbumService(repository, spreads, pageSize)
 
-  final private class LiveAlbumService[F[_]: Monad](
+  final private class LiveAlbumService[F[_]: Monad: IdGenerator: Clock](
       repository: AlbumRepository[F],
       spreads: SpreadTemplateService[F],
-      identifiers: IdGenerator[F],
-      clock: Clock[F],
       pageSize: AlbumPageSize
   ) extends AlbumService[F]:
 
@@ -63,7 +59,7 @@ object AlbumService:
         case AlbumRepository.GetResult.Failed(_)    => GetAlbumResult.Failed
 
     override def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult] =
-      repository.changeYear(id, album => yearDecision(album, year)).map:
+      repository.changeYear(id, year).map:
         case AlbumRepository.ChangeYearResult.Changed(album)                                  => ChangeYearResult.Changed(album)
         case AlbumRepository.ChangeYearResult.HasChapters                                     => ChangeYearResult.HasChapters
         case AlbumRepository.ChangeYearResult.NotFound                                        => ChangeYearResult.NotFound
@@ -76,11 +72,6 @@ object AlbumService:
         case AlbumRepository.DeleteResult.NotFound  => DeleteAlbumResult.NotFound
         case AlbumRepository.DeleteResult.Failed(_) => DeleteAlbumResult.Failed
 
-    private def yearDecision(album: Album, year: AlbumYear) =
-      if album.year.compare(year) === 0 then AlbumRepository.YearDecision.Keep
-      else if album.chapters.nonEmpty then AlbumRepository.YearDecision.Reject
-      else AlbumRepository.YearDecision.Replace(year)
-
     private def buildListResult(requestedPage: Int, totalAlbums: Long, firstPage: AlbumRepository.ListResult) =
       val totalPages    = ((totalAlbums + pageSize - 1) / pageSize).toInt
       val selectedPage  = if totalPages === 0 then 1 else requestedPage.max(1).min(totalPages)
@@ -92,17 +83,19 @@ object AlbumService:
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     private def buildInitialComposition(year: AlbumYear, template: SpreadTemplate.AlbumStart) =
+      val newPhotos =
+        template.photoSlots.traverse(box => IdGenerator[F].nextId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, bleed = Set.empty)))
       for
-        albumId   <- identifiers.nextId.map(AlbumId(_))
-        spreadId  <- identifiers.nextId.map(SpreadId(_))
-        photos    <- template.photoSlots.traverse(box => identifiers.nextId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, Set.empty)))
-        text      <- identifiers.nextId.map(id => SpreadSlot.Text(TextSpreadSlotId(id), template.textSlot))
-        frontId   <- identifiers.nextId.map(CoverSlotId(_))
-        backId    <- identifiers.nextId.map(CoverSlotId(_))
-        createdAt <- clock.now.map(_.truncatedTo(ChronoUnit.MILLIS))
+        albumId   <- IdGenerator[F].nextId.map(AlbumId(_))
+        spreadId  <- IdGenerator[F].nextId.map(SpreadId(_))
+        photos    <- newPhotos
+        text      <- IdGenerator[F].nextId.map(id => SpreadSlot.Text(TextSpreadSlotId(id), template.textSlot))
+        frontId   <- IdGenerator[F].nextId.map(CoverSlotId(_))
+        backId    <- IdGenerator[F].nextId.map(CoverSlotId(_))
+        createdAt <- Clock[F].now.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
         val start = Spread.AlbumStart(spreadId, template.id, photos, text, placements = Vector.empty[SpreadPlacement])
-        val album = Album(albumId, year, synopsis = "", createdAt, start, Vector.empty[Chapter.Vacation], maybeHome = None)
+        val album = Album(albumId, year, synopsis = "", createdAt, start, chapters = Vector.empty[Chapter])
         val cover = Cover(albumId, SpineOwner.Front, CoverSlot(frontId), CoverSlot(backId))
         (album, cover)
 

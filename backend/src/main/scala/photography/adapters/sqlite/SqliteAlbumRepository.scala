@@ -16,7 +16,7 @@ import photography.ports.AlbumRepository
 import photography.ports.AlbumRepository.*
 
 import java.nio.file.{InvalidPathException, Path}
-import java.time.{Instant, ZoneOffset}
+import java.time.{Instant, LocalDate, ZoneOffset}
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
@@ -48,16 +48,14 @@ object SqliteAlbumRepository:
     override def get(id: AlbumId): F[GetResult] =
       execute(load(id.value).map(_.fold[GetResult](GetResult.NotFound)(GetResult.Found(_))), GetResult.Failed(_))
 
-    override def changeYear(id: AlbumId, decide: Album => YearDecision): F[ChangeYearResult] =
+    override def changeYear(id: AlbumId, year: AlbumYear): F[ChangeYearResult] =
+      val update = sql"""UPDATE album SET year = $year WHERE id = ${id.value}
+                         AND (year = $year OR NOT EXISTS (SELECT 1 FROM chapter WHERE album_id = ${id.value}))"""
       val query = load(id.value).flatMap:
-        case None        => (ChangeYearResult.NotFound: ChangeYearResult).pure[ConnectionIO]
+        case None        => ChangeYearResult.NotFound.pure[ConnectionIO]
         case Some(album) =>
-          decide(album) match
-            case YearDecision.Keep          => (ChangeYearResult.Changed(album): ChangeYearResult).pure[ConnectionIO]
-            case YearDecision.Reject        => (ChangeYearResult.HasChapters: ChangeYearResult).pure[ConnectionIO]
-            case YearDecision.Replace(year) =>
-              sql"UPDATE album SET year = $year WHERE id = ${id.value}".update.run
-                .as(ChangeYearResult.Changed(album.copy(year = year)): ChangeYearResult)
+          update.update.run.map: count =>
+            if count > 0 then ChangeYearResult.Changed(album.copy(year = year)) else ChangeYearResult.HasChapters
       execute(query, ChangeYearResult.Failed(_))
 
     override def delete(id: AlbumId): F[DeleteResult] =
@@ -82,12 +80,19 @@ object SqliteAlbumRepository:
         synopsis: String,
         createdAt: Instant,
         opening: Spread.AlbumStart,
-        chapters: Vector[Chapter.Vacation]
+        chapters: Vector[Chapter]
     ) =
-      val album         = Album(AlbumId(id), year, synopsis, createdAt, opening, chapters, maybeHome = None)
-      val chronological = chapters.sortBy(chapter => (chapter.period.firstDay.toEpochDay, chapter.period.days: Long, chapter.id.value.toString))
+      val album         = Album(AlbumId(id), year, synopsis, createdAt, opening, chapters)
+      val chronological = chapters.sortBy(chapter =>
+        (chapter.destination.isHome, chapter.period.firstDay.toEpochDay, chapter.period.days: Long, chapter.id.value.toString)
+      )
+      val home      = chapters.filter(_.destination.isHome)
+      val yearStart = LocalDate.of(year, 1, 1)
+      val yearDays  = ChronoUnit.DAYS.between(yearStart, yearStart.plusYears(1))
       Either.cond(
-        album.spreads.length <= 65 && chapters.map(_.id.value) === chronological.map(_.id.value),
+        album.spreads.length <= 65 && chapters.map(_.id.value) === chronological.map(_.id.value) &&
+          home.sizeIs <= 1 &&
+          home.forall(chapter => chapter.period.firstDay.compareTo(yearStart) === 0 && chapter.period.days.compare(yearDays) === 0),
         album,
         new IllegalArgumentException("Invalid album capacity or chapter order")
       ).liftTo[ConnectionIO]
@@ -95,29 +100,27 @@ object SqliteAlbumRepository:
     private def loadChapters(albumId: UUID) =
       val select = sql"""SELECT c.id, d.id, d.name, k.id, k.code, k.name, k.flag, c.description,
                                c.start_ms, c.end_ms, c.source_folder
-                        FROM chapter c JOIN destination d ON d.id = c.destination_id JOIN country k ON k.id = d.country_id
+                        FROM chapter c LEFT JOIN destination d ON d.id = c.destination_id LEFT JOIN country k ON k.id = d.country_id
                         WHERE c.album_id = $albumId ORDER BY c.position"""
       validateChapters(albumId) >> select.query[ChapterRow].to[Vector].flatMap(_.traverse(decodeChapter))
 
     private def decodeChapter(row: ChapterRow) =
-      val (id, destination, name, countryId, code, countryName, flag, description, start, end, maybeFolder) = row
-      val days                                                                                              = ChronoUnit.DAYS.between(start, end)
-      val period                                                                                            =
-        for
-          _ <- Either.cond(
-            start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0,
-            (),
-            "Expected UTC calendar days"
-          )
-          length <- days.refineEither[Positive]
-        yield VisitPeriod(start.atOffset(ZoneOffset.UTC).toLocalDate, length)
+      val (id, destination, name, countryId, code, countryName, flag, description, start, end, folder) = row
+      val days                                                                                         = ChronoUnit.DAYS.between(start, end)
+      val calendarDays                                                                                 = Either.cond(
+        start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0,
+        (),
+        "Expected UTC calendar days"
+      )
+      val period =
+        calendarDays.flatMap(_ => days.refineEither[Positive]).map(length => VisitPeriod(start.atOffset(ZoneOffset.UTC).toLocalDate, length))
       for
         visit       <- period.leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
         composition <- loadChapterSpreads(id)
       yield
         val (opening, photos) = composition
         val country           = Country(CountryId(countryId), code, countryName, flag)
-        Chapter.Vacation(ChapterId(id), Destination(DestinationId(destination), name, country), visit, description, maybeFolder, opening, photos)
+        Chapter(ChapterId(id), Destination(DestinationId(destination), name, country), visit, description, folder, opening, photos)
 
     private def loadRequired(id: UUID) =
       load(id).flatMap(_.toRight(new IllegalArgumentException(s"Missing required album $id")).liftTo[ConnectionIO])
@@ -281,7 +284,7 @@ object SqliteAlbumRepository:
     private given Meta[DestinationName]  = Meta[String].tiemap[DestinationName](_.refineEither)(value => value: String)
     private given Meta[CountryCode]      = Meta[String].tiemap[CountryCode](_.refineEither)(value => value: String)
     private given Meta[CountryName]      = Meta[String].tiemap[CountryName](_.refineEither)(value => value: String)
-    private given Meta[RelativeLocation] = Meta[String].tiemap[RelativeLocation](_.refineEither)(value => value: String)
+    private given Meta[SourceFolder]     = Meta[String].tiemap[SourceFolder](_.refineEither)(value => value: String)
     private given Meta[AbsoluteLocation] = Meta[String].tiemap[AbsoluteLocation] { value =>
       Either.catchOnly[InvalidPathException](Path.of(value)).leftMap(_.getMessage).flatMap: path =>
         Either.cond(path.isAbsolute, AbsoluteLocation(path), "Expected absolute flag path")
@@ -335,6 +338,6 @@ object SqliteAlbumRepository:
       maybeTemplateKind: Option[String]
   )
   private type ChapterRow =
-    (UUID, UUID, DestinationName, UUID, CountryCode, CountryName, AbsoluteLocation, String, Instant, Instant, Option[RelativeLocation])
+    (UUID, UUID, DestinationName, UUID, CountryCode, CountryName, AbsoluteLocation, String, Instant, Instant, SourceFolder)
   private type SlotRow      = (id: UUID, kind: String, box: SlotBox)
   private type PlacementRow = (UUID, UUID, UUID, InDesignPoints, InDesignPoints, Boolean, Zoom, CaptionCorner)

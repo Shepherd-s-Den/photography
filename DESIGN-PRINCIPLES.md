@@ -18,7 +18,9 @@ What we don't chase: gold-plating — polish past the point where it benefits th
 
 The core is isolated from the outside world. Pure types live in the domain; orchestration and business logic live in the application service's implementation class, while companions hold construction and result types only. A business-external dependency is named by an **algebra** — a `trait` expressed in domain terms, not a vendor's — while generic infrastructure any service could need regardless of business logic (time, identity, logging, mutual exclusion) is a **capability**. Concrete **adapters** implement these contracts and live apart from the core, grouped by the external dependency they own. The composition root is the only place that binds concrete adapters to application algebras.
 
-Static configuration flows the same way. The composition root loads and parses it, converting each setting into the domain type it feeds — `domain` and `usecases` do no config parsing or conversion of their own. A static value never varies between calls, so it is captured once at construction (a `make`/constructor parameter), never threaded through a port's method or any per-call API.
+Operation parameters contain only inputs that can change for that call. Inject fixed business collaborators and settings once through `make` and the private constructor, rather than asking callers to supply services or whole traits on each invocation.
+
+The composition root loads and parses configuration into the types the component needs; `domain` and `usecases` receive those values without parsing them.
 
 Because the core depends only on algebras and capabilities, it can be tested by substituting their interpreters. Adapters are proven at their seam against the real boundary they serve, never by mocking the thing they exist to talk to.
 
@@ -31,7 +33,7 @@ The domain is modelled explicitly and made hard to misuse:
 - **Domain values hold no capabilities.** Values carry self-contained, independently testable data and rules only — no clock, database, or I/O. Domain services orchestrate capability ports around those pure values.
 - **Give event time an explicit owner.** When an event can be recorded after it happened, its timestamp is caller input, not an implicit server clock read. Convert local entry to an absolute instant at the boundary, validate it, and preserve it as part of the event's history.
 - **Use cases own cross-value invariants.** A rule spanning several values of one aggregate (for example, an album's first spread must be its start spread) is enforced where the aggregate is built, in the use case. Value types expose no construction path that can produce an invalid aggregate.
-- **Ubiquitous language.** Code, docs, and the UI use one consistent vocabulary. Translate external terminology at the boundary (see §4), never carry foreign semantics inward.
+- **Ubiquitous language.** Code, docs, and the UI use agreed domain terms. Consult the maintainer before introducing a new term. Translate external terminology at the boundary (see §4).
 
 ## 3. Fractal Design
 
@@ -61,7 +63,7 @@ Boundary encodings must preserve domain semantics used outside the core. If stor
 
 Just as the ACL protects the domain from the outside, interfaces protect internal components from each other. Business collaborators talk through explicit `trait`s; the only things called concretely are pure, stateless utilities.
 
-- **Caller-defined interfaces.** A service interface is shaped by what its consumer needs, kept minimal and named in the consumer's terms — not dictated by an implementation.
+- **Caller-defined interfaces.** Shape an API around the work its caller needs. Precise input and result types tell callers what to provide and what they get back.
 - **Contracts expose responsibilities, not implementations.** Injected interfaces make dependencies understandable and substitutable in tests without reopening or redundantly testing collaborator internals. Defining those contracts forces deliberate abstraction and domain modelling.
 - **Adapters depend on application contracts, never on other adapters or on infrastructure capabilities directly.** A transport handler calls an application service and, in its own tests, substitutes that service. It must not reach past the service to persistence or another external system; each external interaction is reached through the algebra owned by the service responsible for it.
 
@@ -101,4 +103,6 @@ Meaningful names, strong types (§2), clear constructs, and cohesive modules (§
 
 ## Typelevel and Tagless Final
 
-The backend uses Scala 3 and the Typelevel ecosystem, with Tagless Final algebras for effectful application boundaries. Keep services polymorphic in their effect where substitution and composition matter; choose concrete effect runtimes at the composition root. The initial scaffold has no application dependencies, so introduce libraries only when a reviewed change needs them.
+The backend uses Scala 3 and the Typelevel ecosystem, with Tagless Final algebras for effectful application boundaries. Choose concrete effect runtimes at the composition root.
+
+Request capabilities such as `Clock`, `IdGenerator` and `Logger` through `F` context bounds. Use them through their typeclass accessors, not explicit parameters to methods, `make` or private constructors.

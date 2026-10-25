@@ -16,12 +16,10 @@ final case class Album(
     synopsis: String,
     createdAt: Instant,
     opening: Spread.AlbumStart,
-    vacations: Vector[Chapter.Vacation],
-    maybeHome: Option[Chapter.Home]
+    chapters: Vector[Chapter]
 ):
-  def chapters: Vector[Chapter]     = vacations ++ maybeHome.toList
   def spreads: NonEmptyList[Spread] = NonEmptyList(opening, chapters.flatMap(chapter => chapter.opening +: chapter.spreads).toList)
-  def countries: Vector[Country]    = chapters.map(_.country).distinctBy(_.id)
+  def countries: Vector[Country]    = chapters.map(_.destination.country).distinctBy(_.id)
 
 opaque type AlbumId = UUID
 object AlbumId:
