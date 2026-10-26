@@ -1,0 +1,96 @@
+.reader-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.reader-entry h2 {
+  margin: 0 2px;
+}
+.reader-entry button {
+  min-height: 32px;
+  padding: 0 12px;
+}
+.reader-entry > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.reader-stage:fullscreen {
+  display: grid;
+  place-items: center;
+  background: #16252a;
+  padding: 16px;
+  color: #fcfefe;
+}
+.reader-active .reader-canvas {
+  width: min(100%, calc((100dvh - 32px) * var(--canvas-aspect-ratio)));
+}
+.reader-active .canvas-frame {
+  padding: 0;
+}
+.reader-active .cover-canvas {
+  border: 0;
+}
+.reader-active .spread-owner-text,
+.reader-active .cover-canvas {
+  color: #25444c;
+}
+.reader-controls {
+  position: absolute;
+  inset: auto 12px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #16252aeb;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.reader-stage:hover .reader-controls,
+.reader-controls:focus-within {
+  opacity: 1;
+}
+.reader-controls > div {
+  display: grid;
+  gap: 4px;
+}
+.reader-controls span {
+  font-size: 11px;
+}
+.reader-controls p {
+  margin: 0;
+  color: inherit;
+}
+.reader-controls button {
+  min-height: 44px;
+}
+.reader-error {
+  padding: 10px;
+  background: #fff1ed;
+  color: #8a2920;
+}
+.reader-active .reader-error {
+  position: absolute;
+  inset: 12px 12px auto;
+}
+@media (hover: none) {
+  .reader-entry button {
+    min-height: 44px;
+  }
+  .reader-controls {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reader-controls {
+    transition: none;
+  }
+}

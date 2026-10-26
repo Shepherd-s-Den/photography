@@ -1,11 +1,22 @@
 import { For, Show } from "solid-js";
 import type { Slot } from "../model/Workspace";
 
+const spreadWidth = 2381.102;
+const spreadHeight = 765.354;
+export const spreadAspectRatio = spreadWidth / spreadHeight;
+export const coverAspectRatio = 3;
+
 export function SpreadCanvas(props: { slots: readonly Slot[]; text: string; label: string }) {
   return (
     <div class="canvas-frame">
-      <svg class="spread-canvas" role="img" aria-label={`${props.label} composition`} viewBox="0 0 2381.102 765.354">
-        <rect width="2381.102" height="765.354" fill="white" />
+      <svg
+        class="spread-canvas"
+        role="img"
+        aria-label={`${props.label} composition`}
+        viewBox={`0 0 ${String(spreadWidth)} ${String(spreadHeight)}`}
+        style={{ "aspect-ratio": spreadAspectRatio }}
+      >
+        <rect width={spreadWidth} height={spreadHeight} fill="white" />
         <For each={props.slots}>
           {(slot) => (
             <svg x={`${String(slot.x)}%`} y={`${String(slot.y)}%`} width={`${String(slot.width)}%`} height={`${String(slot.height)}%`}>
@@ -29,7 +40,12 @@ export function SpreadCanvas(props: { slots: readonly Slot[]; text: string; labe
 
 export function CoverCanvas(props: { title: string; year: number }) {
   return (
-    <div class="cover-canvas" role="img" aria-label={`Cover: back on the left; front on the right. ${props.title}. ${getCoverCredits(props.year)}`}>
+    <div
+      class="cover-canvas"
+      role="img"
+      aria-label={`Cover: back on the left; front on the right. ${props.title}. ${getCoverCredits(props.year)}`}
+      style={{ "aspect-ratio": coverAspectRatio }}
+    >
       <div class="cover-back">
         <span>Back cover</span>
       </div>

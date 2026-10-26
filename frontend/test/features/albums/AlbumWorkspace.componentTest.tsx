@@ -77,7 +77,7 @@ describe("album workspace browser boundary", () => {
 
     expect(screen.getByRole("img", { name: "Album opening composition" })).toHaveAttribute("viewBox", "0 0 2381.102 765.354");
     expect(screen.queryByText("Photo")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Reader" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reader" })).toBeEnabled();
     const organization = screen.getByRole("navigation", { name: "Album organization" });
     const links = within(organization).getAllByRole("link");
     const expectedLinks = ["Album opening", "01 Kyoto 02/04/2026 - 14/04/2026", "Kyoto · Photo spread 1", "02 Home Throughout the year"];
@@ -129,6 +129,91 @@ describe("album workspace browser boundary", () => {
       fireEvent.click(screen.getByRole("button", { name: "Expand chapter sidebar" }));
       expect(screen.getByRole("button", { name: "Collapse chapter sidebar" })).toHaveFocus();
       expect(screen.getByRole("navigation", { name: "Album organization" })).toBeInTheDocument();
+    },
+  );
+
+  it.each(["cover", "vacation"])(
+    "should read from %s across chapter boundaries and retain the current URL, history and remembered interior on exit",
+    async (part) => {
+      let fullscreen: Element | null = null;
+      const fullscreenDescriptor = Object.getOwnPropertyDescriptor(document, "fullscreenElement");
+      const requestDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "requestFullscreen");
+      const exitDescriptor = Object.getOwnPropertyDescriptor(document, "exitFullscreen");
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreen });
+      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+        configurable: true,
+        value: function (this: HTMLElement) {
+          fullscreen = document.contains(this) ? this : null;
+          document.dispatchEvent(new Event("fullscreenchange"));
+          return Promise.resolve();
+        },
+      });
+      Object.defineProperty(document, "exitFullscreen", {
+        configurable: true,
+        value: () => {
+          fullscreen = null;
+          document.dispatchEvent(new Event("fullscreenchange"));
+          return Promise.resolve();
+        },
+      });
+      window.history.replaceState(null, "", `?part=${part}`);
+      const view = render(() => <AlbumOpen id={album.id} client={buildClient()} />);
+
+      try {
+        fireEvent.click(await screen.findByRole("button", { name: "Reader" }));
+        const exit = await screen.findByRole("button", { name: "Exit reader" });
+
+        if (part === "cover") {
+          expect(screen.getByRole("button", { name: "Previous part" })).toBeDisabled();
+
+          fireEvent.keyDown(exit, { key: "ArrowRight" });
+
+          expect(window.location.search).toBe("");
+
+          fireEvent.click(screen.getByRole("button", { name: "Next part" }));
+        }
+
+        expect(screen.getByRole("img", { name: "Kyoto composition" })).toBeInTheDocument();
+
+        fireEvent.keyDown(exit, { key: "ArrowRight" });
+
+        expect(window.location.search).toBe("?part=vacation-photo");
+
+        fireEvent.keyDown(exit, { key: "ArrowRight" });
+
+        expect(screen.getByRole("img", { name: "Home composition" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Next part" })).toBeDisabled();
+
+        fireEvent.keyDown(exit, { key: "ArrowLeft" });
+
+        expect(window.location.search).toBe("?part=vacation-photo");
+
+        fireEvent.click(exit);
+
+        await waitFor(() => expect(screen.getByRole("button", { name: "Reader" })).toHaveFocus());
+        expect(screen.getByRole("heading", { name: "Kyoto · Photo spread" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Change chapter photo folder" })).toHaveTextContent(vacation.sourceFolder);
+
+        fireEvent.click(screen.getByRole("button", { name: "Cover" }));
+        fireEvent.click(screen.getByRole("button", { name: "Spreads" }));
+
+        expect(window.location.search).toBe("?part=vacation-photo");
+
+        window.history.replaceState(null, "", "?part=home");
+        fireEvent(window, new PopStateEvent("popstate"));
+
+        expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
+      } finally {
+        view.unmount();
+        for (const [owner, key, descriptor] of [
+          [document, "fullscreenElement", fullscreenDescriptor],
+          [HTMLElement.prototype, "requestFullscreen", requestDescriptor],
+          [document, "exitFullscreen", exitDescriptor],
+        ] as const) {
+          if (descriptor === undefined) Reflect.deleteProperty(owner, key);
+          else Object.defineProperty(owner, key, descriptor);
+        }
+      }
     },
   );
 
