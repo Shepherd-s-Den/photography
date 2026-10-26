@@ -29,17 +29,17 @@ export function readFailureMessage(value: unknown): string {
   return "The request could not be completed. Please try again.";
 }
 
-function readRecord(value: unknown): Record<string, unknown> {
+export function readRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Expected a JSON object");
   return Object.fromEntries(Object.entries(value));
 }
 
-function readText(value: unknown): string {
+export function readText(value: unknown): string {
   if (typeof value !== "string") throw new Error("Expected a JSON string");
   return value;
 }
 
-function readNumber(value: unknown): number {
+export function readNumber(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Expected a finite JSON number");
   return value;
 }
@@ -50,7 +50,7 @@ function readInteger(value: unknown, minimum: number): number {
   return parsed;
 }
 
-function readArray(value: unknown): readonly unknown[] {
+export function readArray(value: unknown): readonly unknown[] {
   if (!Array.isArray(value)) throw new Error("Expected a JSON array");
   return value;
 }
