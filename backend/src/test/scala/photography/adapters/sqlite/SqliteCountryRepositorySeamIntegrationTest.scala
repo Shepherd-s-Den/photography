@@ -22,8 +22,7 @@ final class SqliteCountryRepositorySeamIntegrationTest extends CatsEffectSuite:
 
       for
         expected <- inventory.transact(xa)
-
-        result <- repository.list
+        result   <- repository.list
       yield result match
         case ListResult.Listed(countries) =>
           val actual =
@@ -45,8 +44,7 @@ final class SqliteCountryRepositorySeamIntegrationTest extends CatsEffectSuite:
       for
         _        <- rename.transact(xa)
         expected <- identities.transact(xa)
-
-        result <- repository.list
+        result   <- repository.list
       yield result match
         case ListResult.Listed(countries) => assertEquals(countries.toList.map(_.id.value.toString), expected)
         case result                       => fail(s"Expected ordered country catalog, obtained $result")
@@ -69,8 +67,7 @@ final class SqliteCountryRepositorySeamIntegrationTest extends CatsEffectSuite:
           Fragment.const(corruption).update.run >> sql"PRAGMA ignore_check_constraints = OFF".update.run
 
         for
-          _ <- corrupt.transact(xa)
-
+          _      <- corrupt.transact(xa)
           result <- repository.list
         yield assertEquals(result, ListResult.Failed)
     }

@@ -60,9 +60,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
 
     for
       manager <- buildManager(refs)
-
-      result <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
-      writes <- refs.creations.get
+      result  <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
+      writes  <- refs.creations.get
     yield
       val photoSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), box, bleed = Set.empty)
       val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), box)
@@ -92,8 +91,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       val refs = Refs()
 
       for
-        manager <- buildManager(refs, current = album.copy(chapters = Vector(chapter)), countryCatalog = catalog)
-
+        manager   <- buildManager(refs, current = album.copy(chapters = Vector(chapter)), countryCatalog = catalog)
         created   <- manager.create(album.id, chapter.destination.name, requested, Period.Dates(chapter.period), sourceFolder = "/photos/new")
         updated   <- manager.update(album.id, chapter.id, chapter.destination.name, requested, Period.Dates(chapter.period), chapter.sourceFolder)
         creations <- refs.creations.get
@@ -114,12 +112,11 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     for
       missingAlbum   <- buildManager(refs, maybeRead = absentAlbum, countryCatalog = unavailable)
       missingChapter <- buildManager(refs, countryCatalog = unavailable)
-
-      created   <- missingAlbum.create(album.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
-      updated   <- missingAlbum.update(album.id, chapter.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
-      absent    <- missingChapter.update(album.id, chapter.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
-      creations <- refs.creations.get
-      updates   <- refs.updates.get
+      created        <- missingAlbum.create(album.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
+      updated        <- missingAlbum.update(album.id, chapter.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
+      absent         <- missingChapter.update(album.id, chapter.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
+      creations      <- refs.creations.get
+      updates        <- refs.updates.get
     yield
       assertEquals(created, CreateResult.AlbumNotFound)
       assertEquals(updated, UpdateResult.AlbumNotFound)
@@ -134,7 +131,6 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
 
       for
         manager <- buildManager(refs, current = current)
-
         updated <- manager.update(album.id, home.id, homeName, countries.map(_.id), Period.AlbumYear, home.sourceFolder)
         updates <- refs.updates.get
       yield
@@ -167,9 +163,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       val target      = chapter.copy(id = ChapterId(buildUuid(index = 70)), destination = destination, sourceFolder = "/photos/target")
 
       for
-        creator <- buildManager(refs, current = current)
-        editor  <- buildManager(refs, current = current.copy(chapters = current.chapters :+ target))
-
+        creator   <- buildManager(refs, current = current)
+        editor    <- buildManager(refs, current = current.copy(chapters = current.chapters :+ target))
         created   <- creator.create(album.id, name = name, countries.map(_.id), period, sourceFolder = folder)
         updated   <- editor.update(album.id, target.id, name = name, countries.map(_.id), period, sourceFolder = folder)
         creations <- refs.creations.get
@@ -187,9 +182,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
 
       for
         manager <- buildManager(refs, current = album.copy(chapters = Vector(current)))
-
-        result <- manager.update(album.id, current.id, name = requestedName, countries.map(_.id), Period.AlbumYear, sourceFolder = "/photos/changed")
-        writes <- refs.updates.get
+        result  <- manager.update(album.id, current.id, name = requestedName, countries.map(_.id), Period.AlbumYear, sourceFolder = "/photos/changed")
+        writes  <- refs.updates.get
       yield
         assertEquals(result, UpdateResult.Rejected(ChapterConflict.TypeChange))
         assertEquals(writes, Vector.empty)
@@ -203,9 +197,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val beforeLast       = current.copy(chapters = current.chapters.map(value => value.copy(spreads = value.spreads.drop(1))))
 
     for
-      creator <- buildManager(refs, current = beforeLast)
-      full    <- buildManager(refs, current = current)
-
+      creator  <- buildManager(refs, current = beforeLast)
+      full     <- buildManager(refs, current = current)
       admitted <- creator.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
       rejected <- full.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
       updated  <- full.update(album.id, chapter.id, name = "Kyoto", updatedCountries.map(_.id), period, sourceFolder = "/photos/new")
@@ -231,8 +224,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val current     = album.copy(chapters = Vector(earlier, tied, chapter, later, home))
 
     for
-      manager <- buildManager(refs, current = current)
-
+      manager   <- buildManager(refs, current = current)
       created   <- manager.create(album.id, name = "Kyoto", countries.map(_.id), Period.Dates(chapter.period), sourceFolder = "/photos/new")
       updated   <- manager.update(album.id, later.id, name = "Kyoto", countries.map(_.id), Period.Dates(earlier.period), later.sourceFolder)
       creations <- refs.creations.get
@@ -258,7 +250,6 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     for
       manager <- buildManager(refs, maybeRead = read.some, save = save)
       createChapter = manager.create(album.id, name = "Kyoto", countries.map(_.id), Period.Dates(chapter.period), sourceFolder = "/photos/new")
-
       results <- Vector.fill(2)(()).parTraverse(_ => createChapter)
       saved   <- state.get
     yield
@@ -307,11 +298,10 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     for
       missing     <- buildManager(refs)
       noTemplates <- buildManager(refs, templates = ListChapterStartTemplatesResult.Failed)
-
-      _      <- unavailableReads
-      _      <- unavailableWrites
-      absent <- missing.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
-      failed <- noTemplates.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+      _           <- unavailableReads
+      _           <- unavailableWrites
+      absent      <- missing.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+      failed      <- noTemplates.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
     yield
       assertEquals(absent, UpdateResult.ChapterNotFound)
       assertEquals(failed, CreateResult.Failed)

@@ -8,6 +8,7 @@ import photography.capabilities.IdGenerator
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.{AlbumRepository, ChapterRepository, CountryRepository}
+import photography.syntax.EitherSyntax.*
 import photography.usecases.ChapterManager.*
 import photography.usecases.SpreadTemplateManager.ListChapterStartTemplatesResult
 import io.github.iltotore.iron.autoRefine
@@ -49,12 +50,12 @@ object ChapterManager:
       summon[Mutex[F]].lock.surround:
         val creation =
           for
-            current                          <- EitherT(readAlbum(album))
+            current                          <- readAlbum(album).eitherT
             resolved                         <- EitherT.fromEither[F](checkCreation(current, name, period, sourceFolder))
-            _                                <- EitherT(checkCountryReferences(countries))
-            (template, photoSlots, textSlot) <- EitherT(readChapterStartTemplate)
+            _                                <- checkCountryReferences(countries).eitherT
+            (template, photoSlots, textSlot) <- readChapterStartTemplate.eitherT
             chapter                          <- EitherT.liftF(buildChapter(name, countries, resolved, sourceFolder, template, photoSlots, textSlot))
-            id                               <- EitherT(persistCreation(album, current.chapters, chapter))
+            id                               <- persistCreation(album, current.chapters, chapter).eitherT
           yield id
         creation.fold(translateCreateFailure, CreateResult.Created(_))
 
@@ -69,10 +70,10 @@ object ChapterManager:
       summon[Mutex[F]].lock.surround:
         val update =
           for
-            current  <- EitherT(readAlbum(album)).leftWiden[UpdateFailure]
+            current  <- readAlbum(album).eitherT.leftWiden[UpdateFailure]
             resolved <- EitherT.fromEither[F](checkUpdate(current, chapter, name, period, sourceFolder))
-            _        <- EitherT(checkCountryReferences(countries)).leftWiden[UpdateFailure]
-            saved    <- EitherT(persistUpdate(album, current.chapters, chapter, name, countries, resolved, sourceFolder))
+            _        <- checkCountryReferences(countries).eitherT.leftWiden[UpdateFailure]
+            saved    <- persistUpdate(album, current.chapters, chapter, name, countries, resolved, sourceFolder).eitherT
           yield saved
         update.fold(translateUpdateFailure, _ => UpdateResult.Updated)
 

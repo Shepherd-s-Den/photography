@@ -65,6 +65,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 - Express effectful application boundaries as traits parameterized by an effect type, such as `F[_]`; keep pure domain values independent of runtime effects.
 - Use Cats syntax for value construction (`.pure[F]`, `.some`, `.asRight`, `.asLeft`, and related operations) instead of explicit typeclass calls or `Some`/`Right`/`Left` constructors where syntax applies.
+- Use shared `photography.syntax.EitherSyntax.*` and postfix `.eitherT` to wrap `F[Either[E, A]]`, keeping the operation visible before its transformer syntax.
 - Keep business orchestration visible in the public service method. Similar workflows should have visibly similar structure; do not hide their ordering or compensation inside helpers.
 - Give each helper one responsibility and return the narrowest type that describes it. A persistence or domain-step helper must not construct the caller's public result.
 - Keep effectful sequencing linear. Avoid deeply nested `flatMap`, matches, or conditionals; extract a meaningful step or model the additional state explicitly.
@@ -95,6 +96,7 @@ Every product change follows the [SDD skill](.agents/skills/sdd/SKILL.md). Its p
 - Add tests with each observable behavior and exercise the boundary that owns it.
 - Prefer complete-value assertions and scenario-local setup over assertions on implementation details.
 - Keep test names in the vocabulary of the behavior exposed by the tested boundary.
+- Keep `for` comprehension generators contiguous, without blank lines. Separate Arrange / Act / Assert outside the comprehension rather than interrupting its sequence.
 
 ## Definition of done
 
