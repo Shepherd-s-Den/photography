@@ -24,6 +24,8 @@ The composition root loads and parses configuration into the types the component
 
 Because the core depends only on algebras and capabilities, it can be tested by substituting their interpreters. Adapters are proven at their seam against the real boundary they serve, never by mocking the thing they exist to talk to.
 
+Application services own business decisions; persistence adapters own representation validity, basic relational constraints and atomic writes of supplied decisions. Choose coordination for the supported deployment topology and cover the full read/decision/write sequence. A transaction's atomicity and a business decision's concurrency safety are separate guarantees, each proven at its owning boundary.
+
 ## 2. Domain-Driven Design (a pragmatic subset)
 
 The domain is modelled explicitly and made hard to misuse:
@@ -45,7 +47,7 @@ The system reads the same at every zoom level: `main` is the most zoomed-out vie
 - **Locality of Behavior over structural deduplication.** Keep behavior beside the state and UI that it governs. Similar-looking code is not sufficient reason to share an abstraction when the use cases may evolve independently.
 - **DRY applies to knowledge, not lines.** Centralize a rule, decision, or contract when independent divergence would be a bug. Allow incidental code similarity when the duplicated code represents separate knowledge or responsibilities.
 - **Every abstraction must own a real seam.** Extract an interface, component, or helper only when it names a stable responsibility and has real consumers. Do not replace local code with configuration bags, pass-through layers, or generic frameworks that merely hide differences.
-- **Represent one fact once.** When one measurement determines a classification, model the valid classifications as one closed type carrying the measurements that apply to each case. Do not expose parallel fields that callers can combine into contradictions.
+- **Represent one fact once.** When one measurement determines a classification, model the valid classifications as one closed type carrying the measurements that apply to each case. Do not expose parallel fields that callers can combine into contradictions. Persisted reference catalogs have one authoritative inventory; tests establish their observable guarantees without maintaining a second complete catalog.
 - **Keep mutable records separate from cached projections.** A projection carries identity and derived measurements; read current entity details from their authoritative source and join by identity. A failed read or mismatched identity must not appear as a successful, current view.
 - **Layout follows content constraints, not one viewport.** UI components own their structural boxes, use fluid bounds, and define narrow-width behavior. Decorative layers must not stand in for structure that controls layout.
 
@@ -63,7 +65,7 @@ Boundary encodings must preserve domain semantics used outside the core. If stor
 
 Just as the ACL protects the domain from the outside, interfaces protect internal components from each other. Business collaborators talk through explicit `trait`s; the only things called concretely are pure, stateless utilities.
 
-- **Caller-defined interfaces.** Shape an API around the work its caller needs. Precise input and result types tell callers what to provide and what they get back.
+- **Caller-defined interfaces.** Shape an API around the work its caller needs. Trace every parameter to the information the operation consumes, including factories and private helpers. Accept the smallest meaningful inputs rather than a whole aggregate, configuration or service bundle for a few fields. When several inputs form one cohesive request, define a purpose-specific type containing only those inputs.
 - **Contracts expose responsibilities, not implementations.** Injected interfaces make dependencies understandable and substitutable in tests without reopening or redundantly testing collaborator internals. Defining those contracts forces deliberate abstraction and domain modelling.
 - **Adapters depend on application contracts, never on other adapters or on infrastructure capabilities directly.** A transport handler calls an application service and, in its own tests, substitutes that service. It must not reach past the service to persistence or another external system; each external interaction is reached through the algebra owned by the service responsible for it.
 
@@ -87,6 +89,7 @@ The build starts deliberately small. Add each compiler, formatting, analysis, an
 §3 shapes the system at rest; this is how it holds that shape as it grows. Complexity must earn its place through the value it delivers; narrow or reject a change when that tradeoff does not hold.
 
 - **Occam's Razor.** Compare alternatives that fit the system; prefer fewer assumptions and moving parts.
+- **Compatibility follows deployment needs.** Establish which deployed versions or retained data require preservation before adding upgrade paths. For undeployed software, prefer correcting the initial design and explicitly targeting disposable development data over building speculative compatibility machinery.
 - **Scope versus complexity.** Ask whether 90% of the value is achievable with 10% of the complexity.
 - **Intentional change.** Before the spec, decide what to extend, reuse, build, or split; record why, and revisit the decision as evidence changes.
 - **Refactor as work arrives.** Extract newly exposed responsibilities into their own modules in the change that exposes them, not a later cleanup. Leave no broken windows behind.
