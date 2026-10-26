@@ -6,7 +6,7 @@ const spreadHeight = 765.354;
 export const spreadAspectRatio = spreadWidth / spreadHeight;
 export const coverAspectRatio = 3;
 
-export function SpreadCanvas(props: { slots: readonly Slot[]; text: string; label: string }) {
+export function SpreadCanvas(props: { slots: readonly Slot[]; title: string; text: string; label: string }) {
   return (
     <div class="canvas-frame">
       <svg
@@ -24,7 +24,10 @@ export function SpreadCanvas(props: { slots: readonly Slot[]; text: string; labe
                 when={slot.kind === "photo"}
                 fallback={
                   <foreignObject width="100%" height="100%">
-                    <div class="spread-owner-text">{props.text}</div>
+                    <div class="spread-owner-text">
+                      <div class="spread-owner-title">{props.title}</div>
+                      <p>{props.text}</p>
+                    </div>
                   </foreignObject>
                 }
               >

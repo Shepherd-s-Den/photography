@@ -1,10 +1,12 @@
 import { Show, createMemo, createSignal, createUniqueId, onCleanup, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
 import "./reader.css";
 
 export function FullscreenReader(props: {
   aspectRatio: number;
-  previousReason: string | undefined;
-  nextReason: string | undefined;
+  canPrevious: boolean;
+  canNext: boolean;
+  entryMount?: HTMLDivElement | undefined;
   unavailable: string | undefined;
   onNavigate: (direction: -1 | 1) => void;
   label: string;
@@ -15,8 +17,6 @@ export function FullscreenReader(props: {
   const [error, setError] = createSignal<string>();
   const entryReason = createMemo(() => props.unavailable ?? (pending() ? "Entering fullscreen. Please wait." : undefined));
   const reasonId = createUniqueId();
-  const previousId = createUniqueId();
-  const nextId = createUniqueId();
   let stage!: HTMLDivElement;
   let opener!: HTMLButtonElement;
   let exitButton: HTMLButtonElement | undefined;
@@ -74,9 +74,26 @@ export function FullscreenReader(props: {
     } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
       event.preventDefault();
       const direction = event.key === "ArrowLeft" ? -1 : 1;
-      if ((direction === -1 ? props.previousReason : props.nextReason) === undefined) props.onNavigate(direction);
+      if (direction === -1 ? props.canPrevious : props.canNext) props.onNavigate(direction);
     }
   }
+
+  const entry = (
+    <div class="reader-entry-control">
+      <button
+        ref={(element) => {
+          opener = element;
+        }}
+        type="button"
+        disabled={entryReason() !== undefined}
+        aria-describedby={entryReason() !== undefined ? reasonId : undefined}
+        onClick={() => void enter()}
+      >
+        Reader
+      </button>
+      <Show when={entryReason()}>{(reason) => <span id={reasonId}>{reason()}</span>}</Show>
+    </div>
+  );
 
   return (
     <>
@@ -84,20 +101,9 @@ export function FullscreenReader(props: {
         <Show when={props.label !== ""}>
           <h2>{props.label}</h2>
         </Show>
-        <div>
-          <button
-            ref={(element) => {
-              opener = element;
-            }}
-            type="button"
-            disabled={entryReason() !== undefined}
-            aria-describedby={entryReason() !== undefined ? reasonId : undefined}
-            onClick={() => void enter()}
-          >
-            Reader
-          </button>
-          <Show when={entryReason()}>{(reason) => <span id={reasonId}>{reason()}</span>}</Show>
-        </div>
+        <Show when={props.entryMount} fallback={entry}>
+          {(mount) => <Portal mount={mount()}>{entry}</Portal>}
+        </Show>
       </div>
       <div
         ref={(element) => {
@@ -117,15 +123,13 @@ export function FullscreenReader(props: {
             <div>
               <button
                 type="button"
-                disabled={props.previousReason !== undefined}
-                aria-describedby={props.previousReason !== undefined ? previousId : undefined}
+                disabled={!props.canPrevious}
                 onClick={() => {
                   props.onNavigate(-1);
                 }}
               >
-                Previous part
+                Previous spread
               </button>
-              <Show when={props.previousReason}>{(reason) => <span id={previousId}>{reason()}</span>}</Show>
             </div>
             <p role="status" aria-live="polite">
               {props.label}
@@ -133,15 +137,13 @@ export function FullscreenReader(props: {
             <div>
               <button
                 type="button"
-                disabled={props.nextReason !== undefined}
-                aria-describedby={props.nextReason !== undefined ? nextId : undefined}
+                disabled={!props.canNext}
                 onClick={() => {
                   props.onNavigate(1);
                 }}
               >
-                Next part
+                Next spread
               </button>
-              <Show when={props.nextReason}>{(reason) => <span id={nextId}>{reason()}</span>}</Show>
             </div>
             <button
               ref={(element) => {

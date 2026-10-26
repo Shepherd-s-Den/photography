@@ -56,7 +56,6 @@ export function AlbumDialog(props: {
       return;
     }
     setPending(true);
-    setError(undefined);
     try {
       const action = props.action;
       if (action.kind === "create") await props.client.create(Number(year()));
@@ -137,8 +136,16 @@ export function AlbumDialog(props: {
           <p>This permanently deletes the album. Deleting cannot be undone.</p>
         </Show>
         <div id="album-dialog-feedback">
-          <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
-          <Show when={unavailable()}>{(reason) => <p role="status">{reason()}</p>}</Show>
+          <Show when={error()}>
+            {(message) => (
+              <p role="alert" aria-hidden={pending()}>
+                {message()}
+              </p>
+            )}
+          </Show>
+          <div class="dialog-status">
+            <Show when={unavailable()}>{(reason) => <p role="status">{reason()}</p>}</Show>
+          </div>
         </div>
         <div class="dialog-actions">
           <button

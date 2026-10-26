@@ -144,7 +144,7 @@ describe("album dashboard and open", () => {
     render(() => <App client={client} />);
 
     expect(await screen.findByRole("heading", { name: "A year in photographs / 2026" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Album opening composition" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Synopsis composition" })).toBeInTheDocument();
     expect(screen.queryByText("Read-only album")).not.toBeInTheDocument();
     expect(screen.queryByText(firstAlbum.createdAt)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to albums" })).toHaveAttribute("href", "/");

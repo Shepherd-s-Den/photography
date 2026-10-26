@@ -379,6 +379,15 @@ small {
   gap: 9px;
   margin-top: 7px;
 }
+.dialog-status {
+  min-height: 1.55em;
+}
+.album-dialog .dialog-status p {
+  margin: 0;
+}
+.album-dialog [role="alert"][aria-hidden="true"] {
+  visibility: hidden;
+}
 .confirmation-dialog {
   width: min(480px, calc(100% - 32px));
   padding: 28px;
@@ -454,21 +463,21 @@ small {
 @keyframes dialog-in {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.975);
+    transform: translateY(14px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 @keyframes dialog-out {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateY(8px) scale(0.985);
+    transform: translateY(8px);
   }
 }
 @keyframes scrim-in {

@@ -16,26 +16,9 @@ export function ChapterOutline(props: {
 }) {
   return (
     <aside class="chapter-sidebar">
-      <div class="sidebar-heading">
-        <Show when={!props.collapsed}>
-          <h2>Chapters</h2>
-        </Show>
-        <button
-          type="button"
-          class="sidebar-toggle secondary"
-          aria-label={props.collapsed ? "Expand chapter sidebar" : "Collapse chapter sidebar"}
-          aria-expanded={!props.collapsed}
-          aria-controls="chapter-controls"
-          onClick={(event) => {
-            props.onCollapse();
-            event.currentTarget.focus();
-          }}
-        >
-          {props.collapsed ? "›" : "‹"}
-        </button>
-      </div>
       <div class="sidebar-content">
         <div id="chapter-controls" inert={props.collapsed} aria-hidden={props.collapsed} class="chapter-controls">
+          <h2 class="sidebar-heading">Chapters</h2>
           <nav aria-label="Album organization">
             <a
               href={`/albums/${props.albumId}`}
@@ -45,7 +28,7 @@ export function ChapterOutline(props: {
                 props.onSelect(null);
               }}
             >
-              Album opening
+              Synopsis
             </a>
             <For each={props.chapters}>
               {(chapter, index) => (
@@ -95,6 +78,18 @@ export function ChapterOutline(props: {
           <Show when={props.creationReason}>{(reason) => <p id="chapter-capacity">{reason()}</p>}</Show>
         </div>
       </div>
+      <button
+        type="button"
+        class="sidebar-toggle"
+        aria-label={props.collapsed ? "Expand chapter sidebar" : "Collapse chapter sidebar"}
+        aria-expanded={!props.collapsed}
+        aria-controls="chapter-controls"
+        title={props.collapsed ? "Expand chapter sidebar" : "Collapse chapter sidebar"}
+        onClick={(event) => {
+          props.onCollapse();
+          event.currentTarget.focus();
+        }}
+      />
     </aside>
   );
 }
