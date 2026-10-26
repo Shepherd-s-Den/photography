@@ -53,7 +53,13 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 - Apply locality of behavior and knowledge-based DRY from [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md#3-fractal-design): deduplicate a rule or contract whose divergence would be a bug, not code that merely has the same shape today.
 - Before extracting shared code, name the responsibility it owns and the callers that must obey the same invariant. If an extraction mainly replaces straightforward code with callbacks, options, or configuration, keep the behavior local.
+- Treat a wide private helper as a responsibility check: separate independently changing decisions and keep simple checks visible at their caller. A request object earns its place through cohesion, not by hiding an unrelated parameter list.
 - A user interface component owns the behavior and accessible state of its controls. State transitions must not discard focus or hide the reason an action is unavailable.
+
+## Readable density
+
+- Inspect declarations, calls and chains after formatting. Keep short expressions together within the configured line limit; a formatter pass alone does not establish readability. Move a chained call to its own line when that lets its tuple or type arguments fit together.
+- Name meaningful conditions and bulky nested values before constructing results. This keeps ordinary validation, resource sequencing and expected-value declarations compact while exposing their important inputs. Prefer these local values to line-count-driven helpers or artificial wrapping.
 
 ## Scala composition
 
