@@ -4,8 +4,8 @@
 
 ## Contract inventory
 
-- [SQLite migrations](../backend/src/main/resources/db/) define the schema contract, including the four seeded `AlbumStart` layouts; foreign-key enforcement is enabled on every connection.
-- The [OpenAPI specification](http-api.openapi.json) defines the five album operations and `AlbumStart`-template listing, including requests, responses, pagination and error contracts.
+- [SQLite migrations](../backend/src/main/resources/db/) define the schema contract, including four `AlbumStart` layouts, 27 chapter-start layouts and all 249 ISO 3166-1 countries/territories; foreign-key enforcement is enabled on every connection.
+- The [OpenAPI specification](http-api.openapi.json) defines year-required album creation, metadata reads and free-form rename, deletion, pagination, workspace reads, multi-country chapter creation/update and `AlbumStart`-template listing, including representation and error contracts.
 
 ## Frontend delivery
 
