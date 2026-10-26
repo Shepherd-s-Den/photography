@@ -380,9 +380,8 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 412)), box),
           placements = Vector(expectedPlacement)
         )
-        val expectedPhotosSlot =
-          SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 411)), box, bleed = Set.empty[SpreadEdge])
-        val expectedPhotos = Spread.PhotosOnly(
+        val expectedPhotosSlot = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 411)), box, bleed = Set.empty[SpreadEdge])
+        val expectedPhotos     = Spread.PhotosOnly(
           SpreadId(buildUuid(index = 410)),
           SpreadTemplateId(buildUuid(index = 409)),
           photoSlots = NonEmptyList.one(expectedPhotosSlot),
@@ -425,9 +424,11 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   private def buildTransactor =
     for
-      path <- Resource.make(IO.blocking(Files.createTempFile("album-", ".sqlite")))(path => IO.blocking(Files.deleteIfExists(path)).void)
-      _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
-      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
+      path <- Resource.make(IO.blocking(Files.createTempFile(Path.of("target"), "album-", ".sqlite")))(path =>
+        IO.blocking(Files.deleteIfExists(path)).void
+      )
+      _  <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
+      xa <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa
 
   private def buildAlbum(index: Int) =

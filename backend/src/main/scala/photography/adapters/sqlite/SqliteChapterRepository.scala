@@ -21,17 +21,23 @@ object SqliteChapterRepository:
     new LiveChapterRepository(transactor)
 
   final private class LiveChapterRepository[F[_]: Async: Logger: IdGenerator](transactor: Transactor[F]) extends ChapterRepository[F]:
-    override def create(album: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId]): F[CreateResult] =
+    override def create(album: AlbumId, chapter: NewChapter, order: NonEmptyList[ChapterId]): F[CreateResult] =
+      val initial = Either.cond(
+        chapter.opening.placements.isEmpty && chapter.opening.photoSlots.nonEmpty &&
+          chapter.opening.photoSlots.forall(_.id.value =!= chapter.opening.textSlot.id.value),
+        (),
+        new IllegalArgumentException("Expected an empty chapter opening with photo slots")
+      )
       val query = albumExists(album).flatMap:
         case false => CreateResult.AlbumNotFound.pure[ConnectionIO]
         case true  =>
           for
-            _ <- validateInitial(chapter).liftTo[ConnectionIO]
-            _ <- insertDestination(chapter.destination.id.value, chapter.destination.name, chapter.destination.countries)
-            _ <- insertChapter(album, chapter)
-            _ <- insertOpening(chapter.id, chapter.opening)
+            _ <- initial.liftTo[ConnectionIO]
+            _ <- validateOpening(chapter.opening.template, chapter.opening.photoSlots.map(_.box), chapter.opening.textSlot.box)
+            _ <- insertDestination(chapter.destinationId.value, chapter.name, chapter.countries)
+            _ <- insertChapter(album, chapter.id, chapter.destinationId, chapter.description, chapter.period, chapter.sourceFolder)
+            _ <- insertOpening(chapter.id, chapter.opening.id, chapter.opening.template, chapter.opening.photoSlots, chapter.opening.textSlot)
             _ <- persistOrder(album, order)
-            _ <- validateComposition(album)
           yield CreateResult.Saved: CreateResult
       execute(query.transact(transactor), CreateResult.Failed)
 
@@ -39,7 +45,7 @@ object SqliteChapterRepository:
         album: AlbumId,
         chapter: ChapterId,
         name: DestinationName,
-        countries: NonEmptyList[Country],
+        countries: NonEmptyList[CountryId],
         period: VisitPeriod,
         sourceFolder: SourceFolder,
         order: NonEmptyList[ChapterId]
@@ -52,12 +58,10 @@ object SqliteChapterRepository:
               case None           => UpdateResult.ChapterNotFound.pure[ConnectionIO]
               case Some(previous) =>
                 for
-                  _ <- validateComposition(album)
                   _ <- insertDestination(destination, name, countries)
-                  _ <- updateMetadata(album, chapter, destination, name, period, sourceFolder)
+                  _ <- updateMetadata(album, chapter, destination, period, sourceFolder)
                   _ <- deleteUnreferencedDestination(previous)
                   _ <- persistOrder(album, order)
-                  _ <- validateComposition(album)
                 yield UpdateResult.Saved: UpdateResult
         query.transact(transactor)
       execute(operation, UpdateResult.Failed)
@@ -65,20 +69,26 @@ object SqliteChapterRepository:
     private def albumExists(album: AlbumId) =
       sql"SELECT EXISTS(SELECT 1 FROM album WHERE id = ${album.value})".query[Boolean].unique
 
-    private def validateInitial(chapter: Chapter) =
-      Either.cond(
-        chapter.spreads.isEmpty && chapter.opening.placements.isEmpty,
-        (),
-        new IllegalArgumentException("Expected an empty chapter opening")
-      )
+    private def validateOpening(template: SpreadTemplateId, photos: Vector[SlotBox], text: SlotBox) =
+      val select = sql"""SELECT s.kind, s.x, s.y, s.width, s.height FROM spread_template_slot s
+        JOIN spread_template t ON t.id = s.template_id WHERE t.id = ${template.value} AND t.kind = 'chapter_start'"""
+      val supplied = (photos.map(box => ("photo", box)) :+ ("text", text)).map { case (kind, box) =>
+        (kind, box.x: Double, box.y: Double, box.width: Double, box.height: Double)
+      }
+      select.query[(String, Double, Double, Double, Double)].to[Vector].flatMap: expected =>
+        Either.cond(
+          expected.size === supplied.size && expected.toSet === supplied.toSet,
+          (),
+          new IllegalArgumentException("Opening slots must represent their chapter template")
+        ).liftTo[ConnectionIO]
 
     private def deleteUnreferencedDestination(id: UUID) =
       sql"DELETE FROM destination WHERE id = $id AND NOT EXISTS (SELECT 1 FROM chapter WHERE destination_id = $id)".update.run.void
 
-    private def insertDestination(id: UUID, name: DestinationName, countries: NonEmptyList[Country]) =
+    private def insertDestination(id: UUID, name: DestinationName, countries: NonEmptyList[CountryId]) =
       val insertCountries = countries.toList.zipWithIndex.traverse_ { case (country, position) =>
         val insert = sql"""INSERT INTO destination_country (destination_id, country_id, position)
-          VALUES ($id, ${country.id.value}, $position)"""
+          VALUES ($id, ${country.value}, $position)"""
         insert.update.run.flatMap(requireOne)
       }
       for
@@ -86,28 +96,26 @@ object SqliteChapterRepository:
         _ <- insertCountries
       yield ()
 
-    private def insertChapter(album: AlbumId, chapter: Chapter) =
-      val start  = chapter.period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
-      val end    = chapter.period.firstDay.plusDays(chapter.period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
-      val home   = chapter.destination.isHome
-      val insert = sql"""INSERT INTO chapter (id, album_id, destination_id, description, start_ms, end_ms, position, source_folder, is_home)
-        VALUES (${chapter.id.value}, ${album.value}, ${chapter.destination.id.value}, ${chapter.description},
-                $start, $end, (SELECT coalesce(max(position), -1) + 1 FROM chapter WHERE album_id = ${album.value}),
-                ${chapter.sourceFolder: String}, $home)"""
-      insert.update.run.flatMap(requireOne)
-
-    private def updateMetadata(
+    private def insertChapter(
         album: AlbumId,
         chapter: ChapterId,
-        destination: UUID,
-        name: DestinationName,
+        destination: DestinationId,
+        description: String,
         period: VisitPeriod,
         folder: SourceFolder
     ) =
+      val start  = period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
+      val end    = period.firstDay.plusDays(period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
+      val insert = sql"""INSERT INTO chapter (id, album_id, destination_id, description, start_ms, end_ms, position, source_folder)
+        VALUES (${chapter.value}, ${album.value}, ${destination.value}, $description,
+                $start, $end, (SELECT coalesce(max(position), -1) + 1 FROM chapter WHERE album_id = ${album.value}),
+                ${folder: String})"""
+      insert.update.run.flatMap(requireOne)
+
+    private def updateMetadata(album: AlbumId, chapter: ChapterId, destination: UUID, period: VisitPeriod, folder: SourceFolder) =
       val start = period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
       val end   = period.firstDay.plusDays(period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
-      val home  = (name: String) === "Home"
-      sql"""UPDATE chapter SET destination_id = $destination, start_ms = $start, end_ms = $end, source_folder = ${folder: String}, is_home = $home
+      sql"""UPDATE chapter SET destination_id = $destination, start_ms = $start, end_ms = $end, source_folder = ${folder: String}
             WHERE id = ${chapter.value} AND album_id = ${album.value}""".update.run.flatMap(requireOne)
 
     private def persistOrder(album: AlbumId, order: NonEmptyList[ChapterId]) =
@@ -129,14 +137,20 @@ object SqliteChapterRepository:
         new IllegalArgumentException("Order must contain every chapter exactly once")
       )
 
-    private def insertOpening(chapter: ChapterId, opening: Spread.ChapterStart) =
+    private def insertOpening(
+        chapter: ChapterId,
+        spread: SpreadId,
+        template: SpreadTemplateId,
+        photos: Vector[SpreadSlot.Photo],
+        text: SpreadSlot.Text
+    ) =
       val insert = sql"""INSERT INTO spread (id, template_id, kind, chapter_id, position)
-        VALUES (${opening.id.value}, ${opening.template.value}, 'chapter_start', ${chapter.value}, 0)"""
+        VALUES (${spread.value}, ${template.value}, 'chapter_start', ${chapter.value}, 0)"""
       val insertText = sql"""INSERT INTO spread_text_slot (id, spread_id, x, y, width, height)
-        VALUES (${opening.textSlot.id.value}, ${opening.id.value}, ${opening.textSlot.box})"""
+        VALUES (${text.id.value}, ${spread.value}, ${text.box})"""
       for
         _ <- insert.update.run.flatMap(requireOne)
-        _ <- opening.photoSlots.traverse_(slot => insertPhotoSlot(opening.id, slot))
+        _ <- photos.traverse_(slot => insertPhotoSlot(spread, slot))
         _ <- insertText.update.run.flatMap(requireOne)
       yield ()
 
@@ -149,10 +163,6 @@ object SqliteChapterRepository:
         _ <- insert.update.run.flatMap(requireOne)
         _ <- insertBleed
       yield ()
-
-    private def validateComposition(album: AlbumId) =
-      sql"SELECT count(*) FROM invalid_album_composition WHERE album_id = ${album.value}".query[Long].unique.flatMap: invalid =>
-        Either.cond(invalid === 0L, (), new IllegalArgumentException("Incomplete stored composition")).liftTo[ConnectionIO]
 
     private def requireOne(count: Int) =
       Either.cond(count === 1, (), new IllegalStateException("Expected one persisted row")).liftTo[ConnectionIO]

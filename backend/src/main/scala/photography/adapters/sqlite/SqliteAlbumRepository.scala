@@ -35,13 +35,18 @@ object SqliteAlbumRepository:
       execute(query, ListResult.Failed(_))
 
     override def create(album: Album, cover: Cover): F[CreateResult] =
+      val initial = Either.cond(
+        album.chapters.isEmpty && album.opening.placements.isEmpty && cover.album.value === album.id.value,
+        (),
+        new IllegalArgumentException("Expected an initial album and its cover")
+      )
       val query =
         for
-          start <- validateInitial(album, cover)
-          _     <- insertAlbum(album)
-          _     <- insertInitialSpread(album.id, start)
-          _     <- insertCover(cover)
-          _     <- loadRequired(album.id.value)
+          _ <- initial.liftTo[ConnectionIO]
+          _ <- insertAlbum(album.id, album.year, album.title, album.synopsis, album.createdAt)
+          _ <- insertInitialSpread(album.id, album.opening.id, album.opening.template, album.opening.photoSlots, album.opening.textSlot)
+          _ <- insertCover(cover)
+          _ <- loadRequired(album.id.value)
         yield CreateResult.Created: CreateResult
       execute(query, CreateResult.Failed(_))
 
@@ -66,7 +71,6 @@ object SqliteAlbumRepository:
         case None                                     => Option.empty[Album].pure[ConnectionIO]
         case Some((year, title, synopsis, createdAt)) =>
           for
-            _        <- validateComposition(id)
             chapters <- loadChapters(id)
             opening  <- loadAlbumOpening(id)
             _        <- validateCover(id)
@@ -146,10 +150,6 @@ object SqliteAlbumRepository:
             (c.position < 0 OR NOT EXISTS
              (SELECT 1 FROM spread s WHERE s.chapter_id = c.id AND s.kind = 'chapter_start'))""".query[Long].unique.flatMap: count =>
         Either.cond(count === 0L, (), new IllegalArgumentException("Invalid chapter composition")).liftTo[ConnectionIO]
-
-    private def validateComposition(albumId: UUID) =
-      sql"SELECT count(*) FROM invalid_album_composition WHERE album_id = $albumId".query[Long].unique.flatMap: invalid =>
-        Either.cond(invalid === 0L, (), new IllegalArgumentException("Incomplete stored composition")).liftTo[ConnectionIO]
 
     private def loadSpread(row: SpreadRow) =
       val id             = row.id
@@ -236,32 +236,29 @@ object SqliteAlbumRepository:
 
     private def validateCoverSpine(id: UUID) =
       sql"SELECT spine_owner FROM cover WHERE album_id = $id".query[String].option
-        .ensure(new IllegalArgumentException("Incomplete cover"))(_.exists(value => value === "front" || value === "back"))
-        .void
+        .ensure(new IllegalArgumentException("Incomplete cover"))(_.exists(value => value === "front" || value === "back")).void
 
     private def validateCoverSlots(id: UUID) =
       sql"SELECT side FROM cover_slot WHERE album_id = $id ORDER BY side".query[String].to[List]
-        .ensure(new IllegalArgumentException("Incomplete cover"))(_ === List("back", "front"))
-        .void
+        .ensure(new IllegalArgumentException("Incomplete cover"))(_ === List("back", "front")).void
 
-    private def validateInitial(album: Album, cover: Cover) =
-      Either.cond(
-        album.chapters.isEmpty && album.opening.placements.isEmpty && cover.album.value === album.id.value,
-        album.opening,
-        new IllegalArgumentException("Expected an initial album and its cover")
-      ).liftTo[ConnectionIO]
-
-    private def insertAlbum(album: Album) =
+    private def insertAlbum(id: AlbumId, year: AlbumYear, title: AlbumTitle, synopsis: String, createdAt: Instant) =
       sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
-            VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, ${album.createdAt})""".update.run.void
+            VALUES (${id.value}, $year, $title, $synopsis, $createdAt)""".update.run.void
 
-    private def insertInitialSpread(albumId: AlbumId, start: Spread.AlbumStart) =
+    private def insertInitialSpread(
+        album: AlbumId,
+        spread: SpreadId,
+        template: SpreadTemplateId,
+        photos: Vector[SpreadSlot.Photo],
+        text: SpreadSlot.Text
+    ) =
       val insert = sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
-                        VALUES (${start.id.value}, ${start.template.value}, 'album_start', ${albumId.value}, 0)"""
+                        VALUES (${spread.value}, ${template.value}, 'album_start', ${album.value}, 0)"""
       for
         _ <- insert.update.run
-        _ <- start.photoSlots.traverse_(slot => insertSlot(start.id, slot))
-        _ <- insertSlot(start.id, start.textSlot)
+        _ <- photos.traverse_(slot => insertSlot(spread, slot))
+        _ <- insertSlot(spread, text)
       yield ()
 
     private def insertSlot(spread: SpreadId, slot: SpreadSlot) =
@@ -340,7 +337,6 @@ object SqliteAlbumRepository:
       position: Int,
       maybeTemplateKind: Option[String]
   )
-  private type ChapterRow =
-    (UUID, UUID, DestinationName, String, Instant, Instant, SourceFolder)
+  private type ChapterRow   = (UUID, UUID, DestinationName, String, Instant, Instant, SourceFolder)
   private type SlotRow      = (id: UUID, kind: String, box: SlotBox)
   private type PlacementRow = (UUID, UUID, UUID, InDesignPoints, InDesignPoints, Boolean, Zoom, CaptionCorner)

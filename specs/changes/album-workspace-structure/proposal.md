@@ -30,7 +30,7 @@ flowchart LR
 ### Album and chapters
 
 - Every album has an immutable year, supplied at creation, identifying at most one album. Creation suggests `Journey of the Shepherds <year>`; album titles are freely editable.
-- Existing yearless records require separate explicit resolution; this change preserves them without inventing years. Album reads return complete year-bearing values or an explicit failure.
+- Album reads return complete year-bearing values or an explicit failure.
 - Album countries are derived from its chapter destinations. The complete selectable country catalog is independent reference data.
 - An album has chapters; each chapter has a destination with a free-form name and a non-empty list of catalog countries.
 - Chapters sort by first day, then last day, then chapter ID. A destination named `Home` is unique within its album and its chapter is always last.
@@ -41,13 +41,16 @@ flowchart LR
 | Rule | Enforcement |
 |---|---|
 | Unique album year | Database unique constraint |
-| At most one Home per album | Database partial unique constraint |
-| Unique required chapter folder and chapter position within an album | Database unique constraints |
+| At most one Home per album; Home/type preservation | Application validation |
+| Unique required chapter folder within an album | Application validation |
+| Unique chapter position within an album | Database unique constraint |
 | Valid identities and country/album/chapter associations | Database primary/foreign keys and application ownership validation |
 | At most 65 interior spreads (130 pages), counting album/chapter openings and photo spreads, excluding Cover | Application validation |
 | Calendar/date and absolute-folder representations | Source-boundary decoding and refinement |
-| Home's year-derived period | Application rule |
-| Chronological positions and complete opening slots | Application transaction |
+| Home's year-derived period and chapter chronology | Application rules |
+| Supplied chapter order and complete opening slots | Persistence transaction |
+
+Concurrent editors share one backend instance's chapter-mutation lock, covering the application read/decision/write sequence. Persistence transactions commit each supplied change atomically.
 
 ### HTTP contract
 

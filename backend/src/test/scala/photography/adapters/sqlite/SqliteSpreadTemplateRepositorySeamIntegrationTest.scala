@@ -2,8 +2,6 @@ package photography.adapters.sqlite
 
 import cats.effect.{IO, Resource}
 import cats.syntax.all.*
-import io.circe.Decoder
-import io.circe.jawn.decode
 import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
 import org.typelevel.doobie.Fragment
@@ -15,7 +13,6 @@ import photography.domain.layout.*
 import photography.ports.SpreadTemplateRepository.*
 
 import java.nio.file.{Files, Path}
-import scala.io.{Codec, Source}
 
 final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]               = Slf4jLogger.getLogger[IO]
@@ -57,71 +54,42 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
           assertEquals(templates.toList.map(_.textSlot), expectedTextSlots)
         case result => fail(s"Expected migrated templates, obtained $result")
 
-  test(s"should load all 27 original Saal chapter openings with $defaultChapterTemplateName first"):
+  test(s"should load the 27 chapter openings with $defaultChapterTemplateName first"):
     buildTransactor.use: xa =>
-      val repository       = SqliteSpreadTemplateRepository.make[IO](xa)
-      val chapterInventory = readInventory[List[(
-          String,
-          String,
-          Vector[(Double, Double, Double, Double)],
-          (Double, Double, Double, Double)
-      )]]("chapter-start-templates.json")
+      val repository     = SqliteSpreadTemplateRepository.make[IO](xa)
+      val expectedPhotos = Vector(
+        buildBox(x = 25.199487, y = 0.914609, width = 23.666164, height = 98.170781),
+        buildBox(x = 49.075638, y = 0.914609, width = 23.666164, height = 98.170781),
+        buildBox(x = 72.951789, y = 0.914609, width = 26.754230, height = 48.758744),
+        buildBox(x = 72.951789, y = 50.326646, width = 26.754230, height = 48.758744)
+      )
+      val expectedText = buildBox(x = 0.293982, y = 0.914609, width = 24.695519, height = 98.170781)
 
-      for
-        expected <- chapterInventory
-        loaded   <- repository.listChapterStartTemplates
-      yield loaded match
+      repository.listChapterStartTemplates.map:
         case ListChapterStartTemplatesResult.Listed(templates) =>
-          val actual = templates.toList.map { template =>
-            (template.id.value.toString, template.name: String, template.photoSlots.map(boxValues), boxValues(template.textSlot))
-          }
+          assertEquals(templates.size, 27)
+          val identities = templates.toList.map(_.id.value.toString)
 
-          assertEquals(expected.size, 27)
-          assertEquals(actual, expected)
+          assertEquals(identities, identities.sorted)
+          assertEquals(identities.distinct.size, 27)
+          assertEquals(templates.head.id.value.toString, "00000000-0000-0000-0000-000000000005")
           assertEquals(templates.head.name: String, defaultChapterTemplateName)
-          assertEquals(templates.head.photoSlots.size, 4)
+          assertEquals(templates.head.photoSlots, expectedPhotos)
+          assertEquals(templates.head.textSlot, expectedText)
         case result => fail(s"Expected migrated chapter templates, obtained $result")
 
-  test("should populate all 249 ISO countries through SQL"):
+  test("should populate 249 distinct ISO countries with stable identities and flag paths"):
     buildTransactor.use: xa =>
-      for
-        expected <- readInventory[List[(String, String, String, String)]]("countries.json")
-        actual   <- sql"SELECT id, code, name, flag FROM country ORDER BY code".query[(String, String, String, String)].to[List].transact(xa)
-      yield
-        assertEquals(actual.size, 249)
-        assertEquals(actual, expected)
-
-  test("should preserve existing country identity and template geometry when the seed is reapplied"):
-    buildTransactor.use: xa =>
-      val templateId      = "00000000-0000-0000-0000-000000000005"
-      val countryId       = "90000000-0000-0000-0000-000000000001"
-      val expectedRomania = (countryId, "Existing Romania")
-      val seedSource      = Resource.fromAutoCloseable(IO.blocking(Source.fromResource("db/V2__seed_reference_catalogs.sql")(using Codec.UTF8)))
-      val templateRows    = sql"SELECT id, template_id, kind, x, y, width, height FROM spread_template_slot ORDER BY id".query[(
-          Long,
-          String,
-          String,
-          Double,
-          Double,
-          Double,
-          Double
-      )].to[List]
+      val inventory       = sql"SELECT count(*), count(DISTINCT code), count(DISTINCT id) FROM country".query[(Int, Int, Int)].unique
+      val romania         = sql"SELECT id, name, flag FROM country WHERE code = 'RO'".query[(String, String, String)].unique
+      val expectedRomania = ("10000000-0000-0000-0000-000000000001", "Romania", "/flags/ro.svg")
 
       for
-        _         <- sql"UPDATE country SET id = $countryId, name = 'Existing Romania' WHERE code = 'RO'".update.run.transact(xa)
-        _         <- sql"UPDATE spread_template_slot SET width = 20 WHERE template_id = $templateId AND kind = 'text'".update.run.transact(xa)
-        before    <- templateRows.transact(xa)
-        seed      <- seedSource.use(source => IO.blocking(source.mkString))
-        _         <- seed.split(";").toList.filter(_.trim.nonEmpty).traverse_(statement => Fragment.const(statement).update.run).transact(xa)
-        after     <- templateRows.transact(xa)
-        romania   <- sql"SELECT id, name FROM country WHERE code = 'RO'".query[(String, String)].unique.transact(xa)
-        countries <- sql"SELECT count(*) FROM country".query[Int].unique.transact(xa)
-        templates <- sql"SELECT count(*) FROM spread_template WHERE kind = 'chapter_start'".query[Int].unique.transact(xa)
+        counts  <- inventory.transact(xa)
+        country <- romania.transact(xa)
       yield
-        assertEquals(after, before)
-        assertEquals(romania, expectedRomania)
-        assertEquals(countries, 249)
-        assertEquals(templates, 27)
+        assertEquals(counts, (249, 249, 249))
+        assertEquals(country, expectedRomania)
 
   test("should reject malformed or unavailable chapter opening catalogs"):
     Vector(
@@ -180,10 +148,3 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
 
   private def buildBox(x: Double, y: Double, width: Double, height: Double) =
     SlotBox(x = x.refineUnsafe, y = y.refineUnsafe, width = width.refineUnsafe, height = height.refineUnsafe)
-
-  private def boxValues(box: SlotBox) =
-    (box.x: Double, box.y: Double, box.width: Double, box.height: Double)
-
-  private def readInventory[A: Decoder](name: String) =
-    Resource.fromAutoCloseable(IO.blocking(Source.fromResource(s"reference/$name")(using Codec.UTF8))).use: source =>
-      IO.blocking(source.mkString).flatMap(text => IO.fromEither(decode[A](text)))

@@ -8,8 +8,9 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.adapters.http.{AlbumApi, HealthRoutes, SpreadTemplateApi, StaticSite}
-import photography.app.config.AppConfig
+import photography.app.config.{AppConfig, HttpServerConfig}
 import photography.capabilities.{Clock, IdGenerator}
+import photography.usecases.{AlbumManager, SpreadTemplateManager}
 import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
@@ -20,22 +21,17 @@ object Main extends IOApp.Simple:
 
   override def run: IO[Unit] =
     AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
-      AppResourcesBuilder.make(config).build[IO].use: resources =>
+      AppResourcesBuilder.make(config.sqlite).build[IO].use: resources =>
         for
           _        <- resources.flyway.migrate
           _        <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
           managers <- AppManagers.make[IO](resources.sqlite, config.albums.pageSize)
-          _        <- buildHttpServer(config, buildHttpApp(managers)).useForever.void
+          _        <- buildHttpServer(config.http, buildHttpApp(managers.albums, managers.templates)).useForever.void
         yield ()
 
-  private def buildHttpApp(managers: AppManagers[IO]) =
-    val api = HealthRoutes.routes[IO] <+> AlbumApi.make(managers.albums).routes <+> SpreadTemplateApi.make(managers.templates).routes
+  private def buildHttpApp(albums: AlbumManager[IO], templates: SpreadTemplateManager[IO]) =
+    val api = HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes
     StaticSite.make(api, "frontend").app
 
-  private def buildHttpServer(config: AppConfig, app: HttpApp[IO]) =
-    EmberServerBuilder
-      .default[IO]
-      .withHost(config.http.host)
-      .withPort(config.http.port)
-      .withHttpApp(app)
-      .build
+  private def buildHttpServer(config: HttpServerConfig, app: HttpApp[IO]) =
+    EmberServerBuilder.default[IO].withHost(config.host).withPort(config.port).withHttpApp(app).build

@@ -38,13 +38,14 @@ object AlbumManager:
 
     override def list(page: Int): F[ListAlbumsResult] =
       repository.list(offset = 0, limit = pageSize).flatMap:
-        case AlbumRepository.ListResult.Failed(_)                 => ListAlbumsResult.Failed.pure[F]
-        case firstPage @ AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice.totalAlbums, firstPage)
+        case AlbumRepository.ListResult.Failed(_)     => ListAlbumsResult.Failed.pure[F]
+        case AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice)
 
     override def create(year: AlbumYear, title: AlbumTitle): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          buildInitialComposition(year, title, templates.head).flatMap { case (album, cover) =>
+          val template = templates.head
+          buildInitialComposition(year, title, template.id, template.photoSlots, template.textSlot).flatMap { case (album, cover) =>
             repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created                                         => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(AlbumRepository.Failure.YearAlreadyUsed) => CreateAlbumResult.YearAlreadyUsed
@@ -70,11 +71,13 @@ object AlbumManager:
         case AlbumRepository.DeleteResult.NotFound  => DeleteAlbumResult.NotFound
         case AlbumRepository.DeleteResult.Failed(_) => DeleteAlbumResult.Failed
 
-    private def buildListResult(requestedPage: Int, totalAlbums: Long, firstPage: AlbumRepository.ListResult) =
+    private def buildListResult(requestedPage: Int, firstPage: AlbumRepository.AlbumPageSlice) =
+      val totalAlbums   = firstPage.totalAlbums
       val totalPages    = ((totalAlbums + pageSize - 1) / pageSize).toInt
       val selectedPage  = if totalPages === 0 then 1 else requestedPage.max(1).min(totalPages)
       val offset        = (selectedPage - 1) * pageSize
-      val selectedSlice = if offset === 0 then firstPage.pure[F] else repository.list(offset = offset, limit = pageSize)
+      val selectedSlice =
+        if offset === 0 then AlbumRepository.ListResult.Listed(firstPage).pure[F] else repository.list(offset = offset, limit = pageSize)
       selectedSlice.map:
         case AlbumRepository.ListResult.Listed(slice) =>
           ListAlbumsResult.Listed(AlbumPage(
@@ -86,19 +89,24 @@ object AlbumManager:
           ))
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
-    private def buildInitialComposition(year: AlbumYear, title: AlbumTitle, template: SpreadTemplate.AlbumStart) =
-      val newPhotos =
-        template.photoSlots.traverse(box => IdGenerator[F].generateId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, bleed = Set.empty)))
+    private def buildInitialComposition(
+        year: AlbumYear,
+        title: AlbumTitle,
+        template: SpreadTemplateId,
+        photoSlots: Vector[SlotBox],
+        textSlot: SlotBox
+    ) =
+      val newPhotos = photoSlots.traverse(box => IdGenerator[F].generateId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, bleed = Set.empty)))
       for
         albumId   <- IdGenerator[F].generateId.map(AlbumId(_))
         spreadId  <- IdGenerator[F].generateId.map(SpreadId(_))
         photos    <- newPhotos
-        text      <- IdGenerator[F].generateId.map(id => SpreadSlot.Text(TextSpreadSlotId(id), template.textSlot))
+        text      <- IdGenerator[F].generateId.map(id => SpreadSlot.Text(TextSpreadSlotId(id), textSlot))
         frontId   <- IdGenerator[F].generateId.map(CoverSlotId(_))
         backId    <- IdGenerator[F].generateId.map(CoverSlotId(_))
         createdAt <- Clock[F].readInstant.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
-        val start = Spread.AlbumStart(spreadId, template.id, photoSlots = photos, textSlot = text, placements = Vector.empty[SpreadPlacement])
+        val start = Spread.AlbumStart(spreadId, template, photoSlots = photos, textSlot = text, placements = Vector.empty[SpreadPlacement])
         val album = Album(albumId, year = year, title = title, synopsis = "", createdAt = createdAt, start, chapters = Vector.empty[Chapter])
         val cover = Cover(albumId, SpineOwner.Front, front = CoverSlot(frontId), back = CoverSlot(backId))
         (album, cover)

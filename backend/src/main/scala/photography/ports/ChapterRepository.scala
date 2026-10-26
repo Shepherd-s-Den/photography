@@ -3,23 +3,33 @@ package photography.ports
 import cats.data.NonEmptyList
 
 import photography.domain.album.*
+import photography.domain.layout.Spread
 
 trait ChapterRepository[F[_]]:
-  // Saves atomically persist the supplied metadata, references, opening and complete album order; failures leave all rows unchanged.
-  // Order membership is checked within the write transaction. Callers coordinate business decisions made before the write.
-  def create(album: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId]): F[ChapterRepository.CreateResult]
+  def create(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId]): F[ChapterRepository.CreateResult]
 
   def update(
       album: AlbumId,
       chapter: ChapterId,
       name: DestinationName,
-      countries: NonEmptyList[Country],
+      countries: NonEmptyList[CountryId],
       period: VisitPeriod,
       sourceFolder: SourceFolder,
       order: NonEmptyList[ChapterId]
   ): F[ChapterRepository.UpdateResult]
 
 object ChapterRepository:
+  final case class NewChapter(
+      id: ChapterId,
+      destinationId: DestinationId,
+      name: DestinationName,
+      countries: NonEmptyList[CountryId],
+      period: VisitPeriod,
+      description: String,
+      sourceFolder: SourceFolder,
+      opening: Spread.ChapterStart
+  )
+
   enum CreateResult:
     case Saved
     case AlbumNotFound, Failed
