@@ -28,86 +28,63 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
   private val box      = SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0)
   private val template =
     SpreadTemplate.ChapterStart(SpreadTemplateId(buildUuid(index = 4)), name = "Default", photoSlots = Vector(box), textSlot = box)
-  private val album = Album(
-    AlbumId(buildUuid(index = 1)),
-    year = 2026,
-    title = "A year abroad",
-    synopsis = "",
-    createdAt = Instant.EPOCH,
-    Spread.AlbumStart(
-      SpreadId(buildUuid(index = 3)),
-      template.id,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 5)), box),
-      placements = Vector.empty[SpreadPlacement]
-    ),
-    chapters = Vector.empty[Chapter]
-  )
-  private val chapter = Chapter(
-    ChapterId(buildUuid(index = 20)),
-    Destination(DestinationId(buildUuid(index = 30)), name = "Asian capitals", countries),
-    VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2),
-    description = "",
-    sourceFolder = "/photos/capitals",
-    Spread.ChapterStart(
-      SpreadId(buildUuid(index = 40)),
-      template.id,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 41)), box),
-      placements = Vector.empty[SpreadPlacement]
-    ),
-    spreads = Vector.empty[Spread.PhotosOnly]
-  )
-  private val home = chapter.copy(
-    id = ChapterId(buildUuid(index = 50)),
-    destination = chapter.destination.copy(name = homeName),
-    period = VisitPeriod(firstDay = LocalDate.of(2026, 1, 1), days = 365),
-    sourceFolder = "/photos/Home"
-  )
+  private val album =
+    val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 5)), box)
+    val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val opening         = Spread.AlbumStart(SpreadId(buildUuid(index = 3)), template.id, emptyPhotoSlots, textSlot, emptyPlacements)
+    val emptyChapters   = Vector.empty[Chapter]
+    Album(AlbumId(buildUuid(index = 1)), year = 2026, title = "A year abroad", synopsis = "", Instant.EPOCH, opening, emptyChapters)
+  private val chapter =
+    val destination     = Destination(DestinationId(buildUuid(index = 30)), name = "Asian capitals", countries)
+    val period          = VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2)
+    val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 41)), box)
+    val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val opening         = Spread.ChapterStart(SpreadId(buildUuid(index = 40)), template.id, emptyPhotoSlots, textSlot, emptyPlacements)
+    val emptySpreads    = Vector.empty[Spread.PhotosOnly]
+    Chapter(ChapterId(buildUuid(index = 20)), destination, period, description = "", sourceFolder = "/photos/capitals", opening, emptySpreads)
+  private val home =
+    val destination = chapter.destination.copy(name = homeName)
+    val fullYear    = VisitPeriod(firstDay = LocalDate.of(2026, 1, 1), days = 365)
+    chapter.copy(id = ChapterId(buildUuid(index = 50)), destination = destination, period = fullYear, sourceFolder = "/photos/Home")
   private val atCapacity =
-    val photo = Spread.PhotosOnly(
-      SpreadId(buildUuid(index = 60)),
-      template.id,
-      photoSlots = NonEmptyList.one(SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 61)), box, bleed = Set.empty)),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    album.copy(chapters =
-      Vector(chapter.copy(spreads = Vector.tabulate(63)(index => photo.copy(id = SpreadId(buildUuid(index = 100 + index.toLong))))))
-    )
+    val photoSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 61)), box, bleed = Set.empty)
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val photo           = Spread.PhotosOnly(SpreadId(buildUuid(index = 60)), template.id, NonEmptyList.one(photoSlot), emptyPlacements)
+    val spreads         = Vector.tabulate(63)(index => photo.copy(id = SpreadId(buildUuid(index = 100 + index.toLong))))
+    album.copy(chapters = Vector(chapter.copy(spreads = spreads)))
 
   test("should create a multi-country chapter and its empty opening"):
     val refs = Refs()
 
     for
       manager <- buildManager(refs)
-      result  <- manager.create(album.id, chapter.destination.name, countries, Period.Dates(chapter.period), chapter.sourceFolder)
+      result  <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
       writes  <- refs.creations.get
     yield
-      val opening = Spread.ChapterStart(
-        SpreadId(buildUuid(index = 11)),
-        template.id,
-        photoSlots = Vector(SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), box, bleed = Set.empty)),
-        textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), box),
-        placements = Vector.empty[SpreadPlacement]
-      )
-      val expected = chapter.copy(
-        id = ChapterId(buildUuid(index = 10)),
-        destination = chapter.destination.copy(id = DestinationId(buildUuid(index = 14))),
-        opening = opening
-      )
+      val photoSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), box, bleed = Set.empty)
+      val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), box)
+      val emptyPlacements = Vector.empty[SpreadPlacement]
+      val opening         = Spread.ChapterStart(SpreadId(buildUuid(index = 11)), template.id, Vector(photoSlot), textSlot, emptyPlacements)
+      val chapterId       = ChapterId(buildUuid(index = 10))
+      val destinationId   = DestinationId(buildUuid(index = 14))
+      val countryIds      = countries.map(_.id)
+      val destinationName = chapter.destination.name
+      val sourceFolder    = chapter.sourceFolder
+      val expected        =
+        ChapterRepository.NewChapter(chapterId, destinationId, destinationName, countryIds, chapter.period, description = "", sourceFolder, opening)
       assertEquals(result, CreateResult.Created(expected.id))
       assertEquals(writes, Vector((album.id, expected, NonEmptyList.one(expected.id))))
-      assertEquals(album.copy(chapters = Vector(expected)).countries, countries.toList.toVector)
 
   test(s"should resolve the full year for $homeName including leap days"):
     Vector((2024: AlbumYear, 366: VisitDays), (2026: AlbumYear, 365: VisitDays)).traverse_ { case (year, days) =>
       val refs    = Refs()
-      val current =
-        album.copy(year = year, chapters = Vector(home.copy(period = VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days))))
+      val current = album.copy(year = year, chapters = Vector(home.copy(period = VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days))))
 
       for
         manager <- buildManager(refs, current = current)
-        updated <- manager.update(album.id, home.id, homeName, countries, Period.AlbumYear, home.sourceFolder)
+        updated <- manager.update(album.id, home.id, homeName, countries.map(_.id), Period.AlbumYear, home.sourceFolder)
         updates <- refs.updates.get
       yield
         assertEquals(updated, UpdateResult.Updated)
@@ -134,18 +111,15 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       )
     )
     scenarios.traverse_ { case (current, name, period, folder, expected) =>
-      val refs   = Refs()
-      val target = chapter.copy(
-        id = ChapterId(buildUuid(index = 70)),
-        destination = chapter.destination.copy(name = name),
-        sourceFolder = "/photos/target"
-      )
+      val refs        = Refs()
+      val destination = chapter.destination.copy(name = name)
+      val target      = chapter.copy(id = ChapterId(buildUuid(index = 70)), destination = destination, sourceFolder = "/photos/target")
 
       for
         creator   <- buildManager(refs, current = current)
         editor    <- buildManager(refs, current = current.copy(chapters = current.chapters :+ target))
-        created   <- creator.create(album.id, name = name, countries, period, sourceFolder = folder)
-        updated   <- editor.update(album.id, target.id, name = name, countries, period, sourceFolder = folder)
+        created   <- creator.create(album.id, name = name, countries.map(_.id), period, sourceFolder = folder)
+        updated   <- editor.update(album.id, target.id, name = name, countries.map(_.id), period, sourceFolder = folder)
         creations <- refs.creations.get
         updates   <- refs.updates.get
       yield
@@ -161,7 +135,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
 
       for
         manager <- buildManager(refs, current = album.copy(chapters = Vector(current)))
-        result  <- manager.update(album.id, current.id, name = requestedName, countries, Period.AlbumYear, sourceFolder = "/photos/changed")
+        result  <- manager.update(album.id, current.id, name = requestedName, countries.map(_.id), Period.AlbumYear, sourceFolder = "/photos/changed")
         writes  <- refs.updates.get
       yield
         assertEquals(result, UpdateResult.Rejected(ChapterConflict.TypeChange))
@@ -178,9 +152,9 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     for
       creator  <- buildManager(refs, current = beforeLast)
       full     <- buildManager(refs, current = current)
-      admitted <- creator.create(album.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new")
-      rejected <- full.create(album.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new")
-      updated  <- full.update(album.id, chapter.id, name = "Kyoto", updatedCountries, period, sourceFolder = "/photos/new")
+      admitted <- creator.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+      rejected <- full.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+      updated  <- full.update(album.id, chapter.id, name = "Kyoto", updatedCountries.map(_.id), period, sourceFolder = "/photos/new")
       writes   <- refs.updates.get
     yield
       assertEquals(beforeLast.spreads.length, 64)
@@ -188,39 +162,28 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       assertEquals(admitted, CreateResult.Created(ChapterId(buildUuid(index = 10))))
       assertEquals(rejected, CreateResult.Rejected(ChapterConflict.AtCapacity))
       assertEquals(updated, UpdateResult.Updated)
-      val expectedWrites =
-        Vector((
-          album.id,
-          chapter.id,
-          "Kyoto": DestinationName,
-          updatedCountries,
-          chapter.period,
-          "/photos/new": SourceFolder,
-          NonEmptyList.one(chapter.id)
-        ))
+      val destinationName: DestinationName = "Kyoto"
+      val sourceFolder: SourceFolder       = "/photos/new"
+      val chapterOrder                     = NonEmptyList.one(chapter.id)
+      val expectedWrites = Vector((album.id, chapter.id, destinationName, updatedCountries.map(_.id), chapter.period, sourceFolder, chapterOrder))
       assertEquals(writes, expectedWrites)
 
   test(s"should order chapters by dates and identity with $homeName last"):
-    val refs    = Refs()
-    val earlier =
-      chapter.copy(id = ChapterId(buildUuid(index = 70)), period = chapter.period.copy(days = 1), sourceFolder = "/photos/earlier")
-    val tied  = earlier.copy(id = ChapterId(buildUuid(index = 71)), sourceFolder = "/photos/tied")
-    val later = chapter.copy(
-      id = ChapterId(buildUuid(index = 72)),
-      period = VisitPeriod(firstDay = LocalDate.of(2026, 5, 2), days = 1),
-      sourceFolder = "/photos/later"
-    )
-    val current = album.copy(chapters = Vector(earlier, tied, chapter, later, home))
+    val refs        = Refs()
+    val earlier     = chapter.copy(id = ChapterId(buildUuid(index = 70)), period = chapter.period.copy(days = 1), sourceFolder = "/photos/earlier")
+    val tied        = earlier.copy(id = ChapterId(buildUuid(index = 71)), sourceFolder = "/photos/tied")
+    val laterPeriod = VisitPeriod(firstDay = LocalDate.of(2026, 5, 2), days = 1)
+    val later       = chapter.copy(id = ChapterId(buildUuid(index = 72)), period = laterPeriod, sourceFolder = "/photos/later")
+    val current     = album.copy(chapters = Vector(earlier, tied, chapter, later, home))
 
     for
       manager   <- buildManager(refs, current = current)
-      created   <- manager.create(album.id, name = "Kyoto", countries, Period.Dates(chapter.period), sourceFolder = "/photos/new")
-      updated   <- manager.update(album.id, later.id, name = "Kyoto", countries, Period.Dates(earlier.period), later.sourceFolder)
+      created   <- manager.create(album.id, name = "Kyoto", countries.map(_.id), Period.Dates(chapter.period), sourceFolder = "/photos/new")
+      updated   <- manager.update(album.id, later.id, name = "Kyoto", countries.map(_.id), Period.Dates(earlier.period), later.sourceFolder)
       creations <- refs.creations.get
       updates   <- refs.updates.get
     yield
-      val expectedCreations =
-        Vector(NonEmptyList.of(earlier.id, tied.id, ChapterId(buildUuid(index = 10)), chapter.id, later.id, home.id))
+      val expectedCreations = Vector(NonEmptyList.of(earlier.id, tied.id, ChapterId(buildUuid(index = 10)), chapter.id, later.id, home.id))
       assertEquals(created, CreateResult.Created(ChapterId(buildUuid(index = 10))))
       assertEquals(updated, UpdateResult.Updated)
       assertEquals(creations.map(_.order), expectedCreations)
@@ -231,11 +194,15 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val beforeLast = atCapacity.copy(chapters = atCapacity.chapters.map(value => value.copy(spreads = value.spreads.drop(1))))
     val state      = Ref.unsafe[IO, Album](beforeLast)
     val read       = state.get.flatMap(value => IO.cede.as(AlbumRepository.GetResult.Found(value)))
-    val save       = (value: Chapter) => state.update(valueBefore => valueBefore.copy(chapters = valueBefore.chapters :+ value))
+    val save       = (value: ChapterRepository.NewChapter) =>
+      val destination  = Destination(value.destinationId, value.name, countries)
+      val emptySpreads = Vector.empty[Spread.PhotosOnly]
+      val saved        = Chapter(value.id, destination, value.period, value.description, value.sourceFolder, value.opening, emptySpreads)
+      state.update(valueBefore => valueBefore.copy(chapters = valueBefore.chapters :+ saved))
 
     for
       manager <- buildManager(refs, maybeRead = read.some, save = save)
-      createChapter = manager.create(album.id, name = "Kyoto", countries, Period.Dates(chapter.period), sourceFolder = "/photos/new")
+      createChapter = manager.create(album.id, name = "Kyoto", countries.map(_.id), Period.Dates(chapter.period), sourceFolder = "/photos/new")
       results <- Vector.fill(2)(()).parTraverse(_ => createChapter)
       saved   <- state.get
     yield
@@ -267,16 +234,16 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val unavailableReads = reads.traverse { case (read, expected) =>
       buildManager(refs, maybeRead = read.pure[IO].some).flatMap { manager =>
         (
-          manager.create(album.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new"),
-          manager.update(album.id, chapter.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new")
+          manager.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new"),
+          manager.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
         ).tupled.map(result => assertEquals(result, expected))
       }
     }
     val unavailableWrites = writes.traverse { case (creation, update, expected) =>
       buildManager(refs, current = current, createWrite = creation, updateWrite = update).flatMap { manager =>
         (
-          manager.create(album.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new"),
-          manager.update(album.id, chapter.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new")
+          manager.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new"),
+          manager.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
         ).tupled.map(result => assertEquals(result, expected))
       }
     }
@@ -285,15 +252,15 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       _           <- unavailableReads
       _           <- unavailableWrites
       missing     <- buildManager(refs)
-      absent      <- missing.update(album.id, chapter.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new")
+      absent      <- missing.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
       noTemplates <- buildManager(refs, templates = ListChapterStartTemplatesResult.Failed)
-      failed      <- noTemplates.create(album.id, name = "Kyoto", countries, period, sourceFolder = "/photos/new")
+      failed      <- noTemplates.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
     yield
       assertEquals(absent, UpdateResult.ChapterNotFound)
       assertEquals(failed, CreateResult.Failed)
 
   final private case class Refs():
-    val creations: Ref[IO, Vector[(album: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId])]] = Ref.unsafe(Vector.empty)
+    val creations: Ref[IO, Vector[(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId])]] = Ref.unsafe(Vector.empty)
 
     val updates: Ref[
       IO,
@@ -301,7 +268,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
           album: AlbumId,
           chapter: ChapterId,
           name: DestinationName,
-          countries: NonEmptyList[Country],
+          countries: NonEmptyList[CountryId],
           period: VisitPeriod,
           folder: SourceFolder,
           order: NonEmptyList[ChapterId]
@@ -316,7 +283,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       createWrite: ChapterRepository.CreateResult = ChapterRepository.CreateResult.Saved,
       updateWrite: ChapterRepository.UpdateResult = ChapterRepository.UpdateResult.Saved,
       templates: ListChapterStartTemplatesResult = ListChapterStartTemplatesResult.Listed(NonEmptyList.one(template)),
-      save: Chapter => IO[Unit] = _ => IO.unit
+      save: ChapterRepository.NewChapter => IO[Unit] = _ => IO.unit
   ) =
     given IdGenerator[IO] with
       private val next                  = Ref.unsafe[IO, Long](10L)
@@ -333,13 +300,17 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       override def delete(value: AlbumId): IO[AlbumRepository.DeleteResult] =
         IO.raiseError[AlbumRepository.DeleteResult](new AssertionError("Unexpected deletion"))
     val repository = new ChapterRepository[IO]:
-      override def create(parent: AlbumId, chapter: Chapter, order: NonEmptyList[ChapterId]): IO[ChapterRepository.CreateResult] =
+      override def create(
+          parent: AlbumId,
+          chapter: ChapterRepository.NewChapter,
+          order: NonEmptyList[ChapterId]
+      ): IO[ChapterRepository.CreateResult] =
         refs.creations.update(_ :+ (parent, chapter, order)) >> save(chapter).as(createWrite)
       override def update(
           parent: AlbumId,
           chapter: ChapterId,
           name: DestinationName,
-          countries: NonEmptyList[Country],
+          countries: NonEmptyList[CountryId],
           period: VisitPeriod,
           sourceFolder: SourceFolder,
           order: NonEmptyList[ChapterId]

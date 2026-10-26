@@ -4,15 +4,18 @@ import com.tngtech.archunit.core.importer.{ClassFileImporter, ImportOption}
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices
 import munit.FunSuite
+import photography.domain.album.Album
 
 class ArchitectureTest extends FunSuite:
 
-  // `DO_NOT_INCLUDE_TESTS` only recognises Maven/Gradle/IntelliJ test layouts, not this build's `*-tests.jar`, so it's ineffective here.
-  private val excludeTestClasses: ImportOption = location => !location.contains("-tests.jar")
+  // sbt 2 uses content-addressed jars without a test suffix, so identify the test container by its actual code source.
+  private val testCodeLocation                 = classOf[ArchitectureTest].getProtectionDomain.getCodeSource.getLocation.toURI.toString
+  private val excludeTestClasses: ImportOption = location => !location.contains(testCodeLocation)
 
   private val classes = ClassFileImporter().withImportOption(excludeTestClasses).importPackages("photography")
 
   test("should keep layers pointing inward and adapters isolated from each other"):
+    assertNotEquals(testCodeLocation, classOf[Album].getProtectionDomain.getCodeSource.getLocation.toURI.toString)
     noClasses()
       .that()
       .resideInAPackage("photography.domain..")

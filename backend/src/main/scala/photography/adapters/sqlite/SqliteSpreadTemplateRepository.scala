@@ -22,9 +22,7 @@ object SqliteSpreadTemplateRepository:
     override def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult] =
       loadOpenings(kind = "album_start").transact(transactor).attempt.flatMap:
         case Right(rows) =>
-          val templates = rows.map { case (id, name, photos, text) =>
-            SpreadTemplate.AlbumStart(id, name = name, photoSlots = photos, textSlot = text)
-          }
+          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.AlbumStart(id, name, photos, text) }
           ListAlbumStartTemplatesResult.Listed(templates).pure[F]
         case Left(error) =>
           Logger[F].error(error)("Could not list album opening templates").as(ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure))
@@ -32,9 +30,7 @@ object SqliteSpreadTemplateRepository:
     override def listChapterStartTemplates: F[ListChapterStartTemplatesResult] =
       loadOpenings(kind = "chapter_start").transact(transactor).attempt.flatMap:
         case Right(rows) =>
-          val templates = rows.map { case (id, name, photos, text) =>
-            SpreadTemplate.ChapterStart(id, name = name, photoSlots = photos, textSlot = text)
-          }
+          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.ChapterStart(id, name, photos, text) }
           ListChapterStartTemplatesResult.Listed(templates).pure[F]
         case Left(error) =>
           Logger[F].error(error)("Could not list chapter opening templates").as(ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
@@ -53,7 +49,7 @@ object SqliteSpreadTemplateRepository:
         val photos = rows.collect { case ("photo", box) => box }.toVector
         val texts  = rows.collect { case ("text", box) => box }
         texts match
-          case text :: Nil if photos.size + 1 === rows.size => (photos, text).pure[ConnectionIO]
+          case text :: Nil if photos.nonEmpty && photos.size + 1 === rows.size => (photos, text).pure[ConnectionIO]
           case _ => new IllegalArgumentException(s"Invalid opening slots for template $id").raiseError[ConnectionIO, (Vector[SlotBox], SlotBox)]
 
     private given Meta[SpreadTemplateName] =

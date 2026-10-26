@@ -35,13 +35,15 @@ object SqliteAlbumRepository:
       execute(query, ListResult.Failed(_))
 
     override def create(album: Album, cover: Cover): F[CreateResult] =
-      val query =
+      val isInitial = album.chapters.isEmpty && album.opening.placements.isEmpty && cover.album.value === album.id.value
+      val initial   = Either.cond(isInitial, (), new IllegalArgumentException("Expected an initial album and its cover"))
+      val query     =
         for
-          start <- validateInitial(album, cover)
-          _     <- insertAlbum(album)
-          _     <- insertInitialSpread(album.id, start)
-          _     <- insertCover(cover)
-          _     <- loadRequired(album.id.value)
+          _ <- initial.liftTo[ConnectionIO]
+          _ <- insertAlbum(album.id, album.year, album.title, album.synopsis, album.createdAt)
+          _ <- insertInitialSpread(album.id, album.opening.id, album.opening.template, album.opening.photoSlots, album.opening.textSlot)
+          _ <- insertCover(cover)
+          _ <- loadRequired(album.id.value)
         yield CreateResult.Created: CreateResult
       execute(query, CreateResult.Failed(_))
 
@@ -81,32 +83,19 @@ object SqliteAlbumRepository:
     private def decodeChapter(row: ChapterRow) =
       val (id, destination, name, description, start, end, folder) = row
 
-      val days         = ChronoUnit.DAYS.between(start, end)
-      val calendarDays = Either.cond(
-        start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0,
-        (),
-        "Expected UTC calendar days"
-      )
-      val period =
-        calendarDays.flatMap(_ => days.refineEither[Positive]).map(length =>
-          VisitPeriod(firstDay = start.atOffset(ZoneOffset.UTC).toLocalDate, days = length)
-        )
+      val days            = ChronoUnit.DAYS.between(start, end)
+      val firstDay        = start.atOffset(ZoneOffset.UTC).toLocalDate
+      val calendarAligned = start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0
+      val calendarDays    = Either.cond(calendarAligned, (), "Expected UTC calendar days")
+      val period          = calendarDays.flatMap(_ => days.refineEither[Positive]).map(length => VisitPeriod(firstDay, days = length))
       for
         visit       <- period.leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
         composition <- loadChapterSpreads(id)
         countries   <- loadCountries(destination)
       yield
-        val (opening, photos) = composition
-
-        Chapter(
-          ChapterId(id),
-          Destination(DestinationId(destination), name = name, countries),
-          visit,
-          description = description,
-          sourceFolder = folder,
-          opening,
-          spreads = photos
-        )
+        val (opening, photos)  = composition
+        val chapterDestination = Destination(DestinationId(destination), name = name, countries)
+        Chapter(ChapterId(id), chapterDestination, visit, description = description, sourceFolder = folder, opening, spreads = photos)
 
     private def loadCountries(destination: UUID) =
       val select = sql"""SELECT k.id, k.code, k.name, k.flag FROM destination_country d
@@ -188,28 +177,18 @@ object SqliteAlbumRepository:
     private def decodeSpread(row: SpreadRow, slots: Vector[SpreadSlot], placements: Vector[SpreadPlacement]) =
       val (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) = row
 
-      val photos = slots.collect { case photo: SpreadSlot.Photo => photo }
-      val texts  = slots.collect { case text: SpreadSlot.Text => text }
+      val photos     = slots.collect { case photo: SpreadSlot.Photo => photo }
+      val texts      = slots.collect { case text: SpreadSlot.Text => text }
+      val spreadId   = SpreadId(id)
+      val templateId = SpreadTemplateId(template)
       (kind, maybeTemplateKind, maybeAlbum, maybeChapter, texts) match
         case ("album_start", Some("album_start"), Some(_), None, Vector(text)) if position === 0 =>
-          (Spread.AlbumStart(
-            SpreadId(id),
-            SpreadTemplateId(template),
-            photoSlots = photos,
-            textSlot = text,
-            placements = placements
-          ): Spread).asRight[String]
+          (Spread.AlbumStart(spreadId, templateId, photoSlots = photos, textSlot = text, placements = placements): Spread).asRight[String]
         case ("chapter_start", Some("chapter_start"), None, Some(_), Vector(text)) if position === 0 =>
-          (Spread.ChapterStart(
-            SpreadId(id),
-            SpreadTemplateId(template),
-            photoSlots = photos,
-            textSlot = text,
-            placements = placements
-          ): Spread).asRight[String]
+          (Spread.ChapterStart(spreadId, templateId, photoSlots = photos, textSlot = text, placements = placements): Spread).asRight[String]
         case ("photos_only", Some("photos_only"), None, Some(_), Vector()) if position > 0 =>
           NonEmptyList.fromList(photos.toList).toRight("Photo spread must have photo slots")
-            .map(nonEmpty => Spread.PhotosOnly(SpreadId(id), SpreadTemplateId(template), photoSlots = nonEmpty, placements = placements): Spread)
+            .map(nonEmpty => Spread.PhotosOnly(spreadId, templateId, photoSlots = nonEmpty, placements = placements): Spread)
         case _ => s"Invalid spread shape for $id".asLeft[Spread]
 
     private def loadPlacements(spreadId: UUID) =
@@ -217,13 +196,8 @@ object SqliteAlbumRepository:
             FROM placement p JOIN spread_photo_slot s ON s.id = p.spread_photo_slot_id
             WHERE s.spread_id = $spreadId ORDER BY p.id""".query[PlacementRow].to[Vector].map:
         _.map { case (id, slot, photo, x, y, mirrored, zoom, corner) =>
-          SpreadPlacement(
-            SpreadPlacementId(id),
-            PhotoSpreadSlotId(slot),
-            PhotoId(photo),
-            PhotoTransform(Shift(x = x, y = y), mirrored = mirrored, zoom = zoom),
-            corner
-          )
+          val transform = PhotoTransform(Shift(x = x, y = y), mirrored = mirrored, zoom = zoom)
+          SpreadPlacement(SpreadPlacementId(id), PhotoSpreadSlotId(slot), PhotoId(photo), transform, corner)
         }
 
     private def validateCover(id: UUID) =
@@ -231,32 +205,29 @@ object SqliteAlbumRepository:
 
     private def validateCoverSpine(id: UUID) =
       sql"SELECT spine_owner FROM cover WHERE album_id = $id".query[String].option
-        .ensure(new IllegalArgumentException("Incomplete cover"))(_.exists(value => value === "front" || value === "back"))
-        .void
+        .ensure(new IllegalArgumentException("Incomplete cover"))(_.exists(value => value === "front" || value === "back")).void
 
     private def validateCoverSlots(id: UUID) =
       sql"SELECT side FROM cover_slot WHERE album_id = $id ORDER BY side".query[String].to[List]
-        .ensure(new IllegalArgumentException("Incomplete cover"))(_ === List("back", "front"))
-        .void
+        .ensure(new IllegalArgumentException("Incomplete cover"))(_ === List("back", "front")).void
 
-    private def validateInitial(album: Album, cover: Cover) =
-      Either.cond(
-        album.chapters.isEmpty && album.opening.placements.isEmpty && cover.album.value === album.id.value,
-        album.opening,
-        new IllegalArgumentException("Expected an initial album and its cover")
-      ).liftTo[ConnectionIO]
-
-    private def insertAlbum(album: Album) =
+    private def insertAlbum(id: AlbumId, year: AlbumYear, title: AlbumTitle, synopsis: String, createdAt: Instant) =
       sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
-            VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, ${album.createdAt})""".update.run.void
+            VALUES (${id.value}, $year, $title, $synopsis, $createdAt)""".update.run.void
 
-    private def insertInitialSpread(albumId: AlbumId, start: Spread.AlbumStart) =
+    private def insertInitialSpread(
+        album: AlbumId,
+        spread: SpreadId,
+        template: SpreadTemplateId,
+        photos: Vector[SpreadSlot.Photo],
+        text: SpreadSlot.Text
+    ) =
       val insert = sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
-                        VALUES (${start.id.value}, ${start.template.value}, 'album_start', ${albumId.value}, 0)"""
+                        VALUES (${spread.value}, ${template.value}, 'album_start', ${album.value}, 0)"""
       for
         _ <- insert.update.run
-        _ <- start.photoSlots.traverse_(slot => insertSlot(start.id, slot))
-        _ <- insertSlot(start.id, start.textSlot)
+        _ <- photos.traverse_(slot => insertSlot(spread, slot))
+        _ <- insertSlot(spread, text)
       yield ()
 
     private def insertSlot(spread: SpreadId, slot: SpreadSlot) =
@@ -313,19 +284,6 @@ object SqliteAlbumRepository:
     private given Read[SlotRow] =
       Read[(UUID, String, SlotBox)].map { case (id, kind, box) => (id, kind, box) }
 
-    private given Meta[SpreadEdge] = Meta[String].tiemap[SpreadEdge] {
-      case "top"    => SpreadEdge.Top.asRight[String]
-      case "bottom" => SpreadEdge.Bottom.asRight[String]
-      case "left"   => SpreadEdge.Left.asRight[String]
-      case "right"  => SpreadEdge.Right.asRight[String]
-      case other    => s"Unknown bleed edge $other".asLeft[SpreadEdge]
-    } {
-      case SpreadEdge.Top    => "top"
-      case SpreadEdge.Bottom => "bottom"
-      case SpreadEdge.Left   => "left"
-      case SpreadEdge.Right  => "right"
-    }
-
     private given Meta[CaptionCorner] = Meta[String].tiemap[CaptionCorner] {
       case "top_left"     => CaptionCorner.TopLeft.asRight[String]
       case "top_right"    => CaptionCorner.TopRight.asRight[String]
@@ -348,7 +306,6 @@ object SqliteAlbumRepository:
       position: Int,
       maybeTemplateKind: Option[String]
   )
-  private type ChapterRow =
-    (UUID, UUID, DestinationName, String, Instant, Instant, SourceFolder)
+  private type ChapterRow   = (UUID, UUID, DestinationName, String, Instant, Instant, SourceFolder)
   private type SlotRow      = (id: UUID, kind: String, box: SlotBox)
   private type PlacementRow = (UUID, UUID, UUID, InDesignPoints, InDesignPoints, Boolean, Zoom, CaptionCorner)

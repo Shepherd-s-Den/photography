@@ -14,12 +14,12 @@ import io.github.iltotore.iron.autoRefine
 import java.time.{LocalDate, Year}
 
 trait ChapterManager[F[_]]:
-  def create(album: AlbumId, name: DestinationName, countries: NonEmptyList[Country], period: Period, sourceFolder: SourceFolder): F[CreateResult]
+  def create(album: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, sourceFolder: SourceFolder): F[CreateResult]
   def update(
       album: AlbumId,
       chapter: ChapterId,
       name: DestinationName,
-      countries: NonEmptyList[Country],
+      countries: NonEmptyList[CountryId],
       period: Period,
       sourceFolder: SourceFolder
   ): F[UpdateResult]
@@ -40,24 +40,32 @@ object ChapterManager:
     override def create(
         album: AlbumId,
         name: DestinationName,
-        countries: NonEmptyList[Country],
+        countries: NonEmptyList[CountryId],
         period: Period,
         sourceFolder: SourceFolder
     ): F[CreateResult] =
-      // Concurrent requests must not both claim the last spread, Home or a folder from the same album snapshot.
       summon[Mutex[F]].lock.surround:
         albums.get(album).flatMap:
           case AlbumRepository.GetResult.Found(current) =>
-            val resolvedPeriod = resolvePeriod(current.year, period)
-            findCreationConflict(current, name, resolvedPeriod, sourceFolder) match
+            val resolvedPeriod    = resolvePeriod(current.year, period)
+            val isHome            = (name: String) === "Home"
+            val homeExists        = current.chapters.exists(_.destination.isHome)
+            val folderAssigned    = current.chapters.exists(value => (value.sourceFolder: String) === sourceFolder)
+            val maybeHomeConflict = if isHome then findHomeConflict(current.year, resolvedPeriod, homeExists) else None
+            val maybeConflict     =
+              if current.spreads.length >= 65 then ChapterConflict.AtCapacity.some
+              else maybeHomeConflict.orElse(Option.when(folderAssigned)(ChapterConflict.FolderAssigned))
+            maybeConflict match
               case Some(reason) => CreateResult.Rejected(reason).pure[F]
               case None         =>
                 templates.listChapterStartTemplates.flatMap:
                   case ListChapterStartTemplatesResult.Listed(available) =>
-                    for
-                      chapter <- buildChapter(name, countries, resolvedPeriod, sourceFolder, available.head)
-                      saved   <- chapters.create(album, chapter, orderChapterIds(chapter, current.chapters))
-                    yield translateCreateResult(saved, chapter.id)
+                    val template   = available.head
+                    val others     = current.chapters.map(value => ChapterOrder(value.id, value.destination.isHome, value.period))
+                    val newChapter = buildChapter(name, countries, resolvedPeriod, sourceFolder, template.id, template.photoSlots, template.textSlot)
+                    newChapter.flatMap: chapter =>
+                      val order = NonEmptyList(ChapterOrder(chapter.id, isHome = (chapter.name: String) === "Home", chapter.period), others.toList)
+                      chapters.create(album, chapter, orderChapterIds(order)).map(saved => translateCreateResult(saved, chapter.id))
                   case ListChapterStartTemplatesResult.Failed => CreateResult.Failed.pure[F]
           case AlbumRepository.GetResult.NotFound  => CreateResult.AlbumNotFound.pure[F]
           case AlbumRepository.GetResult.Failed(_) => CreateResult.Failed.pure[F]
@@ -66,70 +74,46 @@ object ChapterManager:
         album: AlbumId,
         chapter: ChapterId,
         name: DestinationName,
-        countries: NonEmptyList[Country],
+        countries: NonEmptyList[CountryId],
         period: Period,
         sourceFolder: SourceFolder
     ): F[UpdateResult] =
-      // Metadata edits must not race creation or each other when checking folder ownership and replacing chapter order.
       summon[Mutex[F]].lock.surround:
         albums.get(album).flatMap:
           case AlbumRepository.GetResult.Found(current) =>
             current.chapters.find(_.id.value === chapter.value) match
               case None           => UpdateResult.ChapterNotFound.pure[F]
               case Some(existing) =>
-                val others = current.chapters.filterNot(_.id.value === chapter.value)
-                reviseChapter(current.year, existing, others, name, countries, resolvePeriod(current.year, period), sourceFolder) match
-                  case Left(reason)   => UpdateResult.Rejected(reason).pure[F]
-                  case Right(updated) =>
-                    chapters.update(
-                      album,
-                      chapter,
-                      name,
-                      countries,
-                      updated.period,
-                      sourceFolder,
-                      orderChapterIds(updated, others)
-                    ).map(translateUpdateResult)
+                val others            = current.chapters.filterNot(_.id.value === chapter.value)
+                val resolvedPeriod    = resolvePeriod(current.year, period)
+                val isHome            = (name: String) === "Home"
+                val homeExists        = others.exists(_.destination.isHome)
+                val folderAssigned    = others.exists(value => (value.sourceFolder: String) === sourceFolder)
+                val maybeHomeConflict = if isHome then findHomeConflict(current.year, resolvedPeriod, homeExists) else None
+                val maybeConflict     =
+                  if existing.destination.isHome =!= isHome then ChapterConflict.TypeChange.some
+                  else maybeHomeConflict.orElse(Option.when(folderAssigned)(ChapterConflict.FolderAssigned))
+                maybeConflict match
+                  case Some(reason) => UpdateResult.Rejected(reason).pure[F]
+                  case None         =>
+                    val otherEntries = others.map(value => ChapterOrder(value.id, value.destination.isHome, value.period)).toList
+                    val order        = NonEmptyList(ChapterOrder(chapter, isHome, resolvedPeriod), otherEntries)
+                    chapters.update(album, chapter, name, countries, resolvedPeriod, sourceFolder, orderChapterIds(order)).map(translateUpdateResult)
           case AlbumRepository.GetResult.NotFound  => UpdateResult.AlbumNotFound.pure[F]
           case AlbumRepository.GetResult.Failed(_) => UpdateResult.Failed.pure[F]
-
-    private def findCreationConflict(
-        album: Album,
-        name: DestinationName,
-        period: VisitPeriod,
-        sourceFolder: SourceFolder
-    ) =
-      if album.spreads.length >= 65 then ChapterConflict.AtCapacity.some
-      else findConflict(album.year, album.chapters, name, period, sourceFolder)
-
-    private def reviseChapter(
-        year: AlbumYear,
-        current: Chapter,
-        others: Vector[Chapter],
-        name: DestinationName,
-        countries: NonEmptyList[Country],
-        period: VisitPeriod,
-        sourceFolder: SourceFolder
-    ) =
-      if current.destination.isHome =!= ((name: String) === "Home") then ChapterConflict.TypeChange.asLeft[Chapter]
-      else
-        findConflict(year, others, name, period, sourceFolder).toLeft:
-          current.copy(destination = current.destination.copy(name = name, countries = countries), period = period, sourceFolder = sourceFolder)
 
     private def resolvePeriod(year: AlbumYear, period: Period) = period match
       case Period.AlbumYear    => buildYearPeriod(year)
       case Period.Dates(value) => value
 
-    private def findConflict(year: AlbumYear, others: Vector[Chapter], name: DestinationName, period: VisitPeriod, sourceFolder: SourceFolder) =
-      val isHome = (name: String) === "Home"
-      if isHome && others.exists(_.destination.isHome) then ChapterConflict.HomeExists.some
-      else if isHome && !arePeriodsEqual(period, buildYearPeriod(year)) then ChapterConflict.HomePeriodMismatch.some
-      else if others.exists(value => (value.sourceFolder: String) === sourceFolder) then ChapterConflict.FolderAssigned.some
+    private def findHomeConflict(year: AlbumYear, period: VisitPeriod, homeExists: Boolean) =
+      if homeExists then ChapterConflict.HomeExists.some
+      else if !arePeriodsEqual(period, buildYearPeriod(year)) then ChapterConflict.HomePeriodMismatch.some
       else None
 
-    private def orderChapterIds(chapter: Chapter, others: Vector[Chapter]) =
-      NonEmptyList(chapter, others.toList).sortBy { value =>
-        (value.destination.isHome, value.period.firstDay.toEpochDay, value.period.days: Long, value.id.value.toString)
+    private def orderChapterIds(chapters: NonEmptyList[ChapterOrder]) =
+      chapters.sortBy { value =>
+        (value.isHome, value.period.firstDay.toEpochDay, value.period.days: Long, value.id.value.toString)
       }.map(_.id)
 
     private def buildYearPeriod(year: AlbumYear) =
@@ -141,25 +125,26 @@ object ChapterManager:
 
     private def buildChapter(
         name: DestinationName,
-        countries: NonEmptyList[Country],
+        countries: NonEmptyList[CountryId],
         period: VisitPeriod,
         sourceFolder: SourceFolder,
-        template: SpreadTemplate.ChapterStart
+        template: SpreadTemplateId,
+        photoSlots: Vector[SlotBox],
+        textSlot: SlotBox
     ) =
       for
         id          <- IdGenerator[F].generateId.map(ChapterId(_))
-        opening     <- buildOpening(template)
-        destination <- IdGenerator[F].generateId.map(value => Destination(DestinationId(value), name = name, countries))
-      yield Chapter(id, destination, period, description = "", sourceFolder = sourceFolder, opening, spreads = Vector.empty[Spread.PhotosOnly])
+        opening     <- buildOpening(template, photoSlots, textSlot)
+        destination <- IdGenerator[F].generateId.map(DestinationId(_))
+      yield ChapterRepository.NewChapter(id, destination, name, countries, period, description = "", sourceFolder, opening)
 
-    private def buildOpening(template: SpreadTemplate.ChapterStart) =
-      val newPhotos =
-        template.photoSlots.traverse(box => IdGenerator[F].generateId.map(slot => SpreadSlot.Photo(PhotoSpreadSlotId(slot), box, bleed = Set.empty)))
+    private def buildOpening(template: SpreadTemplateId, photoSlots: Vector[SlotBox], textSlot: SlotBox) =
+      val newPhotos = photoSlots.traverse(box => IdGenerator[F].generateId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, bleed = Set.empty)))
       for
         id     <- IdGenerator[F].generateId.map(SpreadId(_))
         photos <- newPhotos
-        text   <- IdGenerator[F].generateId.map(slot => SpreadSlot.Text(TextSpreadSlotId(slot), template.textSlot))
-      yield Spread.ChapterStart(id, template.id, photoSlots = photos, textSlot = text, placements = Vector.empty[SpreadPlacement])
+        text   <- IdGenerator[F].generateId.map(slot => SpreadSlot.Text(TextSpreadSlotId(slot), textSlot))
+      yield Spread.ChapterStart(id, template, photoSlots = photos, textSlot = text, placements = Vector.empty[SpreadPlacement])
 
     private def translateCreateResult(result: ChapterRepository.CreateResult, id: ChapterId) = result match
       case ChapterRepository.CreateResult.Saved         => CreateResult.Created(id)
@@ -171,6 +156,8 @@ object ChapterManager:
       case ChapterRepository.UpdateResult.ChapterNotFound => UpdateResult.ChapterNotFound
       case ChapterRepository.UpdateResult.AlbumNotFound   => UpdateResult.AlbumNotFound
       case ChapterRepository.UpdateResult.Failed          => UpdateResult.Failed
+
+  final private case class ChapterOrder(id: ChapterId, isHome: Boolean, period: VisitPeriod)
 
   enum CreateResult:
     case Created(id: ChapterId)

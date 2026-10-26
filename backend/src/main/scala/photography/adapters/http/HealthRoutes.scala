@@ -14,7 +14,4 @@ object HealthRoutes:
 
     HttpRoutes.of[F]:
       case GET -> Root / "health" =>
-        Response[F](Status.Ok)
-          .withEntity("""{"status":"ok"}""")
-          .putHeaders(`Content-Type`(MediaType.application.json))
-          .pure[F]
+        Response[F](Status.Ok).withEntity("""{"status":"ok"}""").putHeaders(`Content-Type`(MediaType.application.json)).pure[F]

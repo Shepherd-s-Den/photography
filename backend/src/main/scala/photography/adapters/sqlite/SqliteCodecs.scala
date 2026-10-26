@@ -24,3 +24,16 @@ private[sqlite] object SqliteCodecs:
 
   given Write[SlotBox] =
     Write[(PositionOnSpread, PositionOnSpread, DistanceWithinSpread, DistanceWithinSpread)].contramap(box => (box.x, box.y, box.width, box.height))
+
+  given Meta[SpreadEdge] = Meta[String].tiemap[SpreadEdge] {
+    case "top"    => SpreadEdge.Top.asRight[String]
+    case "bottom" => SpreadEdge.Bottom.asRight[String]
+    case "left"   => SpreadEdge.Left.asRight[String]
+    case "right"  => SpreadEdge.Right.asRight[String]
+    case other    => s"Unknown bleed edge $other".asLeft[SpreadEdge]
+  } {
+    case SpreadEdge.Top    => "top"
+    case SpreadEdge.Bottom => "bottom"
+    case SpreadEdge.Left   => "left"
+    case SpreadEdge.Right  => "right"
+  }

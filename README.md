@@ -15,4 +15,6 @@ A photography application for managing persisted albums and opening their metada
 
 ## Local SQLite development
 
-The initial V1 schema is still edited in place. Older V1 databases fail startup validation and require explicit resolution; this development baseline does not migrate their contents or assign missing album years. Preserve existing databases and select a fresh `PHOTOGRAPHY_SQLITE_PATH` for isolated development.
+The undeployed application separates the Flyway schema (V1) from its authoritative reference-data seeds (V2): 249 countries/territories and 27 Saal chapter-start layouts. For a checksum-incompatible development database, select a fresh `PHOTOGRAPHY_SQLITE_PATH` or explicitly recreate only the identified disposable database. Retain spike data and unrelated databases.
+
+The supported runtime is one backend instance. The chapter manager owns chapter integrity rules; its shared mutex coordinates concurrent editors' read/decision/write operations. SQLite provides basic relational constraints and transactions for atomic chapter metadata, country associations, opening slots and supplied order.

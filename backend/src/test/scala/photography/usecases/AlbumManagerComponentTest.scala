@@ -59,30 +59,18 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
     val listed       = ListAlbumStartTemplatesResult.Listed(NonEmptyList.of(buildAlbumStartTemplate(index = 20), buildAlbumStartTemplate(index = 21)))
 
-    val expectedStart = Spread.AlbumStart(
-      SpreadId(buildUuid(index = 11)),
-      SpreadTemplateId(buildUuid(index = 20)),
-      photoSlots = Vector(SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), photoBox, bleed = Set.empty[SpreadEdge])),
-      textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), fullBox),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    val expectedAlbum =
-      Album(
-        AlbumId(buildUuid(index = 10)),
-        year = selectedYear,
-        title = "Asian capitals",
-        synopsis = "",
-        createdAt = Instant.parse("2026-10-07T12:00:00.123Z"),
-        expectedStart,
-        chapters = Vector.empty[Chapter]
-      )
-    val expectedCover =
-      Cover(
-        AlbumId(buildUuid(index = 10)),
-        SpineOwner.Front,
-        front = CoverSlot(CoverSlotId(buildUuid(index = 14))),
-        back = CoverSlot(CoverSlotId(buildUuid(index = 15)))
-      )
+    val expectedAlbumId   = AlbumId(buildUuid(index = 10))
+    val templateId        = SpreadTemplateId(buildUuid(index = 20))
+    val photoSlot         = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), photoBox, bleed = Set.empty[SpreadEdge])
+    val textSlot          = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), fullBox)
+    val emptyPlacements   = Vector.empty[SpreadPlacement]
+    val expectedStart     = Spread.AlbumStart(SpreadId(buildUuid(index = 11)), templateId, Vector(photoSlot), textSlot, emptyPlacements)
+    val expectedCreatedAt = Instant.parse("2026-10-07T12:00:00.123Z")
+    val emptyChapters     = Vector.empty[Chapter]
+    val expectedAlbum = Album(expectedAlbumId, selectedYear, title = "Asian capitals", synopsis = "", expectedCreatedAt, expectedStart, emptyChapters)
+    val front         = CoverSlot(CoverSlotId(buildUuid(index = 14)))
+    val back          = CoverSlot(CoverSlotId(buildUuid(index = 15)))
+    val expectedCover = Cover(expectedAlbumId, SpineOwner.Front, front, back)
 
     for
       result  <- buildManager(refs, listResult = listed, currentTime = suppliedTime).create(year = selectedYear, title = "Asian capitals")
@@ -209,31 +197,20 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
   // scalafix:on DisableSyntax.defaultArgs
 
   private def buildAlbumStartTemplate(index: Int) =
-    SpreadTemplate.AlbumStart(
-      SpreadTemplateId(buildUuid(index = index)),
-      name = s"Template $index".refineUnsafe[Not[Empty]],
-      photoSlots = Vector(photoBox),
-      textSlot = fullBox
-    )
+    val name = s"Template $index".refineUnsafe[Not[Empty]]
+    SpreadTemplate.AlbumStart(SpreadTemplateId(buildUuid(index = index)), name, photoSlots = Vector(photoBox), textSlot = fullBox)
 
   private def buildAlbum(index: Int) =
-    val albumId = AlbumId(buildUuid(index = index))
-    val start   = Spread.AlbumStart(
-      SpreadId(buildUuid(index = index + 100)),
-      SpreadTemplateId(buildUuid(index = 20)),
-      photoSlots = Vector(SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = index + 200)), photoBox, bleed = Set.empty)),
-      textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = index + 300)), fullBox),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    Album(
-      albumId,
-      year = (1900 + index).refineUnsafe[AlbumYearConstraint],
-      title = s"Album $index".refineUnsafe,
-      synopsis = s"Synopsis $index",
-      createdAt = createdAt.plusSeconds(index.toLong),
-      start,
-      chapters = Vector.empty[Chapter]
-    )
+    val albumId           = AlbumId(buildUuid(index = index))
+    val templateId        = SpreadTemplateId(buildUuid(index = 20))
+    val photoSlot         = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = index + 200)), photoBox, bleed = Set.empty)
+    val textSlot          = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = index + 300)), fullBox)
+    val emptyPlacements   = Vector.empty[SpreadPlacement]
+    val start             = Spread.AlbumStart(SpreadId(buildUuid(index = index + 100)), templateId, Vector(photoSlot), textSlot, emptyPlacements)
+    val year              = (1900 + index).refineUnsafe[AlbumYearConstraint]
+    val title: AlbumTitle = s"Album $index".refineUnsafe
+    val albumCreatedAt    = createdAt.plusSeconds(index.toLong)
+    Album(albumId, year, title, synopsis = s"Synopsis $index", albumCreatedAt, start, chapters = Vector.empty[Chapter])
 
   private def buildUuid(index: Int) =
     val suffix = index.toString.reverse.padTo(12, '0').reverse
