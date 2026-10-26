@@ -15,7 +15,6 @@ import photography.domain.layout.*
 import photography.ports.AlbumRepository
 import photography.ports.AlbumRepository.*
 
-import java.nio.file.{InvalidPathException, Path}
 import java.time.{Instant, ZoneOffset}
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -262,15 +261,9 @@ object SqliteAlbumRepository:
             case _ => Failure.DatabaseFailure
           Logger[F].error(error)("SQLite album operation failed").as(failed(reason))
 
-    private given Meta[AlbumYear]        = Meta[Int].tiemap[AlbumYear](_.refineEither)(value => value: Int)
-    private given Meta[AlbumTitle]       = Meta[String].tiemap[AlbumTitle](_.refineEither)(value => value: String)
-    private given Meta[CountryCode]      = Meta[String].tiemap[CountryCode](_.refineEither)(value => value: String)
-    private given Meta[CountryName]      = Meta[String].tiemap[CountryName](_.refineEither)(value => value: String)
-    private given Meta[SourceFolder]     = Meta[String].tiemap[SourceFolder](_.refineEither)(value => value: String)
-    private given Meta[AbsoluteLocation] = Meta[String].tiemap[AbsoluteLocation] { value =>
-      Either.catchOnly[InvalidPathException](Path.of(value)).leftMap(_.getMessage).flatMap: path =>
-        Either.cond(path.isAbsolute, AbsoluteLocation(path), "Expected absolute flag path")
-    }(_.value.toString)
+    private given Meta[AlbumYear]      = Meta[Int].tiemap[AlbumYear](_.refineEither)(value => value: Int)
+    private given Meta[AlbumTitle]     = Meta[String].tiemap[AlbumTitle](_.refineEither)(value => value: String)
+    private given Meta[SourceFolder]   = Meta[String].tiemap[SourceFolder](_.refineEither)(value => value: String)
     private given Meta[Instant]        = Meta[Long].timap[Instant](Instant.ofEpochMilli)(_.toEpochMilli)
     private given Meta[InDesignPoints] = Meta[Double].tiemap[InDesignPoints](_.refineEither)(value => value: Double)
     private given Meta[Zoom]           = Meta[Double].tiemap[Zoom](_.refineEither)(value => value: Double)

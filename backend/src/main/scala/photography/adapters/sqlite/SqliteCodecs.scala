@@ -3,8 +3,10 @@ package photography.adapters.sqlite
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import org.typelevel.doobie.{Meta, Read, Write}
+import photography.domain.album.{AbsoluteLocation, CountryCode, CountryName}
 import photography.domain.layout.*
 
+import java.nio.file.{InvalidPathException, Path}
 import java.util.UUID
 
 private[sqlite] object SqliteCodecs:
@@ -12,6 +14,13 @@ private[sqlite] object SqliteCodecs:
     Either.catchNonFatal(UUID.fromString(value)).leftMap(_.getMessage).flatMap: id =>
       Either.cond(id.toString === value, id, s"Noncanonical UUID: $value")
   }(_.toString)
+
+  given Meta[CountryCode]      = Meta[String].tiemap[CountryCode](_.refineEither)(value => value: String)
+  given Meta[CountryName]      = Meta[String].tiemap[CountryName](_.refineEither)(value => value: String)
+  given Meta[AbsoluteLocation] = Meta[String].tiemap[AbsoluteLocation] { value =>
+    Either.catchOnly[InvalidPathException](Path.of(value)).leftMap(_.getMessage).flatMap: path =>
+      Either.cond(path.isAbsolute, AbsoluteLocation(path), "Expected absolute flag path")
+  }(_.value.toString)
 
   private given Meta[PositionOnSpread] =
     Meta[Double].tiemap[PositionOnSpread](_.refineEither)(value => value: Double)
