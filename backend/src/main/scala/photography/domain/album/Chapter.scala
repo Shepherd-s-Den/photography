@@ -31,4 +31,4 @@ final case class Chapter(
 )
 
 enum ChapterConflict:
-  case AtCapacity, HomeExists, HomePeriodMismatch, FolderAssigned, TypeChange
+  case AtCapacity, HomeExists, HomePeriodMismatch, FolderAssigned, TypeChange, UnknownCountries
