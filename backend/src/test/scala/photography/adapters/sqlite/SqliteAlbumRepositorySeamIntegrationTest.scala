@@ -130,25 +130,19 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should reject noninitial composition or a foreign cover without writing owned rows"):
     buildTransactor.use: xa =>
-      val repository     = SqliteAlbumRepository.make[IO](xa)
-      val album          = buildAlbum(index = 1)
-      val chapterOpening = Spread.ChapterStart(
-        SpreadId(buildUuid(index = 10)),
-        SpreadTemplateId(buildUuid(index = 1)),
-        photoSlots = Vector.empty[SpreadSlot.Photo],
-        textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 11)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0)),
-        placements = Vector.empty[SpreadPlacement]
-      )
-      val country = Country(CountryId(buildUuid(index = 12)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
-      val home    = Chapter(
-        ChapterId(buildUuid(index = 13)),
-        Destination(DestinationId(buildUuid(index = 14)), name = "Home", NonEmptyList.one(country)),
-        VisitPeriod(firstDay = LocalDate.of(1901, 1, 1), days = 365),
-        description = "",
-        sourceFolder = "/photos/Home",
-        chapterOpening,
-        spreads = Vector.empty[Spread.PhotosOnly]
-      )
+      val repository      = SqliteAlbumRepository.make[IO](xa)
+      val album           = buildAlbum(index = 1)
+      val templateId      = SpreadTemplateId(buildUuid(index = 1))
+      val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 11)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0))
+      val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
+      val emptyPlacements = Vector.empty[SpreadPlacement]
+      val chapterOpening  = Spread.ChapterStart(SpreadId(buildUuid(index = 10)), templateId, emptyPhotoSlots, textSlot, emptyPlacements)
+      val country         = Country(CountryId(buildUuid(index = 12)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
+      val destination     = Destination(DestinationId(buildUuid(index = 14)), name = "Home", NonEmptyList.one(country))
+      val period          = VisitPeriod(firstDay = LocalDate.of(1901, 1, 1), days = 365)
+      val emptySpreads    = Vector.empty[Spread.PhotosOnly]
+      val home            =
+        Chapter(ChapterId(buildUuid(index = 13)), destination, period, description = "", sourceFolder = "/photos/Home", chapterOpening, emptySpreads)
 
       Vector(
         album.copy(chapters = Vector(home)) -> buildCover(album),
@@ -362,57 +356,47 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         owned    <- countOwned.transact(xa)
         shared   <- countShared.transact(xa)
       yield
-        val box               = SlotBox(x = 0.0.refineUnsafe, y = 0.0.refineUnsafe, width = 100.0.refineUnsafe, height = 100.0.refineUnsafe)
-        val expectedSlot      = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 406)), box, bleed = Set.empty[SpreadEdge])
-        val transform         = PhotoTransform(Shift(x = 0.0.refineUnsafe, y = 0.0.refineUnsafe), mirrored = false, zoom = 1.0.refineUnsafe)
-        val expectedPlacement =
-          SpreadPlacement(
-            SpreadPlacementId(buildUuid(index = 407)),
-            PhotoSpreadSlotId(buildUuid(index = 406)),
-            PhotoId(buildUuid(index = 403)),
-            transform,
-            CaptionCorner.BottomLeft
+        val box                 = SlotBox(x = 0.0.refineUnsafe, y = 0.0.refineUnsafe, width = 100.0.refineUnsafe, height = 100.0.refineUnsafe)
+        val expectedSlot        = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 406)), box, bleed = Set.empty[SpreadEdge])
+        val transform           = PhotoTransform(Shift(x = 0.0.refineUnsafe, y = 0.0.refineUnsafe), mirrored = false, zoom = 1.0.refineUnsafe)
+        val expectedPlacementId = SpreadPlacementId(buildUuid(index = 407))
+        val expectedPhotoId     = PhotoId(buildUuid(index = 403))
+        val expectedPlacement   = SpreadPlacement(expectedPlacementId, expectedSlot.id, expectedPhotoId, transform, CaptionCorner.BottomLeft)
+        val expectedTemplateId  = SpreadTemplateId(buildUuid(index = 404))
+        val expectedText        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 412)), box)
+        val expectedPlacements  = Vector(expectedPlacement)
+        val expectedChapter     =
+          Spread.ChapterStart(SpreadId(buildUuid(index = 405)), expectedTemplateId, Vector(expectedSlot), expectedText, expectedPlacements)
+        val expectedPhotosSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 411)), box, bleed = Set.empty[SpreadEdge])
+        val expectedPhotosTemplateId = SpreadTemplateId(buildUuid(index = 409))
+        val emptyPlacements          = Vector.empty[SpreadPlacement]
+        val expectedPhotoSlots       = NonEmptyList.one(expectedPhotosSlot)
+        val expectedPhotos    = Spread.PhotosOnly(SpreadId(buildUuid(index = 410)), expectedPhotosTemplateId, expectedPhotoSlots, emptyPlacements)
+        val expectedCountry   = Country(CountryId(buildUuid(index = 400)), code = "IS", name = "Iceland", AbsoluteLocation(Path.of("/flags/is.svg")))
+        val japan             = Country(CountryId(buildUuid(index = 430)), code = "JP", name = "Japan", AbsoluteLocation(Path.of("/flags/jp.svg")))
+        val destination       = Destination(DestinationId(buildUuid(index = 401)), name = "Coast", NonEmptyList.of(expectedCountry, japan))
+        val period            = VisitPeriod(firstDay = LocalDate.of(1970, 1, 1), days = 1)
+        val expectedSpreads   = Vector(expectedPhotos)
+        val expectedChapterId = ChapterId(buildUuid(index = 402))
+        val sourceFolder: SourceFolder = "/photos/coast"
+        val chapter         = Chapter(expectedChapterId, destination, period, description = "", sourceFolder, expectedChapter, expectedSpreads)
+        val secondPhotoSlot = expectedSlot.copy(id = PhotoSpreadSlotId(buildUuid(index = 422)))
+        val secondTextSlot  = expectedChapter.textSlot.copy(id = TextSpreadSlotId(buildUuid(index = 423)))
+        val secondSpreadId  = SpreadId(buildUuid(index = 421))
+        val secondOpening   =
+          expectedChapter.copy(id = secondSpreadId, photoSlots = Vector(secondPhotoSlot), textSlot = secondTextSlot, placements = emptyPlacements)
+        val expectedSecondChapterId    = ChapterId(buildUuid(index = 420))
+        val secondPeriod               = VisitPeriod(firstDay = LocalDate.of(1970, 1, 2), days = 1)
+        val emptySpreads               = Vector.empty[Spread.PhotosOnly]
+        val secondFolder: SourceFolder = "/photos/second"
+        val secondChapter              =
+          chapter.copy(
+            id = expectedSecondChapterId,
+            period = secondPeriod,
+            sourceFolder = secondFolder,
+            opening = secondOpening,
+            spreads = emptySpreads
           )
-        val expectedChapter = Spread.ChapterStart(
-          SpreadId(buildUuid(index = 405)),
-          SpreadTemplateId(buildUuid(index = 404)),
-          photoSlots = Vector(expectedSlot),
-          textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 412)), box),
-          placements = Vector(expectedPlacement)
-        )
-        val expectedPhotosSlot = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 411)), box, bleed = Set.empty[SpreadEdge])
-        val expectedPhotos     = Spread.PhotosOnly(
-          SpreadId(buildUuid(index = 410)),
-          SpreadTemplateId(buildUuid(index = 409)),
-          photoSlots = NonEmptyList.one(expectedPhotosSlot),
-          placements = Vector.empty[SpreadPlacement]
-        )
-        val expectedCountry = Country(CountryId(buildUuid(index = 400)), code = "IS", name = "Iceland", AbsoluteLocation(Path.of("/flags/is.svg")))
-        val japan           = Country(CountryId(buildUuid(index = 430)), code = "JP", name = "Japan", AbsoluteLocation(Path.of("/flags/jp.svg")))
-        val destination     = Destination(DestinationId(buildUuid(index = 401)), name = "Coast", NonEmptyList.of(expectedCountry, japan))
-        val chapter         =
-          Chapter(
-            ChapterId(buildUuid(index = 402)),
-            destination,
-            VisitPeriod(firstDay = LocalDate.of(1970, 1, 1), days = 1),
-            description = "",
-            sourceFolder = "/photos/coast",
-            expectedChapter,
-            spreads = Vector(expectedPhotos)
-          )
-        val secondOpening = expectedChapter.copy(
-          id = SpreadId(buildUuid(index = 421)),
-          photoSlots = Vector(expectedSlot.copy(id = PhotoSpreadSlotId(buildUuid(index = 422)))),
-          textSlot = expectedChapter.textSlot.copy(id = TextSpreadSlotId(buildUuid(index = 423))),
-          placements = Vector.empty[SpreadPlacement]
-        )
-        val secondChapter = chapter.copy(
-          id = ChapterId(buildUuid(index = 420)),
-          period = VisitPeriod(firstDay = LocalDate.of(1970, 1, 2), days = 1),
-          sourceFolder = "/photos/second",
-          opening = secondOpening,
-          spreads = Vector.empty[Spread.PhotosOnly]
-        )
         val expectedAlbum = album.copy(chapters = Vector(chapter, secondChapter))
         assertEquals(found, GetResult.Found(expectedAlbum))
         assertEquals(renamed, RenameResult.Renamed(expectedAlbum.copy(title = changedTitle)))
@@ -423,12 +407,12 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(shared, (249L, 1L, 33L, 1L))
 
   private def buildTransactor =
+    val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "album-", ".sqlite"))
+
     for
-      path <- Resource.make(IO.blocking(Files.createTempFile(Path.of("target"), "album-", ".sqlite")))(path =>
-        IO.blocking(Files.deleteIfExists(path)).void
-      )
-      _  <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
-      xa <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
+      path <- Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void)
+      _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa
 
   private def buildAlbum(index: Int) =
@@ -443,35 +427,18 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     val photos = boxes.zipWithIndex.map { case (box, position) =>
       SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = index * 1000 + position)), box, bleed = Set.empty[SpreadEdge])
     }
-    val text = SpreadSlot.Text(
-      TextSpreadSlotId(buildUuid(index = index * 1000 + 4)),
-      SlotBox(x = 50.104993, y = 0.914609, width = 49.601025, height = 98.170781)
-    )
-    val start = Spread.AlbumStart(
-      spreadId,
-      SpreadTemplateId(buildUuid(index = 1)),
-      photoSlots = photos,
-      textSlot = text,
-      placements = Vector.empty[SpreadPlacement]
-    )
-    val albumCreatedAt = if index === 1 then createdAt.plusSeconds(1) else createdAt
-    Album(
-      albumId,
-      year = (1900 + index).refineUnsafe[AlbumYearConstraint],
-      title = "My photographs",
-      synopsis = "",
-      createdAt = albumCreatedAt,
-      start,
-      chapters = Vector.empty[Chapter]
-    )
+    val textBox         = SlotBox(x = 50.104993, y = 0.914609, width = 49.601025, height = 98.170781)
+    val text            = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = index * 1000 + 4)), textBox)
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val start           = Spread.AlbumStart(spreadId, SpreadTemplateId(buildUuid(index = 1)), photoSlots = photos, textSlot = text, emptyPlacements)
+    val albumCreatedAt  = if index === 1 then createdAt.plusSeconds(1) else createdAt
+    val year            = (1900 + index).refineUnsafe[AlbumYearConstraint]
+    Album(albumId, year, title = "My photographs", synopsis = "", albumCreatedAt, start, chapters = Vector.empty[Chapter])
 
   private def buildCover(album: Album) =
     val index = album.id.value.getLeastSignificantBits.toInt
-    Cover(
-      album.id,
-      SpineOwner.Front,
-      front = CoverSlot(CoverSlotId(buildUuid(index = index + 200))),
-      back = CoverSlot(CoverSlotId(buildUuid(index = index + 300)))
-    )
+    val front = CoverSlot(CoverSlotId(buildUuid(index = index + 200)))
+    val back  = CoverSlot(CoverSlotId(buildUuid(index = index + 300)))
+    Cover(album.id, SpineOwner.Front, front, back)
 
   private def buildUuid(index: Int) = new UUID(0L, index.toLong)

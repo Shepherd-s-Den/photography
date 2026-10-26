@@ -19,10 +19,10 @@ final class SqliteConnectionSeamIntegrationTest extends CatsEffectSuite:
       }
 
   private def buildTransactor =
+    val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "connection-", ".sqlite"))
+
     for
-      path <- Resource.make(IO.blocking(Files.createTempFile(Path.of("target"), "connection-", ".sqlite")))(path =>
-        IO.blocking(Files.deleteIfExists(path)).void
-      )
-      _  <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
-      xa <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
+      path <- Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void)
+      _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa

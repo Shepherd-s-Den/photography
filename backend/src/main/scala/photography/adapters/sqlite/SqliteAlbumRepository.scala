@@ -35,12 +35,9 @@ object SqliteAlbumRepository:
       execute(query, ListResult.Failed(_))
 
     override def create(album: Album, cover: Cover): F[CreateResult] =
-      val initial = Either.cond(
-        album.chapters.isEmpty && album.opening.placements.isEmpty && cover.album.value === album.id.value,
-        (),
-        new IllegalArgumentException("Expected an initial album and its cover")
-      )
-      val query =
+      val isInitial = album.chapters.isEmpty && album.opening.placements.isEmpty && cover.album.value === album.id.value
+      val initial   = Either.cond(isInitial, (), new IllegalArgumentException("Expected an initial album and its cover"))
+      val query     =
         for
           _ <- initial.liftTo[ConnectionIO]
           _ <- insertAlbum(album.id, album.year, album.title, album.synopsis, album.createdAt)
@@ -86,32 +83,19 @@ object SqliteAlbumRepository:
     private def decodeChapter(row: ChapterRow) =
       val (id, destination, name, description, start, end, folder) = row
 
-      val days         = ChronoUnit.DAYS.between(start, end)
-      val calendarDays = Either.cond(
-        start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0,
-        (),
-        "Expected UTC calendar days"
-      )
-      val period =
-        calendarDays.flatMap(_ => days.refineEither[Positive]).map(length =>
-          VisitPeriod(firstDay = start.atOffset(ZoneOffset.UTC).toLocalDate, days = length)
-        )
+      val days            = ChronoUnit.DAYS.between(start, end)
+      val firstDay        = start.atOffset(ZoneOffset.UTC).toLocalDate
+      val calendarAligned = start.compareTo(start.truncatedTo(ChronoUnit.DAYS)) === 0 && end.compareTo(end.truncatedTo(ChronoUnit.DAYS)) === 0
+      val calendarDays    = Either.cond(calendarAligned, (), "Expected UTC calendar days")
+      val period          = calendarDays.flatMap(_ => days.refineEither[Positive]).map(length => VisitPeriod(firstDay, days = length))
       for
         visit       <- period.leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
         composition <- loadChapterSpreads(id)
         countries   <- loadCountries(destination)
       yield
-        val (opening, photos) = composition
-
-        Chapter(
-          ChapterId(id),
-          Destination(DestinationId(destination), name = name, countries),
-          visit,
-          description = description,
-          sourceFolder = folder,
-          opening,
-          spreads = photos
-        )
+        val (opening, photos)  = composition
+        val chapterDestination = Destination(DestinationId(destination), name = name, countries)
+        Chapter(ChapterId(id), chapterDestination, visit, description = description, sourceFolder = folder, opening, spreads = photos)
 
     private def loadCountries(destination: UUID) =
       val select = sql"""SELECT k.id, k.code, k.name, k.flag FROM destination_country d
@@ -193,28 +177,18 @@ object SqliteAlbumRepository:
     private def decodeSpread(row: SpreadRow, slots: Vector[SpreadSlot], placements: Vector[SpreadPlacement]) =
       val (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) = row
 
-      val photos = slots.collect { case photo: SpreadSlot.Photo => photo }
-      val texts  = slots.collect { case text: SpreadSlot.Text => text }
+      val photos     = slots.collect { case photo: SpreadSlot.Photo => photo }
+      val texts      = slots.collect { case text: SpreadSlot.Text => text }
+      val spreadId   = SpreadId(id)
+      val templateId = SpreadTemplateId(template)
       (kind, maybeTemplateKind, maybeAlbum, maybeChapter, texts) match
         case ("album_start", Some("album_start"), Some(_), None, Vector(text)) if position === 0 =>
-          (Spread.AlbumStart(
-            SpreadId(id),
-            SpreadTemplateId(template),
-            photoSlots = photos,
-            textSlot = text,
-            placements = placements
-          ): Spread).asRight[String]
+          (Spread.AlbumStart(spreadId, templateId, photoSlots = photos, textSlot = text, placements = placements): Spread).asRight[String]
         case ("chapter_start", Some("chapter_start"), None, Some(_), Vector(text)) if position === 0 =>
-          (Spread.ChapterStart(
-            SpreadId(id),
-            SpreadTemplateId(template),
-            photoSlots = photos,
-            textSlot = text,
-            placements = placements
-          ): Spread).asRight[String]
+          (Spread.ChapterStart(spreadId, templateId, photoSlots = photos, textSlot = text, placements = placements): Spread).asRight[String]
         case ("photos_only", Some("photos_only"), None, Some(_), Vector()) if position > 0 =>
           NonEmptyList.fromList(photos.toList).toRight("Photo spread must have photo slots")
-            .map(nonEmpty => Spread.PhotosOnly(SpreadId(id), SpreadTemplateId(template), photoSlots = nonEmpty, placements = placements): Spread)
+            .map(nonEmpty => Spread.PhotosOnly(spreadId, templateId, photoSlots = nonEmpty, placements = placements): Spread)
         case _ => s"Invalid spread shape for $id".asLeft[Spread]
 
     private def loadPlacements(spreadId: UUID) =
@@ -222,13 +196,8 @@ object SqliteAlbumRepository:
             FROM placement p JOIN spread_photo_slot s ON s.id = p.spread_photo_slot_id
             WHERE s.spread_id = $spreadId ORDER BY p.id""".query[PlacementRow].to[Vector].map:
         _.map { case (id, slot, photo, x, y, mirrored, zoom, corner) =>
-          SpreadPlacement(
-            SpreadPlacementId(id),
-            PhotoSpreadSlotId(slot),
-            PhotoId(photo),
-            PhotoTransform(Shift(x = x, y = y), mirrored = mirrored, zoom = zoom),
-            corner
-          )
+          val transform = PhotoTransform(Shift(x = x, y = y), mirrored = mirrored, zoom = zoom)
+          SpreadPlacement(SpreadPlacementId(id), PhotoSpreadSlotId(slot), PhotoId(photo), transform, corner)
         }
 
     private def validateCover(id: UUID) =

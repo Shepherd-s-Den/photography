@@ -28,52 +28,32 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
   private val box      = SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0)
   private val template =
     SpreadTemplate.ChapterStart(SpreadTemplateId(buildUuid(index = 4)), name = "Default", photoSlots = Vector(box), textSlot = box)
-  private val album = Album(
-    AlbumId(buildUuid(index = 1)),
-    year = 2026,
-    title = "A year abroad",
-    synopsis = "",
-    createdAt = Instant.EPOCH,
-    Spread.AlbumStart(
-      SpreadId(buildUuid(index = 3)),
-      template.id,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 5)), box),
-      placements = Vector.empty[SpreadPlacement]
-    ),
-    chapters = Vector.empty[Chapter]
-  )
-  private val chapter = Chapter(
-    ChapterId(buildUuid(index = 20)),
-    Destination(DestinationId(buildUuid(index = 30)), name = "Asian capitals", countries),
-    VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2),
-    description = "",
-    sourceFolder = "/photos/capitals",
-    Spread.ChapterStart(
-      SpreadId(buildUuid(index = 40)),
-      template.id,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 41)), box),
-      placements = Vector.empty[SpreadPlacement]
-    ),
-    spreads = Vector.empty[Spread.PhotosOnly]
-  )
-  private val home = chapter.copy(
-    id = ChapterId(buildUuid(index = 50)),
-    destination = chapter.destination.copy(name = homeName),
-    period = VisitPeriod(firstDay = LocalDate.of(2026, 1, 1), days = 365),
-    sourceFolder = "/photos/Home"
-  )
+  private val album =
+    val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 5)), box)
+    val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val opening         = Spread.AlbumStart(SpreadId(buildUuid(index = 3)), template.id, emptyPhotoSlots, textSlot, emptyPlacements)
+    val emptyChapters   = Vector.empty[Chapter]
+    Album(AlbumId(buildUuid(index = 1)), year = 2026, title = "A year abroad", synopsis = "", Instant.EPOCH, opening, emptyChapters)
+  private val chapter =
+    val destination     = Destination(DestinationId(buildUuid(index = 30)), name = "Asian capitals", countries)
+    val period          = VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2)
+    val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 41)), box)
+    val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val opening         = Spread.ChapterStart(SpreadId(buildUuid(index = 40)), template.id, emptyPhotoSlots, textSlot, emptyPlacements)
+    val emptySpreads    = Vector.empty[Spread.PhotosOnly]
+    Chapter(ChapterId(buildUuid(index = 20)), destination, period, description = "", sourceFolder = "/photos/capitals", opening, emptySpreads)
+  private val home =
+    val destination = chapter.destination.copy(name = homeName)
+    val fullYear    = VisitPeriod(firstDay = LocalDate.of(2026, 1, 1), days = 365)
+    chapter.copy(id = ChapterId(buildUuid(index = 50)), destination = destination, period = fullYear, sourceFolder = "/photos/Home")
   private val atCapacity =
-    val photo = Spread.PhotosOnly(
-      SpreadId(buildUuid(index = 60)),
-      template.id,
-      photoSlots = NonEmptyList.one(SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 61)), box, bleed = Set.empty)),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    album.copy(chapters =
-      Vector(chapter.copy(spreads = Vector.tabulate(63)(index => photo.copy(id = SpreadId(buildUuid(index = 100 + index.toLong))))))
-    )
+    val photoSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 61)), box, bleed = Set.empty)
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val photo           = Spread.PhotosOnly(SpreadId(buildUuid(index = 60)), template.id, NonEmptyList.one(photoSlot), emptyPlacements)
+    val spreads         = Vector.tabulate(63)(index => photo.copy(id = SpreadId(buildUuid(index = 100 + index.toLong))))
+    album.copy(chapters = Vector(chapter.copy(spreads = spreads)))
 
   test("should create a multi-country chapter and its empty opening"):
     val refs = Refs()
@@ -83,23 +63,17 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       result  <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
       writes  <- refs.creations.get
     yield
-      val opening = Spread.ChapterStart(
-        SpreadId(buildUuid(index = 11)),
-        template.id,
-        photoSlots = Vector(SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), box, bleed = Set.empty)),
-        textSlot = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), box),
-        placements = Vector.empty[SpreadPlacement]
-      )
-      val expected = ChapterRepository.NewChapter(
-        id = ChapterId(buildUuid(index = 10)),
-        destinationId = DestinationId(buildUuid(index = 14)),
-        name = chapter.destination.name,
-        countries = countries.map(_.id),
-        period = chapter.period,
-        description = "",
-        sourceFolder = chapter.sourceFolder,
-        opening = opening
-      )
+      val photoSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), box, bleed = Set.empty)
+      val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), box)
+      val emptyPlacements = Vector.empty[SpreadPlacement]
+      val opening         = Spread.ChapterStart(SpreadId(buildUuid(index = 11)), template.id, Vector(photoSlot), textSlot, emptyPlacements)
+      val chapterId       = ChapterId(buildUuid(index = 10))
+      val destinationId   = DestinationId(buildUuid(index = 14))
+      val countryIds      = countries.map(_.id)
+      val destinationName = chapter.destination.name
+      val sourceFolder    = chapter.sourceFolder
+      val expected        =
+        ChapterRepository.NewChapter(chapterId, destinationId, destinationName, countryIds, chapter.period, description = "", sourceFolder, opening)
       assertEquals(result, CreateResult.Created(expected.id))
       assertEquals(writes, Vector((album.id, expected, NonEmptyList.one(expected.id))))
 
@@ -137,12 +111,9 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       )
     )
     scenarios.traverse_ { case (current, name, period, folder, expected) =>
-      val refs   = Refs()
-      val target = chapter.copy(
-        id = ChapterId(buildUuid(index = 70)),
-        destination = chapter.destination.copy(name = name),
-        sourceFolder = "/photos/target"
-      )
+      val refs        = Refs()
+      val destination = chapter.destination.copy(name = name)
+      val target      = chapter.copy(id = ChapterId(buildUuid(index = 70)), destination = destination, sourceFolder = "/photos/target")
 
       for
         creator   <- buildManager(refs, current = current)
@@ -191,28 +162,19 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       assertEquals(admitted, CreateResult.Created(ChapterId(buildUuid(index = 10))))
       assertEquals(rejected, CreateResult.Rejected(ChapterConflict.AtCapacity))
       assertEquals(updated, UpdateResult.Updated)
-      val expectedWrites =
-        Vector((
-          album.id,
-          chapter.id,
-          "Kyoto": DestinationName,
-          updatedCountries.map(_.id),
-          chapter.period,
-          "/photos/new": SourceFolder,
-          NonEmptyList.one(chapter.id)
-        ))
+      val destinationName: DestinationName = "Kyoto"
+      val sourceFolder: SourceFolder       = "/photos/new"
+      val chapterOrder                     = NonEmptyList.one(chapter.id)
+      val expectedWrites = Vector((album.id, chapter.id, destinationName, updatedCountries.map(_.id), chapter.period, sourceFolder, chapterOrder))
       assertEquals(writes, expectedWrites)
 
   test(s"should order chapters by dates and identity with $homeName last"):
-    val refs    = Refs()
-    val earlier = chapter.copy(id = ChapterId(buildUuid(index = 70)), period = chapter.period.copy(days = 1), sourceFolder = "/photos/earlier")
-    val tied    = earlier.copy(id = ChapterId(buildUuid(index = 71)), sourceFolder = "/photos/tied")
-    val later   = chapter.copy(
-      id = ChapterId(buildUuid(index = 72)),
-      period = VisitPeriod(firstDay = LocalDate.of(2026, 5, 2), days = 1),
-      sourceFolder = "/photos/later"
-    )
-    val current = album.copy(chapters = Vector(earlier, tied, chapter, later, home))
+    val refs        = Refs()
+    val earlier     = chapter.copy(id = ChapterId(buildUuid(index = 70)), period = chapter.period.copy(days = 1), sourceFolder = "/photos/earlier")
+    val tied        = earlier.copy(id = ChapterId(buildUuid(index = 71)), sourceFolder = "/photos/tied")
+    val laterPeriod = VisitPeriod(firstDay = LocalDate.of(2026, 5, 2), days = 1)
+    val later       = chapter.copy(id = ChapterId(buildUuid(index = 72)), period = laterPeriod, sourceFolder = "/photos/later")
+    val current     = album.copy(chapters = Vector(earlier, tied, chapter, later, home))
 
     for
       manager   <- buildManager(refs, current = current)
@@ -233,15 +195,9 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val state      = Ref.unsafe[IO, Album](beforeLast)
     val read       = state.get.flatMap(value => IO.cede.as(AlbumRepository.GetResult.Found(value)))
     val save       = (value: ChapterRepository.NewChapter) =>
-      val saved = Chapter(
-        value.id,
-        Destination(value.destinationId, value.name, countries),
-        value.period,
-        value.description,
-        value.sourceFolder,
-        value.opening,
-        spreads = Vector.empty[Spread.PhotosOnly]
-      )
+      val destination  = Destination(value.destinationId, value.name, countries)
+      val emptySpreads = Vector.empty[Spread.PhotosOnly]
+      val saved        = Chapter(value.id, destination, value.period, value.description, value.sourceFolder, value.opening, emptySpreads)
       state.update(valueBefore => valueBefore.copy(chapters = valueBefore.chapters :+ saved))
 
     for

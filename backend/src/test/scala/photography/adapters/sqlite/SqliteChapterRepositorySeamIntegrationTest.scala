@@ -58,24 +58,11 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       yield
         val originalDestination = Destination(first.destinationId, first.name, NonEmptyList.of(country, otherCountry))
         val changedDestination  = originalDestination.copy(name = newName, countries = newCountries)
-        val expectedFirst       = Chapter(
-          first.id,
-          originalDestination,
-          first.period,
-          first.description,
-          first.sourceFolder,
-          first.opening,
-          spreads = Vector.empty[Spread.PhotosOnly]
-        )
-        val expectedSecond = Chapter(
-          second.id,
-          Destination(second.destinationId, second.name, NonEmptyList.of(country, otherCountry)),
-          second.period,
-          second.description,
-          second.sourceFolder,
-          second.opening,
-          spreads = Vector.empty[Spread.PhotosOnly]
-        )
+        val secondDestination   = Destination(second.destinationId, second.name, NonEmptyList.of(country, otherCountry))
+        val emptySpreads        = Vector.empty[Spread.PhotosOnly]
+        val expectedFirst  = Chapter(first.id, originalDestination, first.period, first.description, first.sourceFolder, first.opening, emptySpreads)
+        val expectedSecond =
+          Chapter(second.id, secondDestination, second.period, second.description, second.sourceFolder, second.opening, emptySpreads)
         initial match
           case AlbumRepository.GetResult.Found(album) => assertEquals(album.chapters, Vector(expectedSecond, expectedFirst))
           case result                                 => fail(s"Expected complete created chapters, obtained $result")
@@ -211,12 +198,12 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     yield ()
 
   private def buildTransactor =
+    val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "chapter-", ".sqlite"))
+
     for
-      path <- Resource.make(IO.blocking(Files.createTempFile(Path.of("target"), "chapter-", ".sqlite")))(path =>
-        IO.blocking(Files.deleteIfExists(path)).void
-      )
-      _  <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
-      xa <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
+      path <- Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void)
+      _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa
 
   private def seedAlbum(xa: Transactor[IO]) =
@@ -237,15 +224,11 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     val photos = template.photoSlots.zipWithIndex.map { case (box, index) =>
       SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(4L, index.toLong)), box, bleed = Set.empty[SpreadEdge])
     }
-    val opening = Spread.AlbumStart(
-      SpreadId(new UUID(4L, 10L)),
-      template.id,
-      photos,
-      SpreadSlot.Text(TextSpreadSlotId(new UUID(4L, 11L)), template.textSlot),
-      placements = Vector.empty[SpreadPlacement]
-    )
-    val album = Album(albumId, year = 2026, title = "Album", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
-    val cover = Cover(albumId, SpineOwner.Front, CoverSlot(CoverSlotId(new UUID(4L, 12L))), CoverSlot(CoverSlotId(new UUID(4L, 13L))))
+    val textSlot        = SpreadSlot.Text(TextSpreadSlotId(new UUID(4L, 11L)), template.textSlot)
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val opening         = Spread.AlbumStart(SpreadId(new UUID(4L, 10L)), template.id, photos, textSlot, emptyPlacements)
+    val album           = Album(albumId, year = 2026, title = "Album", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    val cover           = Cover(albumId, SpineOwner.Front, CoverSlot(CoverSlotId(new UUID(4L, 12L))), CoverSlot(CoverSlotId(new UUID(4L, 13L))))
     (album, cover)
 
   private def buildChapter(xa: Transactor[IO], index: Int) =
@@ -255,21 +238,13 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val photos   = template.photoSlots.zipWithIndex.map { case (box, position) =>
           SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(index.toLong, position.toLong)), box, bleed = Set(SpreadEdge.Left))
         }
-        val opening = Spread.ChapterStart(
-          SpreadId(new UUID(index.toLong, 100L)),
-          template.id,
-          photos,
-          SpreadSlot.Text(TextSpreadSlotId(new UUID(index.toLong, 101L)), template.textSlot),
-          placements = Vector.empty[SpreadPlacement]
-        )
-        ChapterRepository.NewChapter(
-          ChapterId(new UUID(index.toLong, 102L)),
-          DestinationId(new UUID(index.toLong, 103L)),
-          name = "Trip",
-          NonEmptyList.of(country.id, otherCountry.id),
-          period,
-          description = "Retained description",
-          sourceFolder = s"/photos/$index".refineUnsafe,
-          opening
-        ).pure[IO]
+        val textSlot                   = SpreadSlot.Text(TextSpreadSlotId(new UUID(index.toLong, 101L)), template.textSlot)
+        val emptyPlacements            = Vector.empty[SpreadPlacement]
+        val opening                    = Spread.ChapterStart(SpreadId(new UUID(index.toLong, 100L)), template.id, photos, textSlot, emptyPlacements)
+        val chapterId                  = ChapterId(new UUID(index.toLong, 102L))
+        val destinationId              = DestinationId(new UUID(index.toLong, 103L))
+        val countryIds                 = NonEmptyList.of(country.id, otherCountry.id)
+        val sourceFolder: SourceFolder = s"/photos/$index".refineUnsafe
+        val description                = "Retained description"
+        ChapterRepository.NewChapter(chapterId, destinationId, name = "Trip", countryIds, period, description, sourceFolder, opening).pure[IO]
       case value => IO.raiseError[ChapterRepository.NewChapter](new IllegalStateException(s"Missing chapter templates: $value"))

@@ -22,13 +22,11 @@ object SqliteChapterRepository:
 
   final private class LiveChapterRepository[F[_]: Async: Logger: IdGenerator](transactor: Transactor[F]) extends ChapterRepository[F]:
     override def create(album: AlbumId, chapter: NewChapter, order: NonEmptyList[ChapterId]): F[CreateResult] =
-      val initial = Either.cond(
-        chapter.opening.placements.isEmpty && chapter.opening.photoSlots.nonEmpty &&
-          chapter.opening.photoSlots.forall(_.id.value =!= chapter.opening.textSlot.id.value),
-        (),
-        new IllegalArgumentException("Expected an empty chapter opening with photo slots")
-      )
-      val query = albumExists(album).flatMap:
+      val opening         = chapter.opening
+      val distinctSlotIds = opening.photoSlots.forall(_.id.value =!= opening.textSlot.id.value)
+      val isInitial       = opening.placements.isEmpty && opening.photoSlots.nonEmpty && distinctSlotIds
+      val initial         = Either.cond(isInitial, (), new IllegalArgumentException("Expected an empty chapter opening with photo slots"))
+      val query           = albumExists(album).flatMap:
         case false => CreateResult.AlbumNotFound.pure[ConnectionIO]
         case true  =>
           for
@@ -76,11 +74,8 @@ object SqliteChapterRepository:
         (kind, box.x: Double, box.y: Double, box.width: Double, box.height: Double)
       }
       select.query[(String, Double, Double, Double, Double)].to[Vector].flatMap: expected =>
-        Either.cond(
-          expected.size === supplied.size && expected.toSet === supplied.toSet,
-          (),
-          new IllegalArgumentException("Opening slots must represent their chapter template")
-        ).liftTo[ConnectionIO]
+        val matchesTemplate = expected.size === supplied.size && expected.toSet === supplied.toSet
+        Either.cond(matchesTemplate, (), new IllegalArgumentException("Opening slots must represent their chapter template")).liftTo[ConnectionIO]
 
     private def deleteUnreferencedDestination(id: UUID) =
       sql"DELETE FROM destination WHERE id = $id AND NOT EXISTS (SELECT 1 FROM chapter WHERE destination_id = $id)".update.run.void
@@ -131,11 +126,8 @@ object SqliteChapterRepository:
       yield ()
 
     private def validateOrder(stored: List[UUID], supplied: List[UUID]) =
-      Either.cond(
-        stored.size === supplied.size && stored.toSet === supplied.toSet,
-        (),
-        new IllegalArgumentException("Order must contain every chapter exactly once")
-      )
+      val containsEveryChapter = stored.size === supplied.size && stored.toSet === supplied.toSet
+      Either.cond(containsEveryChapter, (), new IllegalArgumentException("Order must contain every chapter exactly once"))
 
     private def insertOpening(
         chapter: ChapterId,

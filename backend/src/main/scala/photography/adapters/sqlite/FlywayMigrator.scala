@@ -9,9 +9,6 @@ import java.nio.file.Path
 object FlywayMigrator:
 
   def make[F[_]: Async](configuredPath: Path): Resource[F, Fly4s[F]] =
-    Fly4s.make[F](
-      s"jdbc:sqlite:${configuredPath.toAbsolutePath.normalize()}",
-      user = Option.empty[String],
-      password = Option.empty[Array[Char]],
-      Fly4sConfig(table = "flyway", locations = List(Location("db")), connectRetries = 3)
-    )
+    val jdbcUrl = s"jdbc:sqlite:${configuredPath.toAbsolutePath.normalize()}"
+    val config  = Fly4sConfig(table = "flyway", locations = List(Location("db")), connectRetries = 3)
+    Fly4s.make[F](jdbcUrl, user = Option.empty[String], password = Option.empty[Array[Char]], config)

@@ -80,13 +80,8 @@ object AlbumManager:
         if offset === 0 then AlbumRepository.ListResult.Listed(firstPage).pure[F] else repository.list(offset = offset, limit = pageSize)
       selectedSlice.map:
         case AlbumRepository.ListResult.Listed(slice) =>
-          ListAlbumsResult.Listed(AlbumPage(
-            slice.albums,
-            page = selectedPage,
-            pageSize = pageSize,
-            totalAlbums = totalAlbums,
-            totalPages = totalPages
-          ))
+          val page = AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages)
+          ListAlbumsResult.Listed(page)
         case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     private def buildInitialComposition(

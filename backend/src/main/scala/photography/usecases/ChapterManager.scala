@@ -47,17 +47,14 @@ object ChapterManager:
       summon[Mutex[F]].lock.surround:
         albums.get(album).flatMap:
           case AlbumRepository.GetResult.Found(current) =>
-            val resolvedPeriod = resolvePeriod(current.year, period)
-            val maybeConflict  =
+            val resolvedPeriod    = resolvePeriod(current.year, period)
+            val isHome            = (name: String) === "Home"
+            val homeExists        = current.chapters.exists(_.destination.isHome)
+            val folderAssigned    = current.chapters.exists(value => (value.sourceFolder: String) === sourceFolder)
+            val maybeHomeConflict = if isHome then findHomeConflict(current.year, resolvedPeriod, homeExists) else None
+            val maybeConflict     =
               if current.spreads.length >= 65 then ChapterConflict.AtCapacity.some
-              else
-                findConflict(
-                  current.year,
-                  isHome = (name: String) === "Home",
-                  resolvedPeriod,
-                  homeExists = current.chapters.exists(_.destination.isHome),
-                  folderAssigned = current.chapters.exists(value => (value.sourceFolder: String) === sourceFolder)
-                )
+              else maybeHomeConflict.orElse(Option.when(folderAssigned)(ChapterConflict.FolderAssigned))
             maybeConflict match
               case Some(reason) => CreateResult.Rejected(reason).pure[F]
               case None         =>
@@ -87,26 +84,20 @@ object ChapterManager:
             current.chapters.find(_.id.value === chapter.value) match
               case None           => UpdateResult.ChapterNotFound.pure[F]
               case Some(existing) =>
-                val others         = current.chapters.filterNot(_.id.value === chapter.value)
-                val resolvedPeriod = resolvePeriod(current.year, period)
-                val isHome         = (name: String) === "Home"
-                val maybeConflict  =
+                val others            = current.chapters.filterNot(_.id.value === chapter.value)
+                val resolvedPeriod    = resolvePeriod(current.year, period)
+                val isHome            = (name: String) === "Home"
+                val homeExists        = others.exists(_.destination.isHome)
+                val folderAssigned    = others.exists(value => (value.sourceFolder: String) === sourceFolder)
+                val maybeHomeConflict = if isHome then findHomeConflict(current.year, resolvedPeriod, homeExists) else None
+                val maybeConflict     =
                   if existing.destination.isHome =!= isHome then ChapterConflict.TypeChange.some
-                  else
-                    findConflict(
-                      current.year,
-                      isHome,
-                      resolvedPeriod,
-                      homeExists = others.exists(_.destination.isHome),
-                      folderAssigned = others.exists(value => (value.sourceFolder: String) === sourceFolder)
-                    )
+                  else maybeHomeConflict.orElse(Option.when(folderAssigned)(ChapterConflict.FolderAssigned))
                 maybeConflict match
                   case Some(reason) => UpdateResult.Rejected(reason).pure[F]
                   case None         =>
-                    val order = NonEmptyList(
-                      ChapterOrder(chapter, isHome, resolvedPeriod),
-                      others.map(value => ChapterOrder(value.id, value.destination.isHome, value.period)).toList
-                    )
+                    val otherEntries = others.map(value => ChapterOrder(value.id, value.destination.isHome, value.period)).toList
+                    val order        = NonEmptyList(ChapterOrder(chapter, isHome, resolvedPeriod), otherEntries)
                     chapters.update(album, chapter, name, countries, resolvedPeriod, sourceFolder, orderChapterIds(order)).map(translateUpdateResult)
           case AlbumRepository.GetResult.NotFound  => UpdateResult.AlbumNotFound.pure[F]
           case AlbumRepository.GetResult.Failed(_) => UpdateResult.Failed.pure[F]
@@ -115,10 +106,9 @@ object ChapterManager:
       case Period.AlbumYear    => buildYearPeriod(year)
       case Period.Dates(value) => value
 
-    private def findConflict(year: AlbumYear, isHome: Boolean, period: VisitPeriod, homeExists: Boolean, folderAssigned: Boolean) =
-      if isHome && homeExists then ChapterConflict.HomeExists.some
-      else if isHome && !arePeriodsEqual(period, buildYearPeriod(year)) then ChapterConflict.HomePeriodMismatch.some
-      else if folderAssigned then ChapterConflict.FolderAssigned.some
+    private def findHomeConflict(year: AlbumYear, period: VisitPeriod, homeExists: Boolean) =
+      if homeExists then ChapterConflict.HomeExists.some
+      else if !arePeriodsEqual(period, buildYearPeriod(year)) then ChapterConflict.HomePeriodMismatch.some
       else None
 
     private def orderChapterIds(chapters: NonEmptyList[ChapterOrder]) =

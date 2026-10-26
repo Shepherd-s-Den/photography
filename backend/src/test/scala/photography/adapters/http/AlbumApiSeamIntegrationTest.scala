@@ -18,23 +18,16 @@ import java.util.UUID
 
 final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   private val id    = AlbumId(new UUID(0L, 1L))
-  private val start = Spread.AlbumStart(
-    SpreadId(new UUID(0L, 3L)),
-    SpreadTemplateId(new UUID(0L, 2L)),
-    photoSlots = Vector.empty[SpreadSlot.Photo],
-    textSlot = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0)),
-    placements = Vector.empty[SpreadPlacement]
-  )
+  private val start =
+    val templateId      = SpreadTemplateId(new UUID(0L, 2L))
+    val textSlot        = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0))
+    val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    Spread.AlbumStart(SpreadId(new UUID(0L, 3L)), templateId, emptyPhotoSlots, textSlot, emptyPlacements)
   private val album =
-    Album(
-      id,
-      year = 2026,
-      title = "Journey of the Shepherds 2026",
-      synopsis = "A synopsis",
-      createdAt = Instant.parse("2026-10-24T10:00:00.123Z"),
-      start,
-      chapters = Vector.empty[Chapter]
-    )
+    val createdAt     = Instant.parse("2026-10-24T10:00:00.123Z")
+    val emptyChapters = Vector.empty[Chapter]
+    Album(id, year = 2026, title = "Journey of the Shepherds 2026", synopsis = "A synopsis", createdAt, start, emptyChapters)
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
@@ -93,13 +86,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val malformed    = Vector("{}", "{", "[]")
     val invalidYears =
       Vector("""{"title":"Coast"}""", """{"year":null}""", """{"year":"2026"}""", """{"year":2026.5}""", """{"year":1899}""", """{"year":2101}""")
-    val invalidTitles = Vector(
-      """{"title":""}""",
-      """{"title":" \t\n "}""",
-      """{"title":null}""",
-      """{"title":3}"""
-    )
-    val requests = (malformed ++ invalidYears).map(body => (Method.POST, "/api/albums", body)) ++
+    val invalidTitles = Vector("""{"title":""}""", """{"title":" \t\n "}""", """{"title":null}""", """{"title":3}""")
+    val requests      = (malformed ++ invalidYears).map(body => (Method.POST, "/api/albums", body)) ++
       (malformed ++ invalidTitles).map(body => (Method.PATCH, albumPath, body))
 
     for
@@ -112,12 +100,11 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(calls, Vector.empty)
 
   test("should read metadata without composition and delete with an empty 204 response"):
-    val refs     = Refs()
-    val server   = buildAlbumApi(refs)
-    val expected = parse(
+    val refs         = Refs()
+    val server       = buildAlbumApi(refs)
+    val expectedJson =
       s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","synopsis":"A synopsis","createdAt":"2026-10-24T10:00:00.123Z"}"""
-    )
-      .fold(error => fail(error.message), identity)
+    val expected = parse(expectedJson).fold(error => fail(error.message), identity)
 
     for
       found   <- send(server, Method.GET, path = albumPath, body = "")

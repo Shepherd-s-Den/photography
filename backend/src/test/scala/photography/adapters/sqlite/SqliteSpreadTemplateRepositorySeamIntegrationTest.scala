@@ -136,12 +136,10 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
     }
 
   private def buildTransactor =
-    val databaseFile = Resource.make(IO.blocking(Files.createTempFile(Path.of("target"), "template-", ".sqlite")))(path =>
-      IO.blocking(Files.deleteIfExists(path)).void
-    )
+    val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "template-", ".sqlite"))
 
     for
-      path <- databaseFile
+      path <- Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void)
       _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
       xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa

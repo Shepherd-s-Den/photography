@@ -22,9 +22,7 @@ object SqliteSpreadTemplateRepository:
     override def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult] =
       loadOpenings(kind = "album_start").transact(transactor).attempt.flatMap:
         case Right(rows) =>
-          val templates = rows.map { case (id, name, photos, text) =>
-            SpreadTemplate.AlbumStart(id, name = name, photoSlots = photos, textSlot = text)
-          }
+          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.AlbumStart(id, name, photos, text) }
           ListAlbumStartTemplatesResult.Listed(templates).pure[F]
         case Left(error) =>
           Logger[F].error(error)("Could not list album opening templates").as(ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure))
@@ -32,9 +30,7 @@ object SqliteSpreadTemplateRepository:
     override def listChapterStartTemplates: F[ListChapterStartTemplatesResult] =
       loadOpenings(kind = "chapter_start").transact(transactor).attempt.flatMap:
         case Right(rows) =>
-          val templates = rows.map { case (id, name, photos, text) =>
-            SpreadTemplate.ChapterStart(id, name = name, photoSlots = photos, textSlot = text)
-          }
+          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.ChapterStart(id, name, photos, text) }
           ListChapterStartTemplatesResult.Listed(templates).pure[F]
         case Left(error) =>
           Logger[F].error(error)("Could not list chapter opening templates").as(ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
