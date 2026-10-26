@@ -47,6 +47,9 @@ export function AlbumDialog(props: {
 
   async function submit(event: SubmitEvent) {
     event.preventDefault();
+    // Native disabled controls cannot submit while saving or closing.
+    /* v8 ignore next */
+    if (unavailable() !== undefined) return;
     const validation = deleting() ? undefined : creating() ? validateYear(year()) : validateTitle(title());
     if (validation !== undefined) {
       setError(validation);

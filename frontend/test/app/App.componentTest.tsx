@@ -137,14 +137,14 @@ describe("album dashboard and open", () => {
     });
   });
 
-  it("should open a directly addressed album read-only", async () => {
+  it("should open a directly addressed album workspace read-only", async () => {
     window.history.replaceState(null, "", `/albums/${firstAlbum.id}`);
     const client = buildClient();
 
     render(() => <App client={client} />);
 
-    expect(await screen.findByRole("heading", { name: firstAlbum.title })).toBeInTheDocument();
-    expect(screen.getByText("The sea at dawn.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "A year in photographs / 2026" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Album opening composition" })).toBeInTheDocument();
     expect(screen.queryByText("Read-only album")).not.toBeInTheDocument();
     expect(screen.queryByText(firstAlbum.createdAt)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to albums" })).toHaveAttribute("href", "/");
@@ -331,23 +331,38 @@ describe("album dashboard and open", () => {
     expect(screen.getByRole("button", { name: "Add album" })).toHaveFocus();
   });
 
-  it.each([404, 500])("should distinguish missing album from retryable HTTP %i and never show partial metadata", async (status) => {
+  it.each([
+    [404, "open"],
+    [500, "open"],
+    [404, "workspace"],
+    [500, "workspace"],
+  ] as const)("should distinguish missing album from retryable HTTP %i at %s and never show partial metadata", async (status, operation) => {
     window.history.replaceState(null, "", `/albums/${firstAlbum.id}`);
     const client = buildClient({
-      open: vi
+      [operation]: vi
         .fn()
         .mockRejectedValueOnce(new AlbumRequestError(status, "Request failed"))
-        .mockResolvedValueOnce({ ...firstAlbum, synopsis: "After retry." }),
+        .mockResolvedValueOnce(
+          operation === "open"
+            ? { ...firstAlbum, synopsis: "After retry." }
+            : {
+                year: firstAlbum.year,
+                photoRoot: "/photos",
+                chapters: [],
+                countries: [],
+                spreads: [{ id: "opening", chapter: null, kind: "album_start", slots: [] }],
+              },
+        ),
     });
 
     render(() => <App client={client} />);
 
     expect(screen.getByRole("status", { name: "Loading album" })).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(status === 404 ? "could not be found" : "could not be loaded");
-    expect(screen.queryByRole("heading", { name: firstAlbum.title })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "A year in photographs / 2026" })).not.toBeInTheDocument();
     if (status === 500) {
       fireEvent.click(screen.getByRole("button", { name: "Retry album" }));
-      expect(await screen.findByRole("heading", { name: firstAlbum.title })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "A year in photographs / 2026" })).toBeInTheDocument();
     } else {
       expect(screen.queryByRole("button", { name: "Retry album" })).not.toBeInTheDocument();
     }
@@ -361,6 +376,15 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
     rename: vi.fn().mockResolvedValue(firstAlbum),
     open: vi.fn().mockResolvedValue({ ...firstAlbum, synopsis: "The sea at dawn." }),
     remove: vi.fn().mockResolvedValue(undefined),
+    workspace: vi.fn().mockResolvedValue({
+      year: firstAlbum.year,
+      photoRoot: "/photos",
+      chapters: [],
+      countries: [],
+      spreads: [{ id: "opening", chapter: null, kind: "album_start", slots: [] }],
+    }),
+    createChapter: vi.fn(),
+    updateChapter: vi.fn(),
     ...overrides,
   };
 }

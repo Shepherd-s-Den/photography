@@ -3,6 +3,53 @@ import { makeHttpAlbumClient } from "../../../src/features/albums/api/HttpAlbumC
 import { AlbumRequestError } from "../../../src/features/albums/model/Album";
 
 describe("same-origin album HTTP client", () => {
+  it("should load persisted workspace geometry and send only type-specific chapter inputs", async () => {
+    const workspace = { year: 2026, photoRoot: "/nas/photos", chapters: [], countries: [], spreads: [] };
+    const vacation = {
+      kind: "vacation" as const,
+      name: "Kyoto",
+      countries: ["jp"],
+      start: "2025-12-31",
+      end: "2026-01-01",
+      sourceFolder: "/photos/Kyoto",
+    };
+    const home = { kind: "home" as const, countries: ["ro"], sourceFolder: "/photos/Home" };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(workspace)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "vacation" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "vacation" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "home" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "home" })));
+    const client = makeHttpAlbumClient(fetcher);
+    const expectedVacation = {
+      name: vacation.name,
+      start: vacation.start,
+      end: vacation.end,
+      countries: vacation.countries,
+      sourceFolder: vacation.sourceFolder,
+    };
+    const expectedHome = { countries: home.countries, sourceFolder: home.sourceFolder };
+    const expectedVacationCreation = ["/api/albums/album%2Fid/chapters", { method: "POST", body: JSON.stringify(vacation) }];
+    const expectedVacationUpdate = ["/api/albums/album%2Fid/chapters/chapter%2Fid", { method: "PUT", body: JSON.stringify(expectedVacation) }];
+
+    const loadedWorkspace = await client.workspace("album/id");
+    const createdVacation = await client.createChapter("album/id", vacation);
+    const updatedVacation = await client.updateChapter("album/id", "chapter/id", vacation);
+    const createdHome = await client.createChapter("album/id", home);
+    const updatedHome = await client.updateChapter("album/id", "home", home);
+
+    expect(loadedWorkspace).toEqual(workspace);
+    expect(createdVacation).toEqual({ id: "vacation" });
+    expect(updatedVacation).toEqual({ id: "vacation" });
+    expect(createdHome).toEqual({ id: "home" });
+    expect(updatedHome).toEqual({ id: "home" });
+    expect(fetcher.mock.calls[0]?.[0]).toBe("/api/albums/album%2Fid/workspace");
+    expect(fetcher.mock.calls[1]).toMatchObject(expectedVacationCreation);
+    expect(fetcher.mock.calls[2]).toMatchObject(expectedVacationUpdate);
+    expect(fetcher.mock.calls[3]?.[1]).toMatchObject({ method: "POST", body: JSON.stringify(home) });
+    expect(fetcher.mock.calls[4]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify(expectedHome) });
+  });
   it("should send dashboard album operations with immutable year creation and free-form rename", async () => {
     const album = {
       id: "00000000-0000-0000-0000-000000000001",
