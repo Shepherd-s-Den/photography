@@ -17,13 +17,23 @@
             "name": "page",
             "in": "query",
             "description": "Supply at most once as a 32-bit integer. Malformed, valueless or repeated parameters return 400.",
-            "schema": { "type": "integer", "format": "int32", "minimum": -2147483648, "maximum": 2147483647, "default": 1 }
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": -2147483648,
+              "maximum": 2147483647,
+              "default": 1
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "Selected six-album page",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlbumPage" } } }
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AlbumPage" }
+              }
+            }
           },
           "400": { "$ref": "#/components/responses/ValidationFailure" },
           "500": { "$ref": "#/components/responses/ServiceFailure" }
@@ -32,8 +42,21 @@
       "post": {
         "operationId": "createAlbum",
         "summary": "Create an album",
-        "description": "Atomically creates an empty synopsis, the lowest-ID AlbumStart template's slots with empty placements, and both empty cover sides. The server assigns a stable UUID and immutable UTC creation time.",
-        "requestBody": { "$ref": "#/components/requestBodies/Title" },
+        "description": "Requires an unused immutable year and generates Journey of the Shepherds <year> as the initial title. Atomically creates an empty synopsis, the lowest-ID AlbumStart template's slots with empty placements, and both empty cover sides. The server assigns a stable UUID and immutable UTC creation time.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["year"],
+                "properties": {
+                  "year": { "$ref": "#/components/schemas/AlbumYear" }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "201": { "$ref": "#/components/responses/AlbumSummary" },
           "400": { "$ref": "#/components/responses/ValidationFailure" },
@@ -47,7 +70,7 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "description": "Canonical UUID representation; malformed and unknown IDs share the album_not_found response.",
+          "description": "Canonical hyphenated UUID, case-insensitive on album metadata operations. Malformed and unknown IDs share the album_not_found response; returned IDs are lowercase.",
           "schema": { "type": "string", "format": "uuid" }
         }
       ],
@@ -57,7 +80,11 @@
         "responses": {
           "200": {
             "description": "Album title, synopsis and immutable metadata",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlbumMetadata" } } }
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AlbumMetadata" }
+              }
+            }
           },
           "404": { "$ref": "#/components/responses/AlbumNotFound" },
           "500": { "$ref": "#/components/responses/ServiceFailure" }
@@ -66,7 +93,7 @@
       "patch": {
         "operationId": "renameAlbum",
         "summary": "Rename an album",
-        "description": "Changes only the title; identity, creation time, synopsis and composition remain unchanged.",
+        "description": "Accepts any nonblank title, trimming surrounding whitespace. Changes only the title; year, identity, creation time, synopsis and composition remain unchanged.",
         "requestBody": { "$ref": "#/components/requestBodies/Title" },
         "responses": {
           "200": { "$ref": "#/components/responses/AlbumSummary" },
@@ -85,6 +112,122 @@
         }
       }
     },
+    "/api/albums/{id}/workspace": {
+      "parameters": [{ "$ref": "#/components/parameters/WorkspaceAlbumId" }],
+      "get": {
+        "operationId": "getAlbumWorkspace",
+        "summary": "Read the complete chapter workspace",
+        "description": "Separate from album metadata. Returns the album opening followed by chronological chapter blocks (first day, last day, chapter ID), with Home last. Each block starts with its opening followed by photo spreads in persisted order. Countries is the complete selectable reference catalog, not only the album's represented countries. Empty collections are []; incomplete persisted composition fails rather than returning partial data.",
+        "responses": {
+          "200": {
+            "description": "Complete year-bearing workspace",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Workspace" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/AlbumNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/chapters": {
+      "parameters": [{ "$ref": "#/components/parameters/WorkspaceAlbumId" }],
+      "post": {
+        "operationId": "createChapter",
+        "summary": "Create a vacation or Home chapter",
+        "description": "Atomically saves metadata, country associations, default opening geometry and supplied chronological order. Home is unique and spans the album year. Vacation names are trimmed, nonblank and cannot be Home. Countries must identify distinct catalog entries. Source folders are unique within an album. The 65-interior-spread limit includes all openings and photo spreads but excludes Cover; creation at 64 adds its opening. Invalid input or conflicts return 400 and failed writes leave persisted state unchanged.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "allOf": [
+                      { "$ref": "#/components/schemas/VacationDetails" },
+                      {
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": { "kind": { "const": "vacation" } }
+                      }
+                    ]
+                  },
+                  {
+                    "allOf": [
+                      { "$ref": "#/components/schemas/HomeDetails" },
+                      {
+                        "type": "object",
+                        "required": ["kind"],
+                        "properties": { "kind": { "const": "home" } }
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/ChapterIdentity" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/AlbumNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/chapters/{chapterId}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/WorkspaceAlbumId" },
+        {
+          "name": "chapterId",
+          "in": "path",
+          "required": true,
+          "description": "Lowercase canonical UUID. Malformed, missing or foreign chapter targets return chapter_not_found.",
+          "schema": { "type": "string", "format": "uuid" }
+        }
+      ],
+      "put": {
+        "operationId": "updateChapter",
+        "summary": "Update an owned chapter's metadata",
+        "description": "The saved chapter type selects the details shape: vacation requires name, countries, start, end and sourceFolder; Home requires countries and sourceFolder and retains its year-derived period. No kind field is required or used to change type. Other fields are ignored. Atomically updates metadata, country associations and chronological positions while preserving chapter identity, description, templates, spread/slot IDs and geometry. Conflicts or validation failures return 400 without changing persisted state.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  { "$ref": "#/components/schemas/VacationDetails" },
+                  { "$ref": "#/components/schemas/HomeDetails" }
+                ],
+                "description": "Use the shape belonging to the target's saved kind; the server resolves ownership and type before decoding details."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/ChapterIdentity" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": {
+            "description": "Malformed or missing album, or malformed, missing or foreign chapter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["code"],
+                  "properties": {
+                    "code": { "enum": ["album_not_found", "chapter_not_found"] }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
     "/api/templates/album-start": {
       "get": {
         "operationId": "listAlbumStartTemplates",
@@ -99,7 +242,13 @@
                   "type": "object",
                   "required": ["templates"],
                   "properties": {
-                    "templates": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/AlbumStartTemplate" } }
+                    "templates": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "$ref": "#/components/schemas/AlbumStartTemplate"
+                      }
+                    }
                   }
                 }
               }
@@ -111,6 +260,15 @@
     }
   },
   "components": {
+    "parameters": {
+      "WorkspaceAlbumId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Lowercase canonical UUID. Malformed and missing IDs return album_not_found.",
+        "schema": { "type": "string", "format": "uuid" }
+      }
+    },
     "requestBodies": {
       "Title": {
         "required": true,
@@ -127,9 +285,26 @@
       }
     },
     "responses": {
+      "ChapterIdentity": {
+        "description": "Persisted chapter identity",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["id"],
+              "properties": { "id": { "type": "string", "format": "uuid" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
       "AlbumSummary": {
-        "description": "Album identity, trimmed title and immutable creation time",
-        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AlbumSummary" } } }
+        "description": "Album identity, required immutable year, title and immutable creation time",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/AlbumSummary" }
+          }
+        }
       },
       "ValidationFailure": {
         "description": "Human-readable validation feedback",
@@ -172,19 +347,181 @@
       }
     },
     "schemas": {
-      "AlbumSummary": {
+      "AlbumYear": { "type": "integer", "minimum": 1900, "maximum": 2100 },
+      "CountryIds": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": { "type": "string", "format": "uuid" },
+        "description": "Distinct lowercase canonical UUIDs identifying records in the selectable country catalog."
+      },
+      "SourceFolder": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^/(?!.*[\\\\\\u0000])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*$",
+        "description": "Full backend-visible absolute path, unique within its album and preserved as supplied. Requires nonempty path segments; rejects the bare root, trailing or repeated separators, backslashes, NUL and dot or parent-traversal segments. It need not exist yet."
+      },
+      "HomeDetails": {
         "type": "object",
-        "required": ["id", "title", "createdAt"],
+        "required": ["countries", "sourceFolder"],
+        "properties": {
+          "countries": { "$ref": "#/components/schemas/CountryIds" },
+          "sourceFolder": { "$ref": "#/components/schemas/SourceFolder" }
+        }
+      },
+      "VacationDetails": {
+        "allOf": [
+          { "$ref": "#/components/schemas/HomeDetails" },
+          {
+            "type": "object",
+            "required": ["name", "start", "end"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Trimmed nonblank destination name, other than Home."
+              },
+              "start": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                "description": "Inclusive first calendar day; trips may be outside the album year."
+              },
+              "end": {
+                "type": "string",
+                "format": "date",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                "description": "Inclusive last calendar day, not before start; same-day trips are valid."
+              }
+            }
+          }
+        ]
+      },
+      "Workspace": {
+        "type": "object",
+        "required": ["year", "photoRoot", "chapters", "spreads", "countries"],
+        "properties": {
+          "year": { "$ref": "#/components/schemas/AlbumYear" },
+          "photoRoot": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Configured absolute root used for folder suggestions; the configuration default is /photos. Saved sourceFolder values are full paths, not relative to this value."
+          },
+          "chapters": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Chapter" }
+          },
+          "spreads": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 65,
+            "items": { "$ref": "#/components/schemas/WorkspaceSpread" }
+          },
+          "countries": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/Country" }
+          }
+        }
+      },
+      "Country": {
+        "type": "object",
+        "required": ["id", "name", "code"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string", "minLength": 1 },
+          "code": { "type": "string", "pattern": "^[A-Z]{2}$" }
+        }
+      },
+      "Chapter": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "countries",
+          "start",
+          "end",
+          "sourceFolder",
+          "description"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "kind": { "enum": ["vacation", "home"] },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Destination name; Home for a Home chapter."
+          },
+          "countries": { "$ref": "#/components/schemas/CountryIds" },
+          "start": {
+            "type": "string",
+            "format": "date",
+            "description": "Inclusive first day; January 1 of the album year for Home."
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "description": "Inclusive last day; December 31 of the album year for Home."
+          },
+          "sourceFolder": { "$ref": "#/components/schemas/SourceFolder" },
+          "description": {
+            "type": "string",
+            "description": "Persisted chapter owner text, including the empty string."
+          }
+        }
+      },
+      "WorkspaceSpread": {
+        "type": "object",
+        "required": ["id", "chapter", "kind", "slots"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "chapter": {
+            "type": ["string", "null"],
+            "format": "uuid",
+            "description": "Null for the album opening; otherwise the owning chapter ID."
+          },
+          "kind": { "enum": ["album_start", "chapter_start", "photos_only"] },
+          "slots": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/WorkspaceSlot" },
+            "description": "Photo slots followed by the owner-text slot for openings; photo slots only for photos_only. Geometry is persisted percentages of the full spread axes, not normalized to occupied bounds."
+          }
+        }
+      },
+      "WorkspaceSlot": {
+        "allOf": [
+          { "$ref": "#/components/schemas/TemplateSlot" },
+          {
+            "type": "object",
+            "required": ["id"],
+            "properties": { "id": { "type": "string", "format": "uuid" } }
+          }
+        ]
+      },
+      "AlbumSummary": {
+        "type": "object",
+        "required": ["id", "year", "title", "createdAt"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "year": { "$ref": "#/components/schemas/AlbumYear" },
           "title": { "type": "string", "minLength": 1 },
-          "createdAt": { "type": "string", "format": "date-time", "description": "Immutable UTC instant" }
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Immutable UTC instant"
+          }
         }
       },
       "AlbumMetadata": {
         "allOf": [
           { "$ref": "#/components/schemas/AlbumSummary" },
-          { "type": "object", "required": ["synopsis"], "properties": { "synopsis": { "type": "string" } } }
+          {
+            "type": "object",
+            "required": ["synopsis"],
+            "properties": { "synopsis": { "type": "string" } }
+          }
         ],
         "unevaluatedProperties": false
       },
@@ -192,7 +529,11 @@
         "type": "object",
         "required": ["albums", "page", "pageSize", "totalAlbums", "totalPages"],
         "properties": {
-          "albums": { "type": "array", "maxItems": 6, "items": { "$ref": "#/components/schemas/AlbumSummary" } },
+          "albums": {
+            "type": "array",
+            "maxItems": 6,
+            "items": { "$ref": "#/components/schemas/AlbumSummary" }
+          },
           "page": { "type": "integer", "minimum": 1 },
           "pageSize": { "const": 6 },
           "totalAlbums": { "type": "integer", "minimum": 0 },
@@ -205,7 +546,11 @@
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "name": { "type": "string", "minLength": 1 },
-          "slots": { "type": "array", "minItems": 1, "items": { "$ref": "#/components/schemas/TemplateSlot" } }
+          "slots": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/components/schemas/TemplateSlot" }
+          }
         }
       },
       "TemplateSlot": {
