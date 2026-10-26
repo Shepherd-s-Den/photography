@@ -66,6 +66,7 @@ object SqliteAlbumRepository:
         case None                                     => Option.empty[Album].pure[ConnectionIO]
         case Some((year, title, synopsis, createdAt)) =>
           for
+            _        <- validateComposition(id)
             chapters <- loadChapters(id)
             opening  <- loadAlbumOpening(id)
             _        <- validateCover(id)
@@ -145,6 +146,10 @@ object SqliteAlbumRepository:
             (c.position < 0 OR NOT EXISTS
              (SELECT 1 FROM spread s WHERE s.chapter_id = c.id AND s.kind = 'chapter_start'))""".query[Long].unique.flatMap: count =>
         Either.cond(count === 0L, (), new IllegalArgumentException("Invalid chapter composition")).liftTo[ConnectionIO]
+
+    private def validateComposition(albumId: UUID) =
+      sql"SELECT count(*) FROM invalid_album_composition WHERE album_id = $albumId".query[Long].unique.flatMap: invalid =>
+        Either.cond(invalid === 0L, (), new IllegalArgumentException("Incomplete stored composition")).liftTo[ConnectionIO]
 
     private def loadSpread(row: SpreadRow) =
       val id             = row.id
@@ -312,19 +317,6 @@ object SqliteAlbumRepository:
 
     private given Read[SlotRow] =
       Read[(UUID, String, SlotBox)].map { case (id, kind, box) => (id, kind, box) }
-
-    private given Meta[SpreadEdge] = Meta[String].tiemap[SpreadEdge] {
-      case "top"    => SpreadEdge.Top.asRight[String]
-      case "bottom" => SpreadEdge.Bottom.asRight[String]
-      case "left"   => SpreadEdge.Left.asRight[String]
-      case "right"  => SpreadEdge.Right.asRight[String]
-      case other    => s"Unknown bleed edge $other".asLeft[SpreadEdge]
-    } {
-      case SpreadEdge.Top    => "top"
-      case SpreadEdge.Bottom => "bottom"
-      case SpreadEdge.Left   => "left"
-      case SpreadEdge.Right  => "right"
-    }
 
     private given Meta[CaptionCorner] = Meta[String].tiemap[CaptionCorner] {
       case "top_left"     => CaptionCorner.TopLeft.asRight[String]

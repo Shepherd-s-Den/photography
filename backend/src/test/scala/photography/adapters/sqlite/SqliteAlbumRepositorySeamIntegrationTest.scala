@@ -111,7 +111,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(removed, GetResult.NotFound)
         assertEquals(owned, 0L)
-        assertEquals(templates, 4L)
+        assertEquals(templates, 31L)
 
   test("should roll back every album-owned row when a late cover write fails"):
     buildTransactor.use: xa =>
@@ -273,20 +273,24 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       val countShared = sql"""SELECT (SELECT count(*) FROM country), (SELECT count(*) FROM destination),
                               (SELECT count(*) FROM spread_template), (SELECT count(*) FROM editor_session)"""
         .query[(Long, Long, Long, Long)].unique
-      val insertSecondChapter = sql"""INSERT INTO chapter VALUES
+      val insertSecondChapter =
+        sql"""INSERT INTO chapter (id, album_id, destination_id, description, start_ms, end_ms, position, source_folder) VALUES
                                       ($secondChapterId, $albumId, $destinationId, '', 86400000, 172800000, 1, '/photos/second')"""
       val insertSecondOpening = sql"""INSERT INTO spread (id, template_id, kind, chapter_id, position)
                                       VALUES ($secondOpeningId, $templateId, 'chapter_start', $secondChapterId, 0)"""
-      val insertSecondPhoto = sql"""INSERT INTO spread_photo_slot VALUES ($secondPhotoSlotId, $secondOpeningId, 0, 0, 100, 100)"""
-      val insertSecondText  = sql"""INSERT INTO spread_text_slot VALUES ($secondTextSlotId, $secondOpeningId, 0, 0, 100, 100)"""
+      val insertSecondPhoto  = sql"""INSERT INTO spread_photo_slot VALUES ($secondPhotoSlotId, $secondOpeningId, 0, 0, 100, 100)"""
+      val insertSecondText   = sql"""INSERT INTO spread_text_slot VALUES ($secondTextSlotId, $secondOpeningId, 0, 0, 100, 100)"""
+      val insertFirstChapter = sql"""INSERT INTO chapter (id, album_id, destination_id, description, start_ms, end_ms, position, source_folder)
+        VALUES ($chapterId, $albumId, $destinationId, '', 0, 86400000, 0, '/photos/coast')"""
       val initialiseChapter =
         for
+          _ <- sql"DELETE FROM country WHERE code IN ('IS', 'JP')".update.run
           _ <- sql"INSERT INTO country VALUES ($countryId, 'IS', 'Iceland', '/flags/is.svg')".update.run
           _ <- sql"INSERT INTO destination VALUES ($destinationId, 'Coast')".update.run
           _ <- sql"INSERT INTO destination_country VALUES ($destinationId, $countryId, 0)".update.run
           _ <- sql"INSERT INTO country VALUES (${buildUuid(index = 430).toString}, 'JP', 'Japan', '/flags/jp.svg')".update.run
           _ <- sql"INSERT INTO destination_country VALUES ($destinationId, ${buildUuid(index = 430).toString}, 1)".update.run
-          _ <- sql"INSERT INTO chapter VALUES ($chapterId, $albumId, $destinationId, '', 0, 86400000, 0, '/photos/coast')".update.run
+          _ <- insertFirstChapter.update.run
           _ <- sql"INSERT INTO photo VALUES ($photoId, $chapterId, 'photo.jpg', NULL, NULL, 100, 100, NULL)".update.run
           _ <- sql"INSERT INTO spread_template VALUES ($templateId, 'Chapter', 'chapter_start')".update.run
           _ <- insertTemplateSlot.update.run
@@ -417,7 +421,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(expectedAlbum.countries, Vector(expectedCountry, japan))
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(owned, 0L)
-        assertEquals(shared, (2L, 1L, 6L, 1L))
+        assertEquals(shared, (249L, 1L, 33L, 1L))
 
   private def buildTransactor =
     for

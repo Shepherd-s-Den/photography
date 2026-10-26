@@ -15,4 +15,6 @@ A photography application for managing persisted albums and opening their metada
 
 ## Local SQLite development
 
-The initial V1 schema is still edited in place. Older V1 databases fail startup validation and require explicit resolution; this development baseline does not migrate their contents or assign missing album years. Preserve existing databases and select a fresh `PHOTOGRAPHY_SQLITE_PATH` for isolated development.
+SQLite applies additive migrations to the current V1 baseline, preserving saved albums, country identities and spread geometry while adding reference catalogs and chapter integrity constraints. Databases from earlier, checksum-incompatible V1 development schemas still require explicit resolution; migrations do not invent missing album years. Preserve existing databases and select a fresh `PHOTOGRAPHY_SQLITE_PATH` for isolated development.
+
+The supported runtime is one backend instance. Its shared chapter-manager mutex coordinates concurrent editors' read/decision/write operations; SQLite transactions independently guarantee atomic chapter metadata, country associations, opening slots and supplied order. This does not establish multi-process business-rule coordination.

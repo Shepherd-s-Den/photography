@@ -53,7 +53,7 @@ object SqliteSpreadTemplateRepository:
         val photos = rows.collect { case ("photo", box) => box }.toVector
         val texts  = rows.collect { case ("text", box) => box }
         texts match
-          case text :: Nil if photos.size + 1 === rows.size => (photos, text).pure[ConnectionIO]
+          case text :: Nil if photos.nonEmpty && photos.size + 1 === rows.size => (photos, text).pure[ConnectionIO]
           case _ => new IllegalArgumentException(s"Invalid opening slots for template $id").raiseError[ConnectionIO, (Vector[SlotBox], SlotBox)]
 
     private given Meta[SpreadTemplateName] =

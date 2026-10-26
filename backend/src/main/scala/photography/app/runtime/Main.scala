@@ -8,10 +8,8 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.adapters.http.{AlbumApi, HealthRoutes, SpreadTemplateApi, StaticSite}
-import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteSpreadTemplateRepository}
 import photography.app.config.AppConfig
 import photography.capabilities.{Clock, IdGenerator}
-import photography.usecases.{AlbumManager, SpreadTemplateManager}
 import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
@@ -24,17 +22,14 @@ object Main extends IOApp.Simple:
     AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
       AppResourcesBuilder.make(config).build[IO].use: resources =>
         for
-          _ <- resources.flyway.migrate
-          _ <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
-          _ <- buildHttpServer(config, buildHttpApp(config, resources)).useForever.void
+          _        <- resources.flyway.migrate
+          _        <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
+          managers <- AppManagers.make[IO](resources.sqlite, config.albums.pageSize)
+          _        <- buildHttpServer(config, buildHttpApp(managers)).useForever.void
         yield ()
 
-  private def buildHttpApp(config: AppConfig, resources: AppResourcesBuilder.AppResources[IO]) =
-    val templateRepository = SqliteSpreadTemplateRepository.make[IO](resources.sqlite)
-    val templates          = SpreadTemplateManager.make(templateRepository)
-    val albumRepository    = SqliteAlbumRepository.make[IO](resources.sqlite)
-    val albums             = AlbumManager.make(albumRepository, templates, config.albums.pageSize)
-    val api                = HealthRoutes.routes[IO] <+> AlbumApi.make(albums).routes <+> SpreadTemplateApi.make(templates).routes
+  private def buildHttpApp(managers: AppManagers[IO]) =
+    val api = HealthRoutes.routes[IO] <+> AlbumApi.make(managers.albums).routes <+> SpreadTemplateApi.make(managers.templates).routes
     StaticSite.make(api, "frontend").app
 
   private def buildHttpServer(config: AppConfig, app: HttpApp[IO]) =
