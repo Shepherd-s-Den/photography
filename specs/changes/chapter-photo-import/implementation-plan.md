@@ -1,48 +1,94 @@
 # Chapter photo import implementation slices
 
-The proposal owns behavior. This plan assigns delivery responsibility; every slice starts only after the preceding PR merges and the lifecycle branch is reconciled.
+The proposal owns behavior. Each slice waits for the preceding PR's merge and branch reconciliation; every implementation PR is limited to **1,000 additions plus deletions, including tests**.
 
-Each Implementation PR must contain at most **1,000 additions plus deletions, including tests** against its merge base. Count the complete diff before either review round.
-
-If a slice exceeds that ceiling, split at a real responsibility and revise ownership before implementation; never omit tests or split formatting from its behavior.
+Split an oversized slice by responsibility and revise ownership before implementation, never by omitting tests or separating formatting.
 
 ## Delivery sequence
 
-| Slice | Responsibility and consumers | Criterion ownership | Independently verifiable outcome |
+| Slice | Responsibility | Criterion ownership | Independently verifiable outcome |
 | --- | --- | --- | --- |
-| 1 | Source inventory and JPEG metadata at the filesystem boundary | I3, I4, I11; ordering portion of P3 | Real temporary folders prove scope, symlinks, unsupported counts, EXIF ordering and unstable-read rejection. |
-| 2 | Thumbnail generation and managed-file lifecycle | T1, T2, T4 | Real JPEG fixtures prove orientation, dimensions, exact byte boundary, replacement and safe cleanup/retry. |
-| 3 | Persistent photo inventory and placement invalidation | I7, I13; durable-publication portion of I12 | SQLite seam proves uniqueness, stable IDs, atomic ready-image metadata and cascade deletion without deleting slots. |
-| 4 | Import orchestration and single-instance coordination | I1, I2, I5, I6, I8-I12 | Application scenarios prove progressive results, triggers, deletion only after enumeration, coalescing and folder-version rejection. |
-| 5 | Same-origin photo API, image delivery and runtime composition | T3; public integration of I1-I13 and T1-T4 | Real HTTP/runtime seams prove API-only creation starts work, status/Refresh/recovery work and originals cannot be served. |
-| 6 | Photo-selector state and progress integration | P5-P7, P10 | Component scenarios prove progressive counts, Refresh/Retry, no photo action and failure isolation across chapter switches. |
-| 7 | Chronological row layout and selector sizing/accessibility | P1-P4, P8, P9, P11 | Browser/layout tests prove full ordered rows, whole images, gutters, shared-grip resize, width restoration/retention and focus behavior. |
-| 8 | Grouped spread navigation and metadata presentation | N1-N7 | Component/browser scenarios prove individual navigation, centered miniature captions, URL history and editable-only folders. |
+| 1 | Source inventory / JPEG metadata | I3, I4, I11; ordering in P3 | Temporary folders prove JPEG scope, symlink rejection, unsupported counts, missing/invalid EXIF fallback and unstable reads. |
+| 2 | Thumbnail generation / managed files | T1, T2, T4 | Real images prove orientation, dimensions, exact byte boundary and safe replacement/cleanup/retry. |
+| 3 | Persistence / placement invalidation | I7, I13; durable publication in I12 | SQLite tests prove identity, constraints, generation-safe publication, migration and placement-only cascades. |
+| 4 | Import application / coordination | I1, I2, I5, I6, I8-I12 | Application tests prove triggers, progress, enumeration safety, coalescing, supersession and recovery. |
+| 5 | HTTP / runtime composition | T3; public integration of I1-I13, T1-T4 | HTTP tests prove API-only import, inventory/status/Refresh/recovery and thumbnail-only delivery. |
+| 6 | Scoped selector state | P5-P7, P10; scope integration of P1/P3 | Component/HTTP tests prove chapter versus album scope, global order, counts, Refresh, failures and empty albums. |
+| 7 | Rows / resize / accessibility | P1-P4, P8, P9, P11 | Browser tests prove ordered full-width rows, whole images, portrait emphasis, shared grip, retained width and focus. |
+| 8 | Spread navigation / metadata | N1-N7 | Browser tests prove grouped individual-spread navigation, URL history, captions and editable-only folders. |
 
-Each row owns all enumerated failure cases for its criteria. Slice 5 integrates earlier guarantees rather than redefining their policy; slice 7 consumes slice 1 ordering without duplicating it.
+Each owner covers its enumerated edge cases. Integration slices consume earlier policy instead of duplicating it.
 
-## Design and validation obligations
+## Caller-first boundaries
 
-| Boundary | Required design-map decision before tests |
+Sketches inform each slice's required design map; they are not production declarations.
+
+```scala
+enum PhotoScope:
+  case Chapter(id: ChapterId)
+  case Album(id: AlbumId)
+
+type CapturedAt = java.time.LocalDateTime
+
+enum ImportStatus:
+  case Pending, Running, Complete, Failed
+
+final case class ChapterImport(
+    chapter: ChapterId, status: ImportStatus, unsupported: Int
+)
+
+trait PhotoBrowser[F[_]]:
+  def inventory(scope: PhotoScope): F[PhotoBrowser.InventoryResult]
+  def refresh(scope: PhotoScope): F[PhotoBrowser.RefreshResult]
+
+object PhotoBrowser:
+  enum InventoryResult:
+    case Found(photos: Vector[Photo], unplaced: Int, imports: Vector[ChapterImport])
+    case NotFound
+    case Failed
+  enum RefreshResult:
+    case Started, AlreadyRunning, NotFound, Failed
+```
+
+| Consumer | Effectful owner | Responsibility |
+| --- | --- | --- |
+| Chapter save / scoped Refresh / recovery | Import application | Schedule/coalesce; keep image processing outside chapter locks. |
+| Import application | Source inventory | Enumerate/read JPEGs; validate containment and stable source evidence. |
+| Import application | Thumbnail generation | Encode bounded orientation-correct JPEGs; justify the chosen image library before introduction. |
+| Import application | Photo persistence | Atomically commit current-generation metadata and placement invalidation. |
+| Import application / image delivery | Thumbnail storage | Publish/read/delete files; protect references and in-flight work. |
+| HTTP inventory / Refresh | Photo browser | Resolve scope ownership; aggregate per-chapter status and fan out Refresh. |
+
+## SQLite target
+
+Extend `backend/src/main/resources/db/V1__create_photography_schema.sql` through Flyway. Preserve user databases; never edit applied migrations or reset data.
+
+| Record | Target fields / constraints |
 | --- | --- |
-| Source inventory | Caller-owned typed file results; filesystem containment, metadata decoding and change evidence stay at this boundary. |
-| Thumbnail generation | Encoding is independent of scanning, synchronization and HTTP; choose and justify the image library in the first consuming slice. |
-| Managed files | Own safe publication and removal; never delete a file still referenced by another photo or active import. |
-| Persistence | Represent ready thumbnails and current source generation; atomically enforce supplied decisions and identity constraints. |
-| Import application | Own triggers, progressive lifecycle, supersession and restart policy; coordinate with chapter mutations across the supported single backend instance. |
-| HTTP | Consume application contracts only; validate wire data and define the OpenAPI operations/status representations before exposing them. |
-| Frontend | Keep transport validation, import state, layout calculation and navigation responsibilities at their existing owning seams. |
+| `photo` | Retain ID/chapter/source/caption and unique chapter/source; add source hash and ready thumbnail dimensions/bytes with positive/bounded `CHECK`s. |
+| Capture time | Nullable fixed-width ISO local date/time text with nine fractional digits; source/SQLite adapters validate their representations; lexical order matches local chronology. |
+| Ready thumbnail | Location/dimensions/bytes all present together or absent together; explicit `IS NULL` / `IS NOT NULL` checks. |
+| Placement | Retain photo foreign key `ON DELETE CASCADE`; never cascade to slots. |
 
-Use existing photo identity, location, dimensions and placement contracts where they fit. Separate scanning, encoding, file storage and orchestration rather than transplanting the spike adapter.
+```sql
+CREATE TABLE chapter_photo_import (
+  chapter_id TEXT PRIMARY KEY NOT NULL
+    REFERENCES chapter (id) ON DELETE CASCADE,
+  generation INTEGER NOT NULL CHECK (generation >= 0),
+  status TEXT NOT NULL
+    CHECK (status IN ('pending', 'running', 'complete', 'failed')),
+  unsupported_count INTEGER NOT NULL CHECK (unsupported_count >= 0)
+) STRICT;
+```
 
-No production dependency is selected by this Spec PR. A proposed image library must document its required JPEG/EXIF capability and pass maintainer review before introduction.
+Generation checks and photo writes share one transaction. Thumbnail bytes use `CHECK (thumbnail_bytes BETWEEN 1 AND 300000)` alongside ready-field null checks.
 
-Each slice projects its criteria and edge cases into tests first, records the caller-first design map, and follows the current local shared/stack checklists.
+Replace `Photo.maybeCapturedAt: Option[Instant]` with optional camera-local time. Preserve legacy `captured_at_ms` metadata during additive migration; populate local capture time only from source EXIF, never an assumed timezone.
 
-Run the applicable AGENTS.md component gates and `dagger call verify`, both sequential independent reviews, dispositions and independent repair verification before each PR.
+## Gates and archive
 
-## Completion and archival
+Before each slice: caller-first design map, criteria/edge-case test projection and observed expected failures. Define HTTP wire contracts in OpenAPI before exposing slice 5.
 
-After all eight slices merge, compare the real local journey with the approved proposal and retained confirmed spike. Include source mutation, progressive loading and restart scenarios absent from the spike.
+Before each PR: applicable AGENTS.md gates, both fresh sequential reviews, dispositions and independent repair verification. Count the complete diff before each review.
 
-The separate Archive + Living Docs PR applies every Doc Sync entry, checks complete merged coverage and archives the proposal and this plan. Retain the spike until that PR merges.
+After all slices merge: compare the real journey with the retained spike, apply every Doc Sync entry and archive both documents. Retain the runnable spike through the archive PR's merge.
