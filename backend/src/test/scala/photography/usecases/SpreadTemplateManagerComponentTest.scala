@@ -24,32 +24,32 @@ final class SpreadTemplateManagerComponentTest extends CatsEffectSuite:
   )
 
   test("should preserve the complete ordered album and chapter template catalogs"):
-    val service = buildService(
+    val manager = buildManager(
       SpreadTemplateRepository.ListAlbumStartTemplatesResult.Listed(albumTemplates),
       SpreadTemplateRepository.ListChapterStartTemplatesResult.Listed(chapterTemplates)
     )
 
     for
-      albums   <- service.listAlbumStartTemplates
-      chapters <- service.listChapterStartTemplates
+      albums   <- manager.listAlbumStartTemplates
+      chapters <- manager.listChapterStartTemplates
     yield
       assertEquals(albums, ListAlbumStartTemplatesResult.Listed(albumTemplates))
       assertEquals(chapters, ListChapterStartTemplatesResult.Listed(chapterTemplates))
 
   test("should report unavailable album and chapter template catalogs explicitly"):
-    val service = buildService(
+    val manager = buildManager(
       SpreadTemplateRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure),
       SpreadTemplateRepository.ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure)
     )
 
     for
-      albums   <- service.listAlbumStartTemplates
-      chapters <- service.listChapterStartTemplates
+      albums   <- manager.listAlbumStartTemplates
+      chapters <- manager.listChapterStartTemplates
     yield
       assertEquals(albums, ListAlbumStartTemplatesResult.Failed)
       assertEquals(chapters, ListChapterStartTemplatesResult.Failed)
 
-  private def buildService(
+  private def buildManager(
       albums: SpreadTemplateRepository.ListAlbumStartTemplatesResult,
       chapters: SpreadTemplateRepository.ListChapterStartTemplatesResult
   ) =

@@ -28,15 +28,15 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
 
   test(s"should page albums newest-first with $pageSize per page and clamp requests to the last page"):
     val refs      = Refs()
-    val service   = buildService(refs, albums = thirteenAlbums)
+    val manager   = buildManager(refs, albums = thirteenAlbums)
     val lastPage  = AlbumPage(Vector(buildAlbum(index = 0)), page = 3, pageSize = 6, totalAlbums = 13, totalPages = 3)
     val emptyPage = AlbumPage(albums = Vector.empty[Album], page = 1, pageSize = 6, totalAlbums = 0, totalPages = 0)
 
     for
-      selected  <- service.list(page = 99)
+      selected  <- manager.list(page = 99)
       calls     <- refs.listCalls.get
-      firstPage <- service.list(page = 1)
-      empty     <- buildService(refs).list(page = 1)
+      firstPage <- manager.list(page = 1)
+      empty     <- buildManager(refs).list(page = 1)
     yield
       assertEquals(selected, ListAlbumsResult.Listed(lastPage))
       assertEquals(calls, Vector(0 -> 6, 12 -> 6))
@@ -44,8 +44,8 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       assertEquals(empty, ListAlbumsResult.Listed(emptyPage))
 
   test("should report failure when either album page query fails"):
-    val firstPageFails    = buildService(Refs(), maybeListFailureOffset = 0.some).list(page = 1)
-    val selectedPageFails = buildService(Refs(), albums = thirteenAlbums, maybeListFailureOffset = 12.some).list(page = 99)
+    val firstPageFails    = buildManager(Refs(), maybeListFailureOffset = 0.some).list(page = 1)
+    val selectedPageFails = buildManager(Refs(), albums = thirteenAlbums, maybeListFailureOffset = 12.some).list(page = 99)
 
     for
       first    <- firstPageFails
@@ -85,14 +85,14 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       )
 
     for
-      result  <- buildService(refs, listResult = listed, currentTime = suppliedTime).create(year = selectedYear, title = "Asian capitals")
+      result  <- buildManager(refs, listResult = listed, currentTime = suppliedTime).create(year = selectedYear, title = "Asian capitals")
       created <- refs.maybeCreated.get
     yield
       assertEquals(result, CreateAlbumResult.Created(expectedAlbum))
       assertEquals(created, (expectedAlbum, expectedCover).some)
 
   test("should report failure when the atomic creation write fails"):
-    buildService(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.DatabaseFailure))
+    buildManager(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.DatabaseFailure))
       .create(year = selectedYear, title = "Asian capitals")
       .map(assertEquals(_, CreateAlbumResult.Failed))
 
@@ -100,7 +100,7 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     val refs = Refs()
 
     for
-      result  <- buildService(refs, listResult = ListAlbumStartTemplatesResult.Failed).create(year = selectedYear, title = "Asian capitals")
+      result  <- buildManager(refs, listResult = ListAlbumStartTemplatesResult.Failed).create(year = selectedYear, title = "Asian capitals")
       created <- refs.maybeCreated.get
     yield
       assertEquals(result, CreateAlbumResult.Failed)
@@ -111,10 +111,10 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     val refs  = Refs()
 
     for
-      found    <- buildService(Refs(), getResult = AlbumRepository.GetResult.Found(album)).get(AlbumId(buildUuid(index = 2)))
-      missing  <- buildService(refs, getResult = AlbumRepository.GetResult.NotFound).get(AlbumId(buildUuid(index = 1)))
+      found    <- buildManager(Refs(), getResult = AlbumRepository.GetResult.Found(album)).get(AlbumId(buildUuid(index = 2)))
+      missing  <- buildManager(refs, getResult = AlbumRepository.GetResult.NotFound).get(AlbumId(buildUuid(index = 1)))
       lastRead <- refs.maybeLastReadId.get
-      failed   <- buildService(Refs(), getResult = AlbumRepository.GetResult.Failed(Failure.DatabaseFailure)).get(AlbumId(buildUuid(index = 1)))
+      failed   <- buildManager(Refs(), getResult = AlbumRepository.GetResult.Failed(Failure.DatabaseFailure)).get(AlbumId(buildUuid(index = 1)))
     yield
       assertEquals(found, GetAlbumResult.Found(album))
       assertEquals(missing, GetAlbumResult.NotFound)
@@ -122,9 +122,9 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       assertEquals(failed, GetAlbumResult.Failed)
 
   test("should report an occupied year as a creation conflict rather than a service failure"):
-    val service = buildService(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.YearAlreadyUsed))
+    val manager = buildManager(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.YearAlreadyUsed))
 
-    service.create(year = selectedYear, title = "Asian capitals").map(assertEquals(_, CreateAlbumResult.YearAlreadyUsed))
+    manager.create(year = selectedYear, title = "Asian capitals").map(assertEquals(_, CreateAlbumResult.YearAlreadyUsed))
 
   test("should rename an album and preserve missing and failed write outcomes"):
     val refs  = Refs()
@@ -137,7 +137,7 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     )
 
     for
-      results <- cases.traverse(c => buildService(refs, renameResult = c.response).rename(album.id, title = album.title))
+      results <- cases.traverse(c => buildManager(refs, renameResult = c.response).rename(album.id, title = album.title))
       changed <- refs.maybeRenamedTitle.get
     yield
       assertEquals(results, cases.map(_.expected))
@@ -145,12 +145,12 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
 
   test("should delete an existing Album by id, report not found, and report failure when persistence fails"):
     val refs        = Refs()
-    val unavailable = buildService(Refs(), deleteResult = AlbumRepository.DeleteResult.Failed(Failure.DatabaseFailure))
+    val unavailable = buildManager(Refs(), deleteResult = AlbumRepository.DeleteResult.Failed(Failure.DatabaseFailure))
 
     for
-      deleted   <- buildService(refs, deleteResult = AlbumRepository.DeleteResult.Deleted).delete(AlbumId(buildUuid(index = 1)))
+      deleted   <- buildManager(refs, deleteResult = AlbumRepository.DeleteResult.Deleted).delete(AlbumId(buildUuid(index = 1)))
       deletedId <- refs.maybeDeletedId.get
-      missing   <- buildService(Refs()).delete(AlbumId(buildUuid(index = 1)))
+      missing   <- buildManager(Refs()).delete(AlbumId(buildUuid(index = 1)))
       failed    <- unavailable.delete(AlbumId(buildUuid(index = 1)))
     yield
       assertEquals(deleted, DeleteAlbumResult.Deleted)
@@ -166,7 +166,7 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     val maybeDeletedId: Ref[IO, Option[AlbumId]]       = Ref.unsafe(None)
 
   // scalafix:off DisableSyntax.defaultArgs
-  private def buildService(
+  private def buildManager(
       refs: Refs,
       albums: Vector[Album] = Vector.empty[Album],
       maybeListFailureOffset: Option[Int] = None,
