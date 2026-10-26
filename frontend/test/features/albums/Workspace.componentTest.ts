@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { describePeriod, isCalendarDay, suggestFolder, validateChapter } from "../../../src/features/albums/workspace/ChapterDetails";
-import { findSelection } from "../../../src/features/albums/workspace/AlbumWorkspace";
+import { findSelection, findReaderNavigation } from "../../../src/features/albums/workspace/WorkspaceSelection";
 import { getChapterCapacityReason } from "../../../src/features/albums/workspace/ChapterOutline";
 import { getCoverCredits } from "../../../src/features/albums/workspace/Canvas";
 import { searchCountries } from "../../../src/features/albums/workspace/CountryPicker";
@@ -107,6 +107,30 @@ describe("workspace URL selection", () => {
     expect(findSelection(spreads, "photo")).toEqual({ kind: "spread", spread: spreads[2] });
     expect(findSelection(spreads, "foreign")).toEqual({ kind: "invalid" });
     expect(findSelection([], null)).toEqual({ kind: "invalid" });
+  });
+
+  it.each([
+    ["cover", undefined, null],
+    [null, "cover", "chapter-opening"],
+    ["chapter", null, "photo"],
+    ["photo", "chapter-opening", "home-opening"],
+    ["home", "photo", undefined],
+    ["foreign", undefined, undefined],
+  ] as const)("should traverse persisted Reader order from %s without wrapping", (part, previous, next) => {
+    const spreads = [
+      { id: "album-opening", chapter: null, kind: "album_start" as const, slots: [] },
+      { id: "chapter-opening", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
+      { id: "photo", chapter: "chapter", kind: "photos_only" as const, slots: [] },
+      { id: "home-opening", chapter: "home", kind: "chapter_start" as const, slots: [] },
+    ];
+
+    expect(findReaderNavigation(spreads, findSelection(spreads, part))).toEqual({ previous, next });
+  });
+
+  it("should navigate an album without chapters from its opening to Cover", () => {
+    const spreads = [{ id: "opening", chapter: null, kind: "album_start" as const, slots: [] }];
+
+    expect(findReaderNavigation(spreads, findSelection(spreads, null))).toEqual({ previous: "cover", next: undefined });
   });
 });
 

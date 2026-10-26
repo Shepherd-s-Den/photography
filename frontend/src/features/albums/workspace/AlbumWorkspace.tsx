@@ -1,10 +1,12 @@
 import { Show, createMemo, createSignal, onCleanup, untrack } from "solid-js";
 import type { Album, AlbumClient } from "../model/Album";
-import type { Chapter, Spread, Workspace } from "../model/Workspace";
+import type { Chapter, Workspace } from "../model/Workspace";
 import { ChapterDialog } from "./ChapterDialog";
 import { ChapterOutline, getChapterCapacityReason } from "./ChapterOutline";
 import { ChapterMetadata } from "./ChapterMetadata";
-import { CoverCanvas, SpreadCanvas } from "./Canvas";
+import { CoverCanvas, SpreadCanvas, coverAspectRatio, spreadAspectRatio } from "./Canvas";
+import { FullscreenReader } from "./FullscreenReader";
+import { findReaderNavigation, findSelection } from "./WorkspaceSelection";
 import "./workspace.css";
 
 export function AlbumWorkspace(props: {
@@ -27,6 +29,16 @@ export function AlbumWorkspace(props: {
   });
   const chapter = createMemo(() => props.workspace.chapters.find((candidate) => candidate.id === selectedSpread()?.chapter));
   const label = createMemo(() => chapter()?.name ?? "Album opening");
+  const readerLabel = createMemo(() =>
+    selection().kind === "invalid"
+      ? ""
+      : part() === "cover"
+        ? "Cover"
+        : selectedSpread()?.kind === "photos_only"
+          ? `${label()} · Photo spread`
+          : label(),
+  );
+  const navigation = createMemo(() => findReaderNavigation(props.workspace.spreads, selection()));
   const refreshReason = createMemo(() =>
     refreshing() ? "Refreshing saved workspace. Please wait." : refreshError() ? "Reload the saved workspace before editing chapters." : undefined,
   );
@@ -156,31 +168,35 @@ export function AlbumWorkspace(props: {
                 </button>
               </div>
             </Show>
-            <Show when={part() === "cover"}>
-              <h2>Cover</h2>
-              <CoverCanvas title={props.album.title} year={props.workspace.year} />
-            </Show>
-            <Show when={selectedSpread()}>
-              {(spread) => (
-                <>
-                  <h2>
-                    {label()}
-                    <Show when={spread().kind === "photos_only"}> · Photo spread</Show>
-                  </h2>
-                  <SpreadCanvas slots={spread().slots} text={chapter()?.name ?? props.album.title} label={label()} />
-                  <Show when={chapter()}>
-                    {(owner) => (
-                      <ChapterMetadata
-                        chapter={owner()}
-                        countries={props.workspace.countries}
-                        unavailable={refreshReason()}
-                        onEdit={(opener) => {
-                          setDialog({ chapter: owner(), opener });
-                        }}
-                      />
-                    )}
-                  </Show>
-                </>
+            <FullscreenReader
+              aspectRatio={part() === "cover" ? coverAspectRatio : spreadAspectRatio}
+              label={readerLabel()}
+              unavailable={selection().kind === "invalid" ? "Choose an available album part to enter Reader." : refreshReason()}
+              previousReason={navigation().previous === undefined ? "Cover is the first part." : undefined}
+              nextReason={navigation().next === undefined ? "This is the last spread." : undefined}
+              onNavigate={(direction) => {
+                const next = direction === -1 ? navigation().previous : navigation().next;
+                /* v8 ignore next -- Endpoint controls and keyboard guards prevent unavailable navigation. */
+                if (next !== undefined) select(next);
+              }}
+            >
+              <Show when={part() === "cover"}>
+                <CoverCanvas title={props.album.title} year={props.workspace.year} />
+              </Show>
+              <Show when={selectedSpread()}>
+                {(spread) => <SpreadCanvas slots={spread().slots} text={chapter()?.name ?? props.album.title} label={label()} />}
+              </Show>
+            </FullscreenReader>
+            <Show when={chapter()}>
+              {(owner) => (
+                <ChapterMetadata
+                  chapter={owner()}
+                  countries={props.workspace.countries}
+                  unavailable={refreshReason()}
+                  onEdit={(opener) => {
+                    setDialog({ chapter: owner(), opener });
+                  }}
+                />
               )}
             </Show>
           </Show>
@@ -213,15 +229,4 @@ export function AlbumWorkspace(props: {
       </Show>
     </section>
   );
-}
-
-export type Selection = { kind: "cover" } | { kind: "spread"; spread: Spread } | { kind: "invalid" };
-
-export function findSelection(spreads: readonly Spread[], part: string | null): Selection {
-  if (part === "cover") return { kind: "cover" };
-  const spread =
-    part === null
-      ? spreads.find((candidate) => candidate.kind === "album_start")
-      : spreads.find((candidate) => candidate.id === part || (candidate.chapter === part && candidate.kind === "chapter_start"));
-  return spread === undefined ? { kind: "invalid" } : { kind: "spread", spread };
 }
