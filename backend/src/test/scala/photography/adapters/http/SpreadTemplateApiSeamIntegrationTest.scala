@@ -16,13 +16,13 @@ import photography.usecases.SpreadTemplateManager.ListAlbumStartTemplatesResult
 import java.util.UUID
 
 final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
-  private val photoBox      = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
-  private val synopsisBox   = SlotBox(21.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
+  private val photoBox      = SlotBox(x = 0.0.refineUnsafe, y = 0.0.refineUnsafe, width = 21.0.refineUnsafe, height = 28.0.refineUnsafe)
+  private val synopsisBox   = SlotBox(x = 21.0.refineUnsafe, y = 0.0.refineUnsafe, width = 21.0.refineUnsafe, height = 28.0.refineUnsafe)
   private val firstTemplate = SpreadTemplate.AlbumStart(
     SpreadTemplateId(new UUID(0L, 2L)),
-    "Synopsis right".refineUnsafe,
-    Vector(photoBox),
-    synopsisBox
+    name = "Synopsis right".refineUnsafe,
+    photoSlots = Vector(photoBox),
+    textSlot = synopsisBox
   )
   private val secondTemplate = firstTemplate.copy(id = SpreadTemplateId(new UUID(0L, 4L)), name = "Second".refineUnsafe)
   private val catalog        = NonEmptyList.of(firstTemplate, secondTemplate)

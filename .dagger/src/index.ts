@@ -1,9 +1,9 @@
 import type * as Dagger from "@dagger.io/dagger";
 import { argument, func, object } from "@dagger.io/dagger";
 import { WORKSPACE_IGNORE } from "./buildEnv";
-import { backendCheck } from "./hooks/backend";
-import { frontendCheck } from "./hooks/frontend";
-import { localSetupCheck, pipelineCheck } from "./hooks/pipeline";
+import { checkBackend } from "./hooks/backend";
+import { checkFrontend } from "./hooks/frontend";
+import { checkLocalSetup, checkPipeline } from "./hooks/pipeline";
 import * as Git from "./hooks/git";
 import * as Selection from "./selection";
 
@@ -16,8 +16,10 @@ export class Photography {
     @argument({ defaultPath: "/", ignore: WORKSPACE_IGNORE }) source: Dagger.Directory,
     base = "",
   ): Promise<string> {
-    const components = Selection.componentsOf(
-      Selection.selectAffected(Selection.parseChangedPaths(await Git.changedPaths(source, base))),
+    const components = Selection.listSelectedComponents(
+      Selection.selectAffected(
+        Selection.parseChangedPaths(await Git.readChangedPaths(source, base)),
+      ),
     );
     return components.length === 0 ? "none" : components.join(",");
   }
@@ -31,8 +33,10 @@ export class Photography {
   ): Promise<string> {
     const selection = all
       ? ({ kind: "all" } as const)
-      : Selection.selectAffected(Selection.parseChangedPaths(await Git.changedPaths(source, base)));
-    const components = Selection.componentsOf(selection);
+      : Selection.selectAffected(
+          Selection.parseChangedPaths(await Git.readChangedPaths(source, base)),
+        );
+    const components = Selection.listSelectedComponents(selection);
     const done: string[] = [];
     if (components.includes("backend")) {
       await this.backendCheck(source);
@@ -44,7 +48,7 @@ export class Photography {
     }
     if (components.includes("pipeline")) {
       await this.pipelineCheck(source);
-      await localSetupCheck(source).stdout();
+      await checkLocalSetup(source).stdout();
       done.push("pipeline");
     }
     return done.length === 0 ? "verify: nothing affected" : `verify: ${done.join(", ")} ok`;
@@ -54,20 +58,20 @@ export class Photography {
   backendCheck(
     @argument({ defaultPath: "/", ignore: WORKSPACE_IGNORE }) source: Dagger.Directory,
   ): Promise<string> {
-    return backendCheck(source).stdout();
+    return checkBackend(source).stdout();
   }
 
   @func()
   frontendCheck(
     @argument({ defaultPath: "/", ignore: WORKSPACE_IGNORE }) source: Dagger.Directory,
   ): Promise<string> {
-    return frontendCheck(source).stdout();
+    return checkFrontend(source).stdout();
   }
 
   @func()
   pipelineCheck(
     @argument({ defaultPath: "/", ignore: WORKSPACE_IGNORE }) source: Dagger.Directory,
   ): Promise<string> {
-    return pipelineCheck(source).stdout();
+    return checkPipeline(source).stdout();
   }
 }

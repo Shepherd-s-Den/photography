@@ -44,8 +44,9 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 ## Naming
 
+- Name functions and methods with action verbs that describe their result: `findCreationConflict` for an optional conflict, `hasCreationConflict` for a Boolean.
 - Optional fields, values, and parameters use names that make optionality apparent, such as `maybeDescription`.
-- Values whose types do not reveal their role are named at the call site; self-describing values remain positional.
+- Where named arguments are supported, name literal and placeholder arguments, including years, titles, descriptions, timestamps, coordinates and empty collections, at the call site; self-describing domain values remain positional.
 - In TypeScript, use named imports when they keep the import readable. Keep framework imports named when compiler, lint, or reactivity semantics depend on those bindings.
 
 ## Composition and abstraction

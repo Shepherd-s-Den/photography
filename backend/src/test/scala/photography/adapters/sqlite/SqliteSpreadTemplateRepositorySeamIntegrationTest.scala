@@ -25,27 +25,27 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
       val repository     = SqliteSpreadTemplateRepository.make[IO](xa)
       val expectedPhotos = List(
         Vector(
-          buildBox(0.293982, 0.914609, 24.695519, 48.758744),
-          buildBox(25.199487, 0.914609, 24.695519, 48.758744),
-          buildBox(0.293982, 50.326646, 24.695519, 48.758744),
-          buildBox(25.199487, 50.326646, 24.695519, 48.758744)
+          buildBox(x = 0.293982, y = 0.914609, width = 24.695519, height = 48.758744),
+          buildBox(x = 25.199487, y = 0.914609, width = 24.695519, height = 48.758744),
+          buildBox(x = 0.293982, y = 50.326646, width = 24.695519, height = 48.758744),
+          buildBox(x = 25.199487, y = 50.326646, width = 24.695519, height = 48.758744)
         ),
-        Vector(buildBox(0.293982, 0.914609, 49.601025, 98.170781)),
+        Vector(buildBox(x = 0.293982, y = 0.914609, width = 49.601025, height = 98.170781)),
         Vector(
-          buildBox(0.293982, 0.914609, 16.393684, 38.870004),
-          buildBox(16.897652, 0.914609, 16.393684, 38.870004),
-          buildBox(33.501323, 0.914609, 16.393684, 38.870004),
-          buildBox(0.293982, 40.437905, 24.695519, 58.553948),
-          buildBox(25.199487, 40.437905, 24.695519, 58.553948)
+          buildBox(x = 0.293982, y = 0.914609, width = 16.393684, height = 38.870004),
+          buildBox(x = 16.897652, y = 0.914609, width = 16.393684, height = 38.870004),
+          buildBox(x = 33.501323, y = 0.914609, width = 16.393684, height = 38.870004),
+          buildBox(x = 0.293982, y = 40.437905, width = 24.695519, height = 58.553948),
+          buildBox(x = 25.199487, y = 40.437905, width = 24.695519, height = 58.553948)
         ),
         Vector(
-          buildBox(0.293982, 0.914609, 24.695519, 98.170781),
-          buildBox(25.199487, 0.914609, 24.695519, 48.758744),
-          buildBox(25.199487, 50.326646, 24.695519, 48.758744)
+          buildBox(x = 0.293982, y = 0.914609, width = 24.695519, height = 98.170781),
+          buildBox(x = 25.199487, y = 0.914609, width = 24.695519, height = 48.758744),
+          buildBox(x = 25.199487, y = 50.326646, width = 24.695519, height = 48.758744)
         )
       )
       val expectedNames = List(defaultTemplateName, "1 Full L + Synopsis R", "3+2 L + Synopsis R", "P+2L L + Synopsis R")
-      val expectedText  = buildBox(50.104993, 0.914609, 49.601025, 98.170781)
+      val expectedText  = buildBox(x = 50.104993, y = 0.914609, width = 49.601025, height = 98.170781)
 
       repository.listAlbumStartTemplates.map:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
@@ -65,7 +65,12 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
           _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($id, 'text', 50, 0, 50, 100)".update.run
         yield ()
       val expected =
-        SpreadTemplate.ChapterStart(SpreadTemplateId(new UUID(0L, 20L)), "Chapter opening", Vector(buildBox(0, 0, 50, 100)), buildBox(50, 0, 50, 100))
+        SpreadTemplate.ChapterStart(
+          SpreadTemplateId(new UUID(0L, 20L)),
+          name = "Chapter opening",
+          photoSlots = Vector(buildBox(x = 0, y = 0, width = 50, height = 100)),
+          textSlot = buildBox(x = 50, y = 0, width = 50, height = 100)
+        )
 
       for
         unavailable <- repository.listChapterStartTemplates
@@ -102,8 +107,8 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
     for
       path <- Resource.make(IO.blocking(Files.createTempFile("template-", ".sqlite")))(path => IO.blocking(Files.deleteIfExists(path)).void)
       _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
-      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).transactor
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa
 
   private def buildBox(x: Double, y: Double, width: Double, height: Double) =
-    SlotBox(x.refineUnsafe, y.refineUnsafe, width.refineUnsafe, height.refineUnsafe)
+    SlotBox(x = x.refineUnsafe, y = y.refineUnsafe, width = width.refineUnsafe, height = height.refineUnsafe)

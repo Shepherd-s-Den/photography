@@ -3,29 +3,30 @@ import * as Selection from "../src/selection";
 
 describe("parseChangedPaths", () => {
   it("should split comma and newline separated paths and drop blanks", () => {
-    expect(Selection.parseChangedPaths("backend/a.scala,\nfrontend/index.html,  , ")).toEqual([
-      "backend/a.scala",
-      "frontend/index.html",
-    ]);
+    const paths = Selection.parseChangedPaths("backend/a.scala,\nfrontend/index.html,  , ");
+
+    expect(paths).toEqual(["backend/a.scala", "frontend/index.html"]);
   });
 });
 
-describe("componentsForPath", () => {
+describe("findComponentsForPath", () => {
   it("should include the backend when frontend assets are rebuilt into it", () => {
-    expect(Selection.componentsForPath("backend/build.sbt")).toEqual(["backend"]);
-    expect(Selection.componentsForPath("frontend/index.html")).toEqual(["backend", "frontend"]);
+    expect(Selection.findComponentsForPath("backend/build.sbt")).toEqual(["backend"]);
+    expect(Selection.findComponentsForPath("frontend/index.html")).toEqual(["backend", "frontend"]);
   });
 
   it("should map pipeline paths to the pipeline component", () => {
-    expect(Selection.componentsForPath("scripts/local.py")).toEqual(["pipeline"]);
-    expect(Selection.componentsForPath(".dagger/src/index.ts")).toEqual(["pipeline"]);
-    expect(Selection.componentsForPath("dagger.json")).toEqual(["pipeline"]);
-    expect(Selection.componentsForPath(".github/workflows/build.yml")).toEqual(["pipeline"]);
-    expect(Selection.componentsForPath(".github/workflows/verify-main.yml")).toEqual(["pipeline"]);
+    const workflowComponents = Selection.findComponentsForPath(".github/workflows/verify-main.yml");
+
+    expect(Selection.findComponentsForPath("scripts/local.py")).toEqual(["pipeline"]);
+    expect(Selection.findComponentsForPath(".dagger/src/index.ts")).toEqual(["pipeline"]);
+    expect(Selection.findComponentsForPath("dagger.json")).toEqual(["pipeline"]);
+    expect(Selection.findComponentsForPath(".github/workflows/build.yml")).toEqual(["pipeline"]);
+    expect(workflowComponents).toEqual(["pipeline"]);
   });
 
   it("should ignore documentation and unrelated paths", () => {
-    expect(Selection.componentsForPath("README.md")).toEqual([]);
+    expect(Selection.findComponentsForPath("README.md")).toEqual([]);
   });
 });
 
@@ -35,10 +36,12 @@ describe("selectAffected", () => {
   });
 
   it("should return all checks affected by one changed surface", () => {
-    expect(Selection.selectAffected(["frontend/index.html"])).toEqual({
+    const expected = {
       kind: "some",
       components: ["backend", "frontend"],
-    });
+    };
+
+    expect(Selection.selectAffected(["frontend/index.html"])).toEqual(expected);
   });
 
   it("should return all when every component changed", () => {
@@ -47,14 +50,19 @@ describe("selectAffected", () => {
       "frontend/index.html",
       ".dagger/x.ts",
     ]);
+
     expect(selection).toEqual({ kind: "all" });
   });
 });
 
-describe("componentsOf", () => {
+describe("listSelectedComponents", () => {
   it("should expand each selection variant", () => {
-    expect(Selection.componentsOf({ kind: "none" })).toEqual([]);
-    expect(Selection.componentsOf({ kind: "all" })).toEqual(["backend", "frontend", "pipeline"]);
-    expect(Selection.componentsOf({ kind: "some", components: ["backend"] })).toEqual(["backend"]);
+    const none = Selection.listSelectedComponents({ kind: "none" });
+    const all = Selection.listSelectedComponents({ kind: "all" });
+    const some = Selection.listSelectedComponents({ kind: "some", components: ["backend"] });
+
+    expect(none).toEqual([]);
+    expect(all).toEqual(["backend", "frontend", "pipeline"]);
+    expect(some).toEqual(["backend"]);
   });
 });

@@ -35,9 +35,9 @@ class LocalStateComponentTest(unittest.TestCase):
 
 class LocalRunnerComponentTest(unittest.TestCase):
     def test_should_health_url_use_loopback_for_wildcard_bind_addresses(self):
-        ipv4_url = local.health_url("0.0.0.0", 8080)
-        ipv6_url = local.health_url("::", 8080)
-        local_url = local.health_url("127.0.0.1", 8080)
+        ipv4_url = local.build_health_url(host="0.0.0.0", port=8080)
+        ipv6_url = local.build_health_url(host="::", port=8080)
+        local_url = local.build_health_url(host="127.0.0.1", port=8080)
 
         self.assertEqual(ipv4_url, "http://127.0.0.1:8080/health")
         self.assertEqual(ipv6_url, "http://[::1]:8080/health")
@@ -45,12 +45,12 @@ class LocalRunnerComponentTest(unittest.TestCase):
 
     def test_should_preflight_check_required_tools_and_port_availability(self):
         with mock.patch.object(local.shutil, "which", side_effect=["/usr/bin/java", "/usr/bin/sbt"]):
-            with mock.patch.object(local, "port_available", return_value=True):
-                local.preflight("127.0.0.1", 8080)
+            with mock.patch.object(local, "is_port_available", return_value=True):
+                local.check_prerequisites(host="127.0.0.1", port=8080)
 
         with mock.patch.object(local.shutil, "which", return_value=None):
             with self.assertRaises(local.PreflightError):
-                local.preflight("127.0.0.1", 8080)
+                local.check_prerequisites(host="127.0.0.1", port=8080)
 
         with mock.patch.object(
             local.shutil,
@@ -58,20 +58,20 @@ class LocalRunnerComponentTest(unittest.TestCase):
             side_effect=lambda executable: None if executable == "sbt" else "/usr/bin/java",
         ):
             with self.assertRaises(local.PreflightError):
-                local.preflight("127.0.0.1", 8080)
+                local.check_prerequisites(host="127.0.0.1", port=8080)
 
         with mock.patch.object(local.shutil, "which", return_value="/usr/bin/tool"):
-            with mock.patch.object(local, "port_available", return_value=False):
+            with mock.patch.object(local, "is_port_available", return_value=False):
                 with self.assertRaises(local.PreflightError):
-                    local.preflight("127.0.0.1", 8080)
+                    local.check_prerequisites(host="127.0.0.1", port=8080)
 
     def test_should_readiness_wait_for_the_exact_health_response(self):
         process = mock.Mock()
         process.poll.return_value = None
 
-        with mock.patch.object(local, "health_check", side_effect=[False, True]):
+        with mock.patch.object(local, "is_backend_ready", side_effect=[False, True]):
             with mock.patch.object(local.time, "sleep"):
-                local.wait_for_readiness(process, "http://127.0.0.1:8080/health")
+                local.wait_for_readiness(process, url="http://127.0.0.1:8080/health")
 
         process.poll.assert_called()
 
@@ -82,27 +82,27 @@ class LocalRunnerComponentTest(unittest.TestCase):
         response.headers.get_content_type.return_value = "text/html"
 
         with mock.patch.object(local.urllib.request, "urlopen", return_value=response):
-            self.assertTrue(local.page_check("http://127.0.0.1:5173"))
+            self.assertTrue(local.is_frontend_ready(url="http://127.0.0.1:5173"))
 
         response.status = 503
         with mock.patch.object(local.urllib.request, "urlopen", return_value=response):
-            self.assertFalse(local.page_check("http://127.0.0.1:5173"))
+            self.assertFalse(local.is_frontend_ready(url="http://127.0.0.1:5173"))
 
     def test_should_readiness_fail_if_process_exits_or_deadline_expires(self):
         exited_process = mock.Mock()
         exited_process.poll.return_value = 7
 
         with self.assertRaises(local.StartupError):
-            local.wait_for_readiness(exited_process, "http://127.0.0.1:8080/health")
+            local.wait_for_readiness(exited_process, url="http://127.0.0.1:8080/health")
 
         running_process = mock.Mock()
         running_process.poll.return_value = None
         with mock.patch.object(local.time, "monotonic", side_effect=[0, 181]):
-            with mock.patch.object(local, "health_check", return_value=False):
+            with mock.patch.object(local, "is_backend_ready", return_value=False):
                 with self.assertRaises(TimeoutError):
                     local.wait_for_readiness(
                         running_process,
-                        "http://127.0.0.1:8080/health",
+                        url="http://127.0.0.1:8080/health",
                         timeout=180,
                     )
 
@@ -139,7 +139,7 @@ class LocalRunnerComponentTest(unittest.TestCase):
                 if database_override is not None:
                     environment["PHOTOGRAPHY_SQLITE_PATH"] = database_override
                 with (
-                    mock.patch.object(local, "preflight") as preflight,
+                    mock.patch.object(local, "check_prerequisites") as check_prerequisites,
                     mock.patch.object(local.subprocess, "Popen", return_value=process) as start,
                     mock.patch.object(local, "wait_for_readiness") as ready,
                     mock.patch.object(local, "stop_process_tree") as stop,
@@ -154,14 +154,14 @@ class LocalRunnerComponentTest(unittest.TestCase):
                 actual_database = start.call_args.kwargs["env"]["PHOTOGRAPHY_SQLITE_PATH"]
 
                 self.assertEqual(result, 0)
-                preflight.assert_called_once_with("0.0.0.0", 8090, None)
+                check_prerequisites.assert_called_once_with("0.0.0.0", 8090, None)
                 self.assertEqual(start.call_args.args[0], ["sbt", "-batch", "run"])
                 self.assertEqual(start.call_args.kwargs["cwd"], Path(temporary_directory) / "backend")
                 self.assertTrue(start.call_args.kwargs["start_new_session"])
                 self.assertEqual(start.call_args.kwargs["env"]["PHOTOGRAPHY_HOST"], "0.0.0.0")
                 self.assertEqual(start.call_args.kwargs["env"]["PHOTOGRAPHY_PORT"], "8090")
                 self.assertEqual(actual_database, expected_database)
-                ready.assert_called_once_with(process, "http://127.0.0.1:8090/health")
+                ready.assert_called_once_with(process, url="http://127.0.0.1:8090/health")
                 stop.assert_called_once_with(process)
                 output.assert_called_once_with("Photography backend ready at http://127.0.0.1:8090")
 
@@ -171,13 +171,13 @@ class LocalRunnerComponentTest(unittest.TestCase):
         process.poll.return_value = None
 
         with tempfile.TemporaryDirectory() as temporary_directory:
-            with mock.patch.object(local, "preflight"):
+            with mock.patch.object(local, "check_prerequisites"):
                 with mock.patch.object(local.subprocess, "Popen", return_value=process):
                     with mock.patch.object(local, "wait_for_readiness", side_effect=TimeoutError("not ready")):
                         with mock.patch.object(local, "stop_process_tree") as stop:
                             with mock.patch("builtins.print"):
                                 with self.assertRaises(TimeoutError):
-                                    local.run_local_backend(Path(temporary_directory), {})
+                                    local.run_local_backend(Path(temporary_directory), environment={})
 
             stop.assert_called_once_with(process)
             state = local.make_local_state(Path(temporary_directory))
@@ -186,10 +186,10 @@ class LocalRunnerComponentTest(unittest.TestCase):
 
     def test_should_preflight_failure_avoid_starting_the_backend(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
-            with mock.patch.object(local, "preflight", side_effect=local.PreflightError("port busy")):
+            with mock.patch.object(local, "check_prerequisites", side_effect=local.PreflightError("port busy")):
                 with mock.patch.object(local.subprocess, "Popen") as start:
                     with self.assertRaises(local.PreflightError):
-                        local.run_local_backend(Path(temporary_directory), {})
+                        local.run_local_backend(Path(temporary_directory), environment={})
 
         start.assert_not_called()
 
@@ -216,7 +216,7 @@ class LocalRunnerComponentTest(unittest.TestCase):
                 ]
 
                 with (
-                    mock.patch.object(local, "preflight") as preflight,
+                    mock.patch.object(local, "check_prerequisites") as check_prerequisites,
                     mock.patch.object(local.subprocess, "run") as preparation,
                     mock.patch.object(local.subprocess, "Popen", side_effect=[backend_process, frontend_process]) as start,
                     mock.patch.object(local, "wait_for_readiness") as ready,
@@ -227,7 +227,7 @@ class LocalRunnerComponentTest(unittest.TestCase):
                     result = local.run_local_backend(Path(temporary_directory), environment)
 
                 self.assertEqual(result, 0)
-                preflight.assert_called_once_with("127.0.0.1", 8080, 5174)
+                check_prerequisites.assert_called_once_with("127.0.0.1", 8080, 5174)
                 self.assertEqual(preparation.call_args_list, expected_preparation)
                 self.assertEqual(preparation.call_args.kwargs["env"]["PHOTOGRAPHY_FRONTEND_PORT"], "5174")
                 self.assertEqual(start.call_count, 2)
@@ -249,7 +249,7 @@ class LocalRunnerComponentTest(unittest.TestCase):
                 outcomes = [failure] if command == ["npm", "ci"] else [None, failure]
 
                 with (
-                    mock.patch.object(local, "preflight"),
+                    mock.patch.object(local, "check_prerequisites"),
                     mock.patch.object(local.subprocess, "run", side_effect=outcomes),
                     mock.patch.object(local.subprocess, "Popen") as start,
                 ):
@@ -280,13 +280,13 @@ class LocalRunnerComponentTest(unittest.TestCase):
         process.wait.side_effect = KeyboardInterrupt()
 
         with tempfile.TemporaryDirectory() as temporary_directory:
-            with mock.patch.object(local, "preflight"):
+            with mock.patch.object(local, "check_prerequisites"):
                 with mock.patch.object(local.subprocess, "Popen", return_value=process):
                     with mock.patch.object(local, "wait_for_readiness"):
                         with mock.patch.object(local, "stop_process_tree") as stop:
                             with mock.patch("builtins.print"):
                                 with self.assertRaises(KeyboardInterrupt):
-                                    local.run_local_backend(Path(temporary_directory), {})
+                                    local.run_local_backend(Path(temporary_directory), environment={})
 
             stop.assert_called_once_with(process)
             state = local.make_local_state(Path(temporary_directory))

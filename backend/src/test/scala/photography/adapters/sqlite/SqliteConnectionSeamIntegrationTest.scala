@@ -22,5 +22,5 @@ final class SqliteConnectionSeamIntegrationTest extends CatsEffectSuite:
     for
       path <- Resource.make(IO.blocking(Files.createTempFile("connection-", ".sqlite")))(path => IO.blocking(Files.deleteIfExists(path)).void)
       _    <- FlywayMigrator.make[IO](path).evalMap(_.migrate)
-      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).transactor
+      xa   <- SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor
     yield xa

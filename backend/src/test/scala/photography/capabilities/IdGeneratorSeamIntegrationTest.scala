@@ -7,4 +7,4 @@ import munit.CatsEffectSuite
 final class IdGeneratorSeamIntegrationTest extends CatsEffectSuite:
 
   test("should produce a distinct id on each call"):
-    (IdGenerator.make[IO].nextId, IdGenerator.make[IO].nextId).mapN((first, second) => assertNotEquals(first, second))
+    (IdGenerator.make[IO].generateId, IdGenerator.make[IO].generateId).mapN((first, second) => assertNotEquals(first, second))

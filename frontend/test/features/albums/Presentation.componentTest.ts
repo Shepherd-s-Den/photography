@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AlbumRequestError, type AlbumPage } from "../../../src/features/albums/model/Album";
-import { failureMessage, isMissingAlbum, pagination, validateTitle, validateYear } from "../../../src/features/albums/model/Presentation";
+import { describeFailure, isMissingAlbum, getPaginationFeedback, validateTitle, validateYear } from "../../../src/features/albums/model/Presentation";
 
 describe("album presentation rules", () => {
   it.each([
@@ -31,7 +31,7 @@ describe("album presentation rules", () => {
     [new AlbumRequestError(400, "Use a title"), false, "Use a title"],
   ])("should classify visible request failures", (error, missing, message) => {
     expect(isMissingAlbum(error)).toBe(missing);
-    expect(failureMessage(error)).toBe(message);
+    expect(describeFailure(error)).toBe(message);
   });
 
   it.each([
@@ -43,6 +43,6 @@ describe("album presentation rules", () => {
   ])("should explain pagination availability for page %i of %i", (current, total, loading, previous, next) => {
     const page: AlbumPage = { albums: [], page: current, pageSize: 6, totalAlbums: 0, totalPages: total };
 
-    expect(pagination(page, loading)).toEqual({ previous, next });
+    expect(getPaginationFeedback(page, loading)).toEqual({ previous, next });
   });
 });

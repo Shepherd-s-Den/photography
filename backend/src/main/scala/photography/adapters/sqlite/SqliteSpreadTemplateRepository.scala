@@ -20,17 +20,21 @@ object SqliteSpreadTemplateRepository:
 
   final private class LiveSpreadTemplateRepository[F[_]: Async: Logger](transactor: Transactor[F]) extends SpreadTemplateRepository[F]:
     override def listAlbumStartTemplates: F[ListAlbumStartTemplatesResult] =
-      loadOpenings("album_start").transact(transactor).attempt.flatMap:
+      loadOpenings(kind = "album_start").transact(transactor).attempt.flatMap:
         case Right(rows) =>
-          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.AlbumStart(id, name, photos, text) }
+          val templates = rows.map { case (id, name, photos, text) =>
+            SpreadTemplate.AlbumStart(id, name = name, photoSlots = photos, textSlot = text)
+          }
           ListAlbumStartTemplatesResult.Listed(templates).pure[F]
         case Left(error) =>
           Logger[F].error(error)("Could not list album opening templates").as(ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure))
 
     override def listChapterStartTemplates: F[ListChapterStartTemplatesResult] =
-      loadOpenings("chapter_start").transact(transactor).attempt.flatMap:
+      loadOpenings(kind = "chapter_start").transact(transactor).attempt.flatMap:
         case Right(rows) =>
-          val templates = rows.map { case (id, name, photos, text) => SpreadTemplate.ChapterStart(id, name, photos, text) }
+          val templates = rows.map { case (id, name, photos, text) =>
+            SpreadTemplate.ChapterStart(id, name = name, photoSlots = photos, textSlot = text)
+          }
           ListChapterStartTemplatesResult.Listed(templates).pure[F]
         case Left(error) =>
           Logger[F].error(error)("Could not list chapter opening templates").as(ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))

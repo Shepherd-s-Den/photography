@@ -21,19 +21,27 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   private val start = Spread.AlbumStart(
     SpreadId(new UUID(0L, 3L)),
     SpreadTemplateId(new UUID(0L, 2L)),
-    Vector.empty,
-    SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(0.0, 0.0, 100.0, 100.0)),
-    Vector.empty
+    photoSlots = Vector.empty[SpreadSlot.Photo],
+    textSlot = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0)),
+    placements = Vector.empty[SpreadPlacement]
   )
   private val album =
-    Album(id, 2026, "Journey of the Shepherds 2026", "A synopsis", Instant.parse("2026-10-24T10:00:00.123Z"), start, chapters = Vector.empty[Chapter])
+    Album(
+      id,
+      year = 2026,
+      title = "Journey of the Shepherds 2026",
+      synopsis = "A synopsis",
+      createdAt = Instant.parse("2026-10-24T10:00:00.123Z"),
+      start,
+      chapters = Vector.empty[Chapter]
+    )
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
 
   test("should list exact album metadata and forward default and explicit pages"):
     val refs         = Refs()
-    val page         = AlbumPage(Vector(album), 2, 6, 7, 2)
+    val page         = AlbumPage(Vector(album), page = 2, pageSize = 6, totalAlbums = 7, totalPages = 2)
     val server       = buildAlbumApi(refs, listAlbumsResult = ListAlbumsResult.Listed(page))
     val paths        = Vector("/api/albums", "/api/albums?page=99", "/api/albums?page=0", "/api/albums?page=-1")
     val emptyServer  = buildAlbumApi(Refs())
@@ -43,8 +51,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val expectedResponses = Vector.fill(paths.size)(ApiResponse(Status.Ok, jsonMediaType, expectedPage.some))
 
     for
-      responses <- paths.traverse(send(server, Method.GET, _, ""))
-      empty     <- send(emptyServer, Method.GET, "/api/albums", "")
+      responses <- paths.traverse(path => send(server, Method.GET, path = path, body = ""))
+      empty     <- send(emptyServer, Method.GET, path = "/api/albums", body = "")
       calls     <- refs.calls.get
     yield
       assertEquals(responses, expectedResponses)
@@ -57,7 +65,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val queries = Vector("page", "page=", "page=no", "page=1.5", "page=2147483648", "page=1&page=2", "page=1&page=no", "page=1&page")
 
     for
-      responses <- queries.traverse(query => send(server, Method.GET, s"/api/albums?$query", ""))
+      responses <- queries.traverse(query => send(server, Method.GET, path = s"/api/albums?$query", body = ""))
       calls     <- refs.calls.get
     yield
       assertEquals(responses.map(_.status), Vector.fill(queries.size)(Status.BadRequest))
@@ -71,8 +79,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val expectedMetadata = parse(metadata).fold(error => fail(error.message), identity).some
 
     for
-      created <- send(server, Method.POST, "/api/albums", """{"year":2026}""")
-      renamed <- send(server, Method.PATCH, albumPath, """{"title":"\tAsian capitals\n"}""")
+      created <- send(server, Method.POST, path = "/api/albums", body = """{"year":2026}""")
+      renamed <- send(server, Method.PATCH, path = albumPath, body = """{"title":"\tAsian capitals\n"}""")
       calls   <- refs.calls.get
     yield
       assertEquals(created, ApiResponse(Status.Created, jsonMediaType, expectedMetadata))
@@ -95,7 +103,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       (malformed ++ invalidTitles).map(body => (Method.PATCH, albumPath, body))
 
     for
-      responses <- requests.traverse { case (method, path, body) => send(server, method, path, body) }
+      responses <- requests.traverse { case (method, path, body) => send(server, method, path = path, body = body) }
       calls     <- refs.calls.get
     yield
       assertEquals(responses.map(_.status), Vector.fill(requests.size)(Status.BadRequest))
@@ -112,8 +120,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       .fold(error => fail(error.message), identity)
 
     for
-      found   <- send(server, Method.GET, albumPath, "")
-      deleted <- send(server, Method.DELETE, albumPath, "")
+      found   <- send(server, Method.GET, path = albumPath, body = "")
+      deleted <- send(server, Method.DELETE, path = albumPath, body = "")
       calls   <- refs.calls.get
     yield
       assertEquals(found, ApiResponse(Status.Ok, jsonMediaType, expected.some))
@@ -133,7 +141,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val expectedBody = parse("""{"code":"album_not_found"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(requests.size)(ApiResponse(Status.NotFound, jsonMediaType, expectedBody.some))
     val responses    = requests.traverse { case (method, path) =>
-      send(server, method, path, """{"year":2026,"title":"Journey of the Shepherds 2026"}""")
+      send(server, method, path = path, body = """{"year":2026,"title":"Journey of the Shepherds 2026"}""")
     }
 
     for
@@ -162,7 +170,9 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val expectedBody = parse("""{"code":"service_failure"}""").fold(error => fail(error.message), identity)
     val expected     = Vector.fill(operations.size)(ApiResponse(Status.InternalServerError, jsonMediaType, expectedBody.some))
 
-    operations.traverse { case (method, path) => send(server, method, path, """{"year":2026,"title":"Journey of the Shepherds 2026"}""") }
+    operations.traverse { case (method, path) =>
+      send(server, method, path = path, body = """{"year":2026,"title":"Journey of the Shepherds 2026"}""")
+    }
       .map(responses => assertEquals(responses, expected))
 
   test("should reject duplicate years and expose no year-edit operation"):
@@ -173,7 +183,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
 
     for
       changed   <- server.run(yearEdit)
-      duplicate <- send(taken, Method.POST, "/api/albums", """{"year":2026}""")
+      duplicate <- send(taken, Method.POST, path = "/api/albums", body = """{"year":2026}""")
       calls     <- refs.calls.get
     yield
       assertEquals(changed.status, Status.NotFound)
@@ -189,7 +199,8 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   // scalafix:off DisableSyntax.defaultArgs
   private def buildAlbumApi(
       refs: Refs,
-      listAlbumsResult: ListAlbumsResult = ListAlbumsResult.Listed(AlbumPage(Vector.empty, 1, 6, 0, 0)),
+      listAlbumsResult: ListAlbumsResult =
+        ListAlbumsResult.Listed(AlbumPage(albums = Vector.empty[Album], page = 1, pageSize = 6, totalAlbums = 0, totalPages = 0)),
       createAlbumResult: CreateAlbumResult = CreateAlbumResult.Created(album),
       getAlbumResult: GetAlbumResult = GetAlbumResult.Found(album),
       renameResult: RenameResult = RenameResult.Renamed(album),

@@ -1,26 +1,26 @@
 import { maximumAlbumYear, minimumAlbumYear, type Album, type AlbumPage, type AlbumSummary } from "../model/Album";
 
 export function readSummary(value: unknown): AlbumSummary {
-  const fields = record(value);
-  const year = integer(fields["year"], minimumAlbumYear);
+  const fields = readRecord(value);
+  const year = readInteger(fields["year"], minimumAlbumYear);
   if (year > maximumAlbumYear) throw new Error(`Expected an album year from ${minimumAlbumYear.toString()} to ${maximumAlbumYear.toString()}`);
-  return { id: text(fields["id"]), year, title: text(fields["title"]), createdAt: text(fields["createdAt"]) };
+  return { id: readText(fields["id"]), year, title: readText(fields["title"]), createdAt: readText(fields["createdAt"]) };
 }
 
 export function readAlbum(value: unknown): Album {
-  return { ...readSummary(value), synopsis: text(record(value)["synopsis"]) };
+  return { ...readSummary(value), synopsis: readText(readRecord(value)["synopsis"]) };
 }
 
 export function readPage(value: unknown): AlbumPage {
-  const fields = record(value);
-  const pageSize = integer(fields["pageSize"], 1);
+  const fields = readRecord(value);
+  const pageSize = readInteger(fields["pageSize"], 1);
   if (pageSize !== 6) throw new Error("Unexpected album page size");
   return {
-    albums: array(fields["albums"]).map(readSummary),
-    page: integer(fields["page"], 1),
+    albums: readArray(fields["albums"]).map(readSummary),
+    page: readInteger(fields["page"], 1),
     pageSize,
-    totalAlbums: integer(fields["totalAlbums"], 0),
-    totalPages: integer(fields["totalPages"], 0),
+    totalAlbums: readInteger(fields["totalAlbums"], 0),
+    totalPages: readInteger(fields["totalPages"], 0),
   };
 }
 
@@ -29,28 +29,28 @@ export function readFailureMessage(value: unknown): string {
   return "The request could not be completed. Please try again.";
 }
 
-function record(value: unknown): Record<string, unknown> {
+function readRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Expected a JSON object");
   return Object.fromEntries(Object.entries(value));
 }
 
-function text(value: unknown): string {
+function readText(value: unknown): string {
   if (typeof value !== "string") throw new Error("Expected a JSON string");
   return value;
 }
 
-function number(value: unknown): number {
+function readNumber(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Expected a finite JSON number");
   return value;
 }
 
-function integer(value: unknown, minimum: number): number {
-  const parsed = number(value);
+function readInteger(value: unknown, minimum: number): number {
+  const parsed = readNumber(value);
   if (!Number.isInteger(parsed) || parsed < minimum) throw new Error("Expected an integer in range");
   return parsed;
 }
 
-function array(value: unknown): readonly unknown[] {
+function readArray(value: unknown): readonly unknown[] {
   if (!Array.isArray(value)) throw new Error("Expected a JSON array");
   return value;
 }

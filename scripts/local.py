@@ -63,7 +63,7 @@ def acquire_instance_lock(lock_path: Path):
     return lock_file
 
 
-def port_available(host: str, port: int) -> bool:
+def is_port_available(host: str, port: int) -> bool:
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except OSError:
@@ -80,31 +80,31 @@ def port_available(host: str, port: int) -> bool:
     return True
 
 
-def preflight(host: str, port: int, frontend_port: int | None = None) -> None:
+def check_prerequisites(host: str, port: int, frontend_port: int | None = None) -> None:
     for executable in ("java", "sbt"):
         if shutil.which(executable) is None:
             raise PreflightError(f"Required executable '{executable}' was not found on PATH")
-    if not port_available(host, port):
+    if not is_port_available(host, port):
         raise PreflightError(f"Port {port} is unavailable on {host}")
     if frontend_port is not None:
         if shutil.which("npm") is None:
             raise PreflightError("Required executable 'npm' was not found on PATH")
-        if frontend_port == port or not port_available(host, frontend_port):
+        if frontend_port == port or not is_port_available(host, frontend_port):
             raise PreflightError(f"Frontend port {frontend_port} is unavailable on {host}")
 
 
-def service_url(host: str, port: int) -> str:
+def build_service_url(host: str, port: int) -> str:
     display_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
     if ":" in display_host and not display_host.startswith("["):
         display_host = f"[{display_host}]"
     return f"http://{display_host}:{port}"
 
 
-def health_url(host: str, port: int) -> str:
-    return f"{service_url(host, port)}/health"
+def build_health_url(host: str, port: int) -> str:
+    return f"{build_service_url(host, port)}/health"
 
 
-def health_check(url: str) -> bool:
+def is_backend_ready(url: str) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=2) as response:
             content_type = response.headers.get_content_type()
@@ -114,7 +114,7 @@ def health_check(url: str) -> bool:
         return False
 
 
-def page_check(url: str) -> bool:
+def is_frontend_ready(url: str) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=2) as response:
             return response.status == 200 and response.headers.get_content_type() == "text/html"
@@ -129,7 +129,7 @@ def wait_for_readiness(
     readiness_check: Callable[[str], bool] | None = None,
     service_name: str = "Backend",
 ) -> None:
-    check = readiness_check or health_check
+    check = readiness_check or is_backend_ready
     deadline = time.monotonic() + timeout
     while True:
         exit_code = process.poll()
@@ -212,7 +212,7 @@ def run_local_backend(project_root: Path, environment: Mapping[str, str] | None 
         frontend = project_root / "frontend"
         has_frontend = (frontend / "package.json").is_file()
         frontend_port = parse_frontend_port(launch_environment) if has_frontend else None
-        preflight(host, port, frontend_port)
+        check_prerequisites(host, port, frontend_port)
         if has_frontend:
             subprocess.run(["npm", "ci"], cwd=frontend, env=launch_environment, check=True)
             subprocess.run(["npm", "run", "build"], cwd=frontend, env=launch_environment, check=True)
@@ -223,8 +223,8 @@ def run_local_backend(project_root: Path, environment: Mapping[str, str] | None 
             env=launch_environment,
             start_new_session=True,
         )
-        endpoint = service_url(host, port)
-        wait_for_readiness(process, f"{endpoint}/health")
+        endpoint = build_service_url(host, port)
+        wait_for_readiness(process, url=f"{endpoint}/health")
         print(f"Photography backend ready at {endpoint}")
         if frontend_port is not None:
             frontend_environment = {**launch_environment, "VITE_API_TARGET": endpoint}
@@ -244,11 +244,11 @@ def run_local_backend(project_root: Path, environment: Mapping[str, str] | None 
                 env=frontend_environment,
                 start_new_session=True,
             )
-            frontend_endpoint = service_url(host, frontend_port)
+            frontend_endpoint = build_service_url(host, frontend_port)
             wait_for_readiness(
                 frontend_process,
                 frontend_endpoint,
-                readiness_check=page_check,
+                readiness_check=is_frontend_ready,
                 service_name="Frontend",
             )
             print(f"Photography frontend ready at {frontend_endpoint}")

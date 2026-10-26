@@ -10,7 +10,7 @@ import photography.app.config.SqliteConfig
 import scala.util.chaining.*
 
 trait SqliteConnection[F[_]]:
-  def transactor: Resource[F, Transactor[F]]
+  def buildTransactor: Resource[F, Transactor[F]]
 
 object SqliteConnection:
 
@@ -18,7 +18,7 @@ object SqliteConnection:
     new LiveSqliteConnection(config)
 
   final private class LiveSqliteConnection[F[_]: Async](config: SqliteConfig) extends SqliteConnection[F]:
-    override def transactor: Resource[F, Transactor[F]] =
+    override def buildTransactor: Resource[F, Transactor[F]] =
       for
         connectExecutionContext <- ExecutionContexts.fixedThreadPool[F](size = config.connectionAcquisitionThreads)
         dataSource              <- Resource.make(Async[F].blocking(createDataSource()))(ds => Async[F].blocking(ds.close()))

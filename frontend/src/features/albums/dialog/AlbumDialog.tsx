@@ -1,6 +1,6 @@
 import { Show, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import type { AlbumClient, AlbumSummary } from "../model/Album";
-import { failureMessage, validateTitle, validateYear } from "../model/Presentation";
+import { describeFailure, validateTitle, validateYear } from "../model/Presentation";
 
 export type AlbumAction = { kind: "create" } | { kind: "rename"; album: AlbumSummary } | { kind: "delete"; album: AlbumSummary };
 
@@ -62,7 +62,7 @@ export function AlbumDialog(props: {
       await props.onSaved();
       await close();
     } catch (failure) {
-      setError(failureMessage(failure));
+      setError(describeFailure(failure));
       setPending(false);
     }
   }

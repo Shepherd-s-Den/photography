@@ -9,8 +9,7 @@ export function parseChangedPaths(raw: string): readonly string[] {
     .filter((line) => line !== "");
 }
 
-/** Maps source and pipeline paths to the checks they affect. */
-export function componentsForPath(path: string): readonly Component[] {
+export function findComponentsForPath(path: string): readonly Component[] {
   if (path.startsWith("backend/")) return ["backend"];
   if (path.startsWith("frontend/")) return ["backend", "frontend"];
   if (
@@ -26,7 +25,7 @@ export function componentsForPath(path: string): readonly Component[] {
 export function selectAffected(changedPaths: readonly string[]): Selection {
   const affected = new Set<Component>();
   for (const path of changedPaths) {
-    for (const component of componentsForPath(path)) {
+    for (const component of findComponentsForPath(path)) {
       affected.add(component);
     }
   }
@@ -38,7 +37,7 @@ export function selectAffected(changedPaths: readonly string[]): Selection {
   };
 }
 
-export function componentsOf(selection: Selection): readonly Component[] {
+export function listSelectedComponents(selection: Selection): readonly Component[] {
   switch (selection.kind) {
     case "none":
       return [];

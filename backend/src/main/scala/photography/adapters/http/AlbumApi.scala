@@ -27,46 +27,46 @@ object AlbumApi:
         case GET -> Root / "api" / "albums" / AlbumIdVar(id)             => get(id)
         case request @ PATCH -> Root / "api" / "albums" / AlbumIdVar(id) => rename(id, request)
         case DELETE -> Root / "api" / "albums" / AlbumIdVar(id)          => delete(id)
-        case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _       => albumNotFound
+        case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _       => respondAlbumNotFound
       }
 
     private def list(query: Query) = query match
       case Page(page) =>
-        albums.list(page).flatMap:
+        albums.list(page = page).flatMap:
           case ListAlbumsResult.Listed(selected) => Ok(selected)
-          case ListAlbumsResult.Failed           => serviceFailure
+          case ListAlbumsResult.Failed           => respondServiceFailure
       case _ => BadRequest(Map("message" -> "Supply page once as a 32-bit integer"))
 
     private def create(request: Request[F]) =
       request.as[(AlbumYear, AlbumTitle)].flatMap { case (year, title) => albums.create(year, title) }.flatMap {
         case CreateAlbumResult.Created(album)  => Created(album)
         case CreateAlbumResult.YearAlreadyUsed => BadRequest(Map("message" -> "An album already exists for that year"))
-        case CreateAlbumResult.Failed          => serviceFailure
+        case CreateAlbumResult.Failed          => respondServiceFailure
       }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidYear) }
 
     private def get(id: AlbumId) =
       albums.get(id).flatMap:
         case found: GetAlbumResult.Found => Ok(found)
-        case GetAlbumResult.NotFound     => albumNotFound
-        case GetAlbumResult.Failed       => serviceFailure
+        case GetAlbumResult.NotFound     => respondAlbumNotFound
+        case GetAlbumResult.Failed       => respondServiceFailure
 
     private def rename(id: AlbumId, request: Request[F]) =
-      request.as[AlbumTitle].flatMap(albums.rename(id, _)).flatMap {
+      request.as[AlbumTitle].flatMap(title => albums.rename(id, title)).flatMap {
         case RenameResult.Renamed(album) => Ok(album)
-        case RenameResult.NotFound       => albumNotFound
-        case RenameResult.Failed         => serviceFailure
+        case RenameResult.NotFound       => respondAlbumNotFound
+        case RenameResult.Failed         => respondServiceFailure
       }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidTitle) }
 
     private def delete(id: AlbumId) =
       albums.delete(id).flatMap:
         case DeleteAlbumResult.Deleted  => NoContent()
-        case DeleteAlbumResult.NotFound => albumNotFound
-        case DeleteAlbumResult.Failed   => serviceFailure
+        case DeleteAlbumResult.NotFound => respondAlbumNotFound
+        case DeleteAlbumResult.Failed   => respondServiceFailure
 
-    private def albumNotFound  = NotFound(Map("code" -> "album_not_found"))
-    private def serviceFailure = InternalServerError(Map("code" -> "service_failure"))
-    private val invalidTitle   = Map("message" -> "Supply a non-blank album title")
-    private val invalidYear    = Map("message" -> "Choose a year from 1900 to 2100")
+    private def respondAlbumNotFound  = NotFound(Map("code" -> "album_not_found"))
+    private def respondServiceFailure = InternalServerError(Map("code" -> "service_failure"))
+    private val invalidTitle          = Map("message" -> "Supply a non-blank album title")
+    private val invalidYear           = Map("message" -> "Choose a year from 1900 to 2100")
 
     private object Page:
       def unapply(query: Query): Option[Int] =

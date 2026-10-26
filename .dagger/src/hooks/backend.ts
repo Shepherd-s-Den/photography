@@ -1,8 +1,7 @@
 import * as Dagger from "@dagger.io/dagger";
 import { JDK_IMAGE, NODE_IMAGE } from "../buildEnv";
 
-/** Runs compilation, tests, and static checks in one pinned sbt invocation. */
-export function backendCheck(source: Dagger.Directory): Dagger.Container {
+export function checkBackend(source: Dagger.Directory): Dagger.Container {
   const frontendAssets = Dagger.dag
     .container()
     .from(NODE_IMAGE)
