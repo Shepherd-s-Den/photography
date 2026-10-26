@@ -3,33 +3,39 @@ import { makeHttpAlbumClient } from "../../../src/features/albums/api/HttpAlbumC
 import { AlbumRequestError } from "../../../src/features/albums/model/Album";
 
 describe("same-origin album HTTP client", () => {
-  it("should send the five album operations to relative API URLs", async () => {
-    const album = { id: "00000000-0000-0000-0000-000000000001", title: "Coastal light", createdAt: "2026-10-24T12:00:00Z" };
+  it("should send dashboard album operations with immutable year creation and free-form rename", async () => {
+    const album = {
+      id: "00000000-0000-0000-0000-000000000001",
+      year: 2026,
+      title: "Journey of the Shepherds 2026",
+      createdAt: "2026-10-24T12:00:00Z",
+    };
     const page = { albums: [album], page: 1, pageSize: 6, totalAlbums: 1, totalPages: 1 };
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify(page)))
       .mockResolvedValueOnce(new Response(JSON.stringify(album), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(album)))
       .mockResolvedValueOnce(new Response(JSON.stringify({ ...album, synopsis: "" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...album, title: "Asian capitals" })))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const client = makeHttpAlbumClient(fetcher);
     const expectedUrls = ["/api/albums?page=1", "/api/albums", `/api/albums/${album.id}`, `/api/albums/${album.id}`, `/api/albums/${album.id}`];
-    const expectedCreation = { method: "POST", body: JSON.stringify({ title: album.title }), headers: { "Content-Type": "application/json" } };
+    const expectedCreation = { method: "POST", body: JSON.stringify({ year: album.year }), headers: { "Content-Type": "application/json" } };
 
     const listed = await client.list(1);
-    const created = await client.create(album.title);
-    const renamed = await client.rename(album.id, album.title);
+    const created = await client.create(album.year);
     const opened = await client.open(album.id);
+    const renamed = await client.rename(album.id, "Asian capitals");
     await client.remove(album.id);
 
     expect(listed).toEqual(page);
     expect(created).toEqual(album);
-    expect(renamed).toEqual(album);
     expect(opened).toEqual({ ...album, synopsis: "" });
+    expect(renamed).toEqual({ ...album, title: "Asian capitals" });
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual(expectedUrls);
     expect(fetcher.mock.calls[1]?.[1]).toMatchObject(expectedCreation);
-    expect(fetcher.mock.calls[2]?.[1]).toMatchObject({ method: "PATCH" });
+    expect(fetcher.mock.calls[2]?.[1]).toMatchObject({ method: "GET" });
+    expect(fetcher.mock.calls[3]?.[1]).toMatchObject({ method: "PATCH", body: JSON.stringify({ title: "Asian capitals" }) });
     expect(fetcher.mock.calls[4]?.[1]).toMatchObject({ method: "DELETE" });
   });
 

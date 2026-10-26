@@ -2,7 +2,19 @@
 
 Load only for a PR that changes `backend/**`. `CONTRIBUTING.md` §Scala composition and `DESIGN-PRINCIPLES.md` §1/§4/§5 own the general rules; the shared items live in [`code-quality.md`](code-quality.md).
 
+## Model and boundary audit
+
+- [ ] Use agreed domain terms. Model required values directly and derive facts from their owner.
+- [ ] Make APIs clear for callers: use precise input and result types, and check constructors and copies for invalid combinations.
+- [ ] Parse, normalize and validate external values in adapters; pass strong types into the core.
+- [ ] Put each operation in the service that owns it. Name ports for the work callers need.
+- [ ] Keep a comment only when clearer code cannot express its reason.
+
+## Implementation
+
 - [ ] Effectful application boundaries are expressed as Tagless Final algebras parameterized by `F[_]`; pure domain logic stays independent of runtime effects.
+- [ ] Per-call parameters contain only that call's inputs; fixed business collaborators and settings are injected once at construction.
+- [ ] Capabilities use `F` context bounds and typeclass accessors, not explicit method, `make` or constructor parameters.
 - [ ] Concrete interpreters and effect runtimes are composed at the application boundary, not selected from inside domain code.
 - [ ] In runtime composition, keep constructor/factory calls on one physical line; extract nested dependency construction into meaningfully named vals to fit the line limit.
 - [ ] Business and adapter behavior lives in the owning private `Live*` implementation or behind a caller-defined, injected trait. Inventory every changed public or package-visible companion/helper-object callable and its actual callers: each must be a factory or a pure, stateless utility. Package visibility does not make an effectful helper an internal method or a substitutable collaborator; record the inventory before checking this item off.

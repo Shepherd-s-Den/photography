@@ -18,7 +18,7 @@ object AppResourcesBuilder:
 
     override def build[F[_]: Async]: Resource[F, AppResourcesBuilder.AppResources[F]] =
       for
-        sqlite <- SqliteConnection.make[F](config.sqlite).transactor
+        sqlite <- SqliteConnection.make[F](config.sqlite).buildTransactor
         flyway <- FlywayMigrator.make[F](config.sqlite.path)
       yield AppResources(sqlite, flyway)
 

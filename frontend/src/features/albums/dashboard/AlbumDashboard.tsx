@@ -1,6 +1,6 @@
 import { For, Index, Show, createMemo, createResource, createSignal } from "solid-js";
 import type { AlbumClient, AlbumPage } from "../model/Album";
-import { pagination } from "../model/Presentation";
+import { getPaginationFeedback } from "../model/Presentation";
 import { AlbumDialog, type AlbumAction } from "../dialog/AlbumDialog";
 import { AlbumCard } from "./AlbumCard";
 
@@ -16,7 +16,7 @@ export function AlbumDashboard(props: { client: AlbumClient }) {
   const [action, setAction] = createSignal<AlbumAction>();
   let addButton: HTMLButtonElement;
 
-  async function completed() {
+  async function handleSavedAlbum() {
     const created = action()?.kind === "create";
     if (created) setRequest({ page: 1, direction: undefined });
     else await refetch();
@@ -72,7 +72,7 @@ export function AlbumDashboard(props: { client: AlbumClient }) {
         </Show>
         <Show when={albums.latest}>
           {(page) => {
-            const controls = createMemo(() => pagination(page(), albums.loading));
+            const controls = createMemo(() => getPaginationFeedback(page(), albums.loading));
             return (
               <Show when={page().albums.length > 0}>
                 <Show when={page().albums} keyed>
@@ -144,7 +144,7 @@ export function AlbumDashboard(props: { client: AlbumClient }) {
             onClose={() => {
               setAction(undefined);
             }}
-            onSaved={completed}
+            onSaved={handleSavedAlbum}
             returnFocus={() => {
               const trigger = target.kind === "create" ? addButton : document.getElementById(`${target.kind}-${target.album.id}`);
               if (trigger instanceof HTMLElement) trigger.focus();

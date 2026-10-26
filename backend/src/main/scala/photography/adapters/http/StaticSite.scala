@@ -16,22 +16,22 @@ object StaticSite:
     new LiveStaticSite(api, assetRoot)
 
 final private class LiveStaticSite[F[_]: Async](api: HttpRoutes[F], assetRoot: String) extends StaticSite[F]:
-  override val app: HttpApp[F] = (api <+> missingApi <+> DefaultHead(frontend)).orNotFound
+  override val app: HttpApp[F] = (api <+> buildMissingApiRoutes <+> DefaultHead(buildFrontendRoutes)).orNotFound
 
-  private def missingApi = HttpRoutes.of[F]:
+  private def buildMissingApiRoutes = HttpRoutes.of[F]:
     case request if request.pathInfo.segments.headOption.exists(_.decoded() === "api") =>
       Response[F](Status.NotFound).withEntity("""{"code":"not_found"}""").putHeaders(`Content-Type`(MediaType.application.json)).pure[F]
 
-  private def frontend =
+  private def buildFrontendRoutes =
     val resources = ResourceServiceBuilder[F](assetRoot).toRoutes
     Kleisli { (request: Request[F]) =>
       val segments = request.pathInfo.segments.map(_.decoded())
       val reserved = segments.headOption.contains("health") || segments.toList === List("assets")
       if request.method =!= Method.GET || reserved then OptionT.none[F, Response[F]]
-      else resources(request).orElse(entryPoint(request))
+      else resources(request).orElse(serveEntryPoint(request))
     }
 
-  private def entryPoint(request: Request[F]) =
+  private def serveEntryPoint(request: Request[F]) =
     val segments   = request.pathInfo.segments.map(_.decoded())
     val navigation = !segments.exists(_.contains(".")) && !segments.headOption.contains("assets")
     if navigation then StaticFile.fromResource(s"$assetRoot/index.html", request.some) else OptionT.none[F, Response[F]]

@@ -27,6 +27,8 @@ Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), t
 
 ## Tests
 
+For backend changes, complete the backend checklist's Model and boundary audit before projecting tests. Record that evidence in the local checklist.
+
 Derive tests from the merged spec's acceptance criteria and enumerated edge cases, before writing implementation code. A test must trace to a spec statement and fail only when that stated behavior changes — never reverse-engineered from code already written. Follow `CONTRIBUTING.md`'s testing conventions for suite naming and tiering.
 
 ## Implementation PR(s)

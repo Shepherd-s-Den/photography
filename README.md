@@ -15,4 +15,4 @@ A photography application for managing persisted albums and opening their metada
 
 ## Local SQLite development
 
-The initial V1 schema is still edited in place. A local database created with an older V1 must be recreated before running the updated application; existing database contents are not migrated by this development baseline.
+The initial V1 schema is still edited in place. Older V1 databases fail startup validation and require explicit resolution; this development baseline does not migrate their contents or assign missing album years. Preserve existing databases and select a fresh `PHOTOGRAPHY_SQLITE_PATH` for isolated development.

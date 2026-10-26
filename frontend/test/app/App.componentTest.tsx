@@ -3,14 +3,20 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/app/App";
 import { AlbumRequestError, type AlbumClient, type AlbumPage, type AlbumSummary } from "../../src/features/albums/model/Album";
 
-const firstAlbum: AlbumSummary = { id: "00000000-0000-0000-0000-000000000001", title: "Coastal light", createdAt: "2026-10-24T12:00:00Z" };
+const firstAlbum: AlbumSummary = {
+  id: "00000000-0000-0000-0000-000000000001",
+  year: 2026,
+  title: "Journey of the Shepherds 2026",
+  createdAt: "2026-10-24T12:00:00Z",
+};
 const firstPage: AlbumPage = {
   albums: [
     firstAlbum,
     ...Array.from({ length: 5 }, (_, index) => ({
       ...firstAlbum,
       id: `00000000-0000-0000-0000-${String(index + 2).padStart(12, "0")}`,
-      title: `Journey ${String(index + 2)}`,
+      year: 2027 + index,
+      title: `Journey of the Shepherds ${String(2027 + index)}`,
     })),
   ],
   page: 1,
@@ -18,7 +24,7 @@ const firstPage: AlbumPage = {
   totalAlbums: 7,
   totalPages: 2,
 };
-const lastAlbum = { ...firstAlbum, id: "00000000-0000-0000-0000-000000000007", title: "Desert light" };
+const lastAlbum = { ...firstAlbum, id: "00000000-0000-0000-0000-000000000007", year: 2032, title: "Journey of the Shepherds 2032" };
 const secondPage = { ...firstPage, albums: [lastAlbum], page: 2 };
 const nativeDialogMethods = {
   showModal: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "showModal"),
@@ -26,6 +32,7 @@ const nativeDialogMethods = {
   getAnimations: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "getAnimations"),
 };
 const dialogAnimationFinished = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+const browserYear = vi.spyOn(Date.prototype, "getFullYear").mockReturnValue(2026);
 
 describe("album dashboard and open", () => {
   beforeAll(() => {
@@ -41,6 +48,7 @@ describe("album dashboard and open", () => {
     });
   });
   afterAll(() => {
+    browserYear.mockRestore();
     for (const [name, maybeDescriptor] of Object.entries(nativeDialogMethods)) {
       if (maybeDescriptor === undefined) Reflect.deleteProperty(HTMLDialogElement.prototype, name);
       else Object.defineProperty(HTMLDialogElement.prototype, name, maybeDescriptor);
@@ -62,14 +70,15 @@ describe("album dashboard and open", () => {
     expect(screen.getByRole("banner")).toContainElement(screen.getByRole("link", { name: "Album Layout Studio" }));
     expect(screen.getByRole("heading", { name: "Album dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Rename ${firstAlbum.title}` })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(screen.getByRole("link", { name: firstAlbum.title })).toBeInTheDocument();
     resolveNext(secondPage);
     expect(await screen.findByText("Page 2")).toBeInTheDocument();
   });
 
-  it("should create an album with a trimmed title, restore focus and keep opening separate", async () => {
-    const createdAlbum = { ...lastAlbum, title: "Morning light" };
+  it("should ask for the browser year before creating an album, restore focus and keep opening separate", async () => {
+    const createdAlbum = { ...lastAlbum, year: 2040, title: "Journey of the Shepherds 2040" };
     const client = buildClient({
       create: vi.fn().mockResolvedValue(createdAlbum),
       list: vi
@@ -83,11 +92,13 @@ describe("album dashboard and open", () => {
 
     fireEvent.click(add);
     const dialog = screen.getByRole("dialog", { name: "Create an album" });
-    fireEvent.input(within(dialog).getByRole("textbox", { name: "Album name" }), { target: { value: "  Morning light  " } });
+    expect(within(dialog).getByRole("textbox", { name: "Album year" })).toHaveValue("2026");
+    expect(client.create).not.toHaveBeenCalled();
+    fireEvent.input(within(dialog).getByRole("textbox", { name: "Album year" }), { target: { value: " 2040 " } });
     fireEvent.submit(within(dialog).getByRole("form", { name: "Album details" }));
 
     await waitFor(() => {
-      expect(client.create).toHaveBeenCalledWith("Morning light");
+      expect(client.create).toHaveBeenCalledWith(2040);
     });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -97,17 +108,17 @@ describe("album dashboard and open", () => {
     expect(await screen.findByRole("link", { name: createdAlbum.title })).toBeInTheDocument();
   });
 
-  it("should retain rename input on failure and delete only after explicit confirmation", async () => {
-    const client = buildClient({ rename: vi.fn().mockRejectedValue(new Error("Offline")) });
+  it("should retain a duplicate year with readable feedback and delete only after explicit confirmation", async () => {
+    const client = buildClient({ create: vi.fn().mockRejectedValue(new AlbumRequestError(400, "An album already exists for that year")) });
     render(() => <App client={client} />);
-    const rename = await screen.findByRole("button", { name: `Rename ${firstAlbum.title}` });
+    await screen.findByRole("link", { name: firstAlbum.title });
 
-    fireEvent.click(rename);
-    const input = screen.getByRole("textbox", { name: "Album name" });
-    fireEvent.input(input, { target: { value: "New title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add album" }));
+    const input = screen.getByRole("textbox", { name: "Album year" });
+    fireEvent.input(input, { target: { value: "2026" } });
     fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("could not");
-    expect(input).toHaveValue("New title");
+    expect(await screen.findByRole("alert")).toHaveTextContent("An album already exists for that year");
+    expect(input).toHaveValue("2026");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -185,7 +196,7 @@ describe("album dashboard and open", () => {
     });
     expect(firstAlbumAction).toHaveFocus();
     fireEvent.click(firstAlbumAction);
-    fireEvent.input(screen.getByRole("textbox", { name: "Album name" }), { target: { value: firstAlbum.title } });
+    fireEvent.input(screen.getByRole("textbox", { name: "Album year" }), { target: { value: "2026" } });
     fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
 
     expect(await screen.findByRole("link", { name: firstAlbum.title })).toBeInTheDocument();
@@ -195,10 +206,44 @@ describe("album dashboard and open", () => {
     expect(screen.getByRole("button", { name: "Add album" })).toHaveFocus();
   });
 
-  it("should validate a blank title and allow correction before saving a rename", async () => {
-    const renamedAlbum = { ...firstAlbum, title: "New title" };
+  it("should retain an invalid year and allow correction before creating", async () => {
+    const createdAlbum = { ...firstAlbum, year: 2040, title: "Journey of the Shepherds 2040" };
     const client = buildClient({
-      rename: vi.fn().mockResolvedValue(renamedAlbum),
+      create: vi.fn().mockResolvedValue(createdAlbum),
+      list: vi
+        .fn()
+        .mockResolvedValueOnce(firstPage)
+        .mockResolvedValueOnce({ ...firstPage, albums: [createdAlbum, ...firstPage.albums.slice(0, 5)] }),
+    });
+    render(() => <App client={client} />);
+    const add = screen.getByRole("button", { name: "Add album" });
+    add.focus();
+
+    fireEvent.click(add);
+    const input = screen.getByRole("textbox", { name: "Album year" });
+    expect(input).toHaveFocus();
+    fireEvent.input(input, { target: { value: "   " } });
+    fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose a year from 1900 to 2100.");
+    expect(input).toHaveValue("   ");
+    expect(client.create).not.toHaveBeenCalled();
+    fireEvent.input(input, { target: { value: " 2040 " } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
+
+    await waitFor(() => {
+      expect(client.create).toHaveBeenCalledWith(2040);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(add).toHaveFocus();
+  });
+
+  it("should preserve rename input on failure, save a correction and restore focus", async () => {
+    const renamedAlbum = { ...firstAlbum, title: "Asian capitals" };
+    const client = buildClient({
+      rename: vi.fn().mockRejectedValueOnce(new Error("Offline")).mockResolvedValueOnce(renamedAlbum),
       list: vi
         .fn()
         .mockResolvedValueOnce(firstPage)
@@ -206,24 +251,26 @@ describe("album dashboard and open", () => {
     });
     render(() => <App client={client} />);
     const rename = await screen.findByRole("button", { name: `Rename ${firstAlbum.title}` });
-    rename.focus();
 
     fireEvent.click(rename);
     const input = screen.getByRole("textbox", { name: "Album name" });
     expect(input).toHaveFocus();
+    expect(input).toHaveValue(firstAlbum.title);
     fireEvent.input(input, { target: { value: "   " } });
     fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Enter an album title.");
     expect(client.rename).not.toHaveBeenCalled();
-    fireEvent.input(input, { target: { value: "  New title  " } });
+    fireEvent.input(input, { target: { value: "Asian capitals" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not");
+    expect(input).toHaveValue("Asian capitals");
+    fireEvent.input(input, { target: { value: "  Asian capitals  " } });
     fireEvent.submit(screen.getByRole("form", { name: "Album details" }));
 
     await waitFor(() => {
-      expect(client.rename).toHaveBeenCalledWith(firstAlbum.id, "New title");
-    });
-    await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+    expect(client.rename).toHaveBeenLastCalledWith(firstAlbum.id, renamedAlbum.title);
     expect(await screen.findByRole("button", { name: `Rename ${renamedAlbum.title}` })).toHaveFocus();
   });
 

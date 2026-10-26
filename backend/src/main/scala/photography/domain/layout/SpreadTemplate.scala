@@ -16,13 +16,13 @@ object SpreadTemplateId:
   def apply(value: UUID): SpreadTemplateId         = value
   extension (id: SpreadTemplateId) def value: UUID = id
 
-enum SpreadTemplateKind derives CanEqual:
-  case AlbumStart, ChapterStart, PhotosOnly
-
 final case class SlotBox(x: PositionOnSpread, y: PositionOnSpread, width: DistanceWithinSpread, height: DistanceWithinSpread) derives CanEqual
 
-enum SpreadTemplateSlot derives CanEqual:
-  case Photo(box: SlotBox)
-  case Text(box: SlotBox)
+sealed trait SpreadTemplate:
+  def id: SpreadTemplateId
+  def name: SpreadTemplateName
 
-final case class SpreadTemplate(id: SpreadTemplateId, name: SpreadTemplateName, kind: SpreadTemplateKind, slots: NonEmptyList[SpreadTemplateSlot])
+object SpreadTemplate:
+  final case class AlbumStart(id: SpreadTemplateId, name: SpreadTemplateName, photoSlots: Vector[SlotBox], textSlot: SlotBox)   extends SpreadTemplate
+  final case class ChapterStart(id: SpreadTemplateId, name: SpreadTemplateName, photoSlots: Vector[SlotBox], textSlot: SlotBox) extends SpreadTemplate
+  final case class PhotosOnly(id: SpreadTemplateId, name: SpreadTemplateName, photoSlots: NonEmptyList[SlotBox])                extends SpreadTemplate

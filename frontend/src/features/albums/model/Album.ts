@@ -1,5 +1,9 @@
+export const minimumAlbumYear = 1900;
+export const maximumAlbumYear = 2100;
+
 export interface AlbumSummary {
   readonly id: string;
+  readonly year: number;
   readonly title: string;
   readonly createdAt: string;
 }
@@ -18,7 +22,7 @@ export interface AlbumPage {
 
 export interface AlbumClient {
   readonly list: (page: number) => Promise<AlbumPage>;
-  readonly create: (title: string) => Promise<AlbumSummary>;
+  readonly create: (year: number) => Promise<AlbumSummary>;
   readonly rename: (id: string, title: string) => Promise<AlbumSummary>;
   readonly open: (id: string) => Promise<Album>;
   readonly remove: (id: string) => Promise<void>;

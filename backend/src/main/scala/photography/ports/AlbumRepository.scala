@@ -1,13 +1,13 @@
 package photography.ports
 
-import photography.domain.album.{Album, AlbumId, AlbumName}
+import photography.domain.album.{Album, AlbumId, AlbumTitle}
 import photography.domain.layout.Cover
 
 trait AlbumRepository[F[_]]:
   def list(offset: Int, limit: Int): F[AlbumRepository.ListResult]
   def create(album: Album, cover: Cover): F[AlbumRepository.CreateResult]
   def get(id: AlbumId): F[AlbumRepository.GetResult]
-  def rename(id: AlbumId, title: AlbumName): F[AlbumRepository.RenameResult]
+  def rename(id: AlbumId, title: AlbumTitle): F[AlbumRepository.RenameResult]
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
 
 object AlbumRepository:
@@ -37,4 +37,4 @@ object AlbumRepository:
   final case class AlbumPageSlice(totalAlbums: Long, albums: Vector[Album])
 
   enum Failure derives CanEqual:
-    case InvalidAlbumData, DatabaseFailure
+    case YearAlreadyUsed, DatabaseFailure

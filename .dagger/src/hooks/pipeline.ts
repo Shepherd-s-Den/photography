@@ -1,8 +1,7 @@
 import { type Container, dag, type Directory } from "@dagger.io/dagger";
 import { NODE_IMAGE, PYTHON_IMAGE } from "../buildEnv";
 
-/** Runs the pipeline module's type, lint, format, and unit-test gates. */
-export function pipelineCheck(source: Directory): Container {
+export function checkPipeline(source: Directory): Container {
   return dag
     .container()
     .from(NODE_IMAGE)
@@ -13,7 +12,7 @@ export function pipelineCheck(source: Directory): Container {
     .withExec(["npx", "vitest", "run", "--coverage"]);
 }
 
-export function localSetupCheck(source: Directory): Container {
+export function checkLocalSetup(source: Directory): Container {
   return dag
     .container()
     .from(PYTHON_IMAGE)

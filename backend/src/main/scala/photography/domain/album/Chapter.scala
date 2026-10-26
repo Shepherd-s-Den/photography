@@ -1,31 +1,34 @@
 package photography.domain.album
 
-import java.time.Instant
-import java.nio.file.Path
-import java.util.UUID
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import photography.domain.layout.Spread
+
+import java.time.LocalDate
+import java.util.UUID
 
 opaque type ChapterId = UUID
 object ChapterId:
   def apply(value: UUID): ChapterId         = value
   extension (id: ChapterId) def value: UUID = id
 
-type PositionInAlbum = Int :| (GreaterEqual[0] & Less[20])
+type RelativeLocationConstraint = Not[Blank] & Match["(?!/)(?!.*[:\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
+type RelativeLocation           = String :| RelativeLocationConstraint
+type SourceFolderConstraint     = Match["/(?!.*[\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
+type SourceFolder               = String :| SourceFolderConstraint
+type VisitDays                  = Long :| Positive
 
-opaque type RelativeLocation = Path
-object RelativeLocation:
-  def apply(value: Path): RelativeLocation               = value
-  extension (location: RelativeLocation) def value: Path = location
-
-final case class VisitPeriod(start: Instant, end: Instant)
+final case class VisitPeriod(firstDay: LocalDate, days: VisitDays)
 
 final case class Chapter(
     id: ChapterId,
-    album: AlbumId,
-    destination: DestinationId,
-    description: String,
+    destination: Destination,
     period: VisitPeriod,
-    position: PositionInAlbum,
-    sourceFolder: RelativeLocation
+    description: String,
+    sourceFolder: SourceFolder,
+    opening: Spread.ChapterStart,
+    spreads: Vector[Spread.PhotosOnly]
 )
+
+enum ChapterConflict:
+  case AtCapacity, HomeExists, HomePeriodMismatch, FolderAssigned, TypeChange

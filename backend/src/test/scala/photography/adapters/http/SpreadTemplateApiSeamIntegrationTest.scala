@@ -10,24 +10,24 @@ import munit.CatsEffectSuite
 import org.http4s.{MediaType, Method, Request, Status, Uri}
 import org.http4s.circe.CirceEntityCodec.*
 import photography.domain.layout.*
-import photography.usecases.SpreadTemplateService
-import photography.usecases.SpreadTemplateService.ListAlbumStartTemplatesResult
+import photography.usecases.SpreadTemplateManager
+import photography.usecases.SpreadTemplateManager.ListAlbumStartTemplatesResult
 
 import java.util.UUID
 
 final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
-  private val photoBox      = SlotBox(0.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
-  private val synopsisBox   = SlotBox(21.0.refineUnsafe, 0.0.refineUnsafe, 21.0.refineUnsafe, 28.0.refineUnsafe)
-  private val firstTemplate = SpreadTemplate(
+  private val photoBox      = SlotBox(x = 0.0.refineUnsafe, y = 0.0.refineUnsafe, width = 21.0.refineUnsafe, height = 28.0.refineUnsafe)
+  private val synopsisBox   = SlotBox(x = 21.0.refineUnsafe, y = 0.0.refineUnsafe, width = 21.0.refineUnsafe, height = 28.0.refineUnsafe)
+  private val firstTemplate = SpreadTemplate.AlbumStart(
     SpreadTemplateId(new UUID(0L, 2L)),
-    "Synopsis right".refineUnsafe,
-    SpreadTemplateKind.AlbumStart,
-    NonEmptyList.of(SpreadTemplateSlot.Photo(photoBox), SpreadTemplateSlot.Text(synopsisBox))
+    name = "Synopsis right".refineUnsafe,
+    photoSlots = Vector(photoBox),
+    textSlot = synopsisBox
   )
   private val secondTemplate = firstTemplate.copy(id = SpreadTemplateId(new UUID(0L, 4L)), name = "Second".refineUnsafe)
   private val catalog        = NonEmptyList.of(firstTemplate, secondTemplate)
 
-  test(s"should list ${SpreadTemplateKind.AlbumStart} templates with ordered geometry and report catalog failures"):
+  test("should list album opening templates with ordered geometry and report catalog failures"):
     val server            = buildSpreadTemplateApi(ListAlbumStartTemplatesResult.Listed(catalog))
     val unavailableServer = buildSpreadTemplateApi(ListAlbumStartTemplatesResult.Failed)
     val request           = Request[IO](Method.GET, Uri.unsafeFromString("/api/templates/album-start"))
@@ -50,6 +50,8 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(unavailable.contentType.map(_.mediaType), MediaType.application.json.some)
 
   private def buildSpreadTemplateApi(result: ListAlbumStartTemplatesResult) =
-    val templates = new SpreadTemplateService[IO]:
-      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] = result.pure[IO]
+    val templates = new SpreadTemplateManager[IO]:
+      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = result.pure[IO]
+      override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] =
+        SpreadTemplateManager.ListChapterStartTemplatesResult.Failed.pure[IO]
     SpreadTemplateApi.make(templates).routes.orNotFound

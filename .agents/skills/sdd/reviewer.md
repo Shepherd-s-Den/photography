@@ -14,7 +14,7 @@ Spike has no work item of its own — it produces no PR, and its scratch notes i
 
 ## Protocol
 
-1. **Review, twice in sequence.** Each round is the same: the orchestrator launches a fresh reviewer that re-derives every applicable checklist and checks the work item against its sources, the wrapping check, and, for specs, the spec-quality items. Round two starts from round one's findings and dispositions. The reviewer only reports exact findings with passages; it never edits or approves. Results go in `.agent-work/<slug>/review-<n>/`.
+1. **Review, twice in sequence.** Each round is the same: the orchestrator launches a fresh reviewer that re-derives every applicable checklist and checks the work item against its sources, the wrapping check, and, for specs, the spec-quality items. Backend reviews perform the Model and boundary audit before implementation/style inspection and report its concrete evidence even when there are no findings; the author's validity claims are hypotheses to challenge. Round two starts from round one's findings and dispositions. The reviewer only reports exact findings with passages; it never edits or approves. Results go in `.agent-work/<slug>/review-<n>/`.
 2. **Adjudicate and fix after each round.** The orchestrator decides each finding, fixes accepted ones, and records justified exceptions for rejected ones. Then it launches the next round.
 3. **Publication:** report both rounds and their dispositions to the orchestrator for `SKILL.md`'s PR-opening gate. Review the local branch before publication; a GitHub PR is not required to run these rounds. Merge remains a separate maintainer decision.
 
