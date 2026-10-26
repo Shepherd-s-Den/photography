@@ -58,7 +58,6 @@ export function ChapterDialog(props: {
       return;
     }
     setPending(true);
-    setError(undefined);
     try {
       const saved = await props.save(details);
       props.onSaved(saved.id);
@@ -176,10 +175,18 @@ export function ChapterDialog(props: {
           </label>
         </Show>
         <div id="chapter-feedback">
-          <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
-          <Show when={pending()}>
-            <p role="status">Saving chapter. Please wait.</p>
+          <Show when={error()}>
+            {(message) => (
+              <p role="alert" aria-hidden={pending()}>
+                {message()}
+              </p>
+            )}
           </Show>
+          <div class="dialog-status">
+            <Show when={pending()}>
+              <p role="status">Saving chapter. Please wait.</p>
+            </Show>
+          </div>
         </div>
         <div class="dialog-actions">
           <button

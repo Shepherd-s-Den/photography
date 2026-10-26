@@ -10,11 +10,11 @@
 .reader-entry h2 {
   margin: 0 2px;
 }
-.reader-entry button {
+.reader-entry-control button {
   min-height: 32px;
   padding: 0 12px;
 }
-.reader-entry > div {
+.reader-entry-control {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -82,7 +82,7 @@
   inset: 12px 12px auto;
 }
 @media (hover: none) {
-  .reader-entry button {
+  .reader-entry-control button {
     min-height: 44px;
   }
   .reader-controls {

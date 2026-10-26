@@ -103,7 +103,7 @@ Album metadata reads remain separate from workspace reads.
 - Invalid or duplicate years retain the entered value with readable feedback; the saved year remains fixed.
 - Show one workspace heading, `A year in photographs / <year>`, beneath Back to albums.
 - The browser tab displays a site favicon served by the application.
-- The outline starts with Album opening, then numbered chapter blocks; an album without chapters still opens its initial spread.
+- The outline starts with Synopsis, then numbered chapter blocks; an album without chapters still opens its initial spread.
 - Adding a missed vacation or changing its dates repositions its whole block; Home remains last.
 - The workspace offers chapter creation and metadata changes, without chapter deletion or manual ordering.
 
@@ -121,34 +121,37 @@ Album metadata reads remain separate from workspace reads.
 - Accept a same-day vacation; reject impossible or reversed dates. Name is required after trimming; select at least one catalog country.
 - Suggest the folder from the nominal album year and chapter name; preserve a manually entered override as other fields change.
 - Creating a chapter selects its persisted opening with the default layout and empty photo slots.
-- Selecting a chapter establishes its workspace context. Clicking a metadata value opens chapter details; there is no separate Edit chapter action.
+- Selecting a chapter establishes its workspace context. One pencil control after its metadata opens chapter details and receives focus when the dialog closes.
 - Save/reload preserves chapter identity, type, metadata and composition; editing uses saved countries/folder values rather than new-chapter defaults.
 - Failed saves retain entered values with inline, legible errors. Pending saves expose status and prevent duplicate submissions.
 - Dialogs support keyboard/pointer use, Escape/cancel and focus restoration.
+- Dialog text retains its formatting and line breaks while saving and closing, including after deletion confirmation.
 - At 64 interior spreads, chapter creation can add its opening; at 65, creation is unavailable with a visible reason and rejected saves leave state unchanged.
 
 ### Selection and canvas
 
 - Album opening, chapter openings, individual photo spreads and Cover are addressable within `/albums/{id}`.
 - `?part=cover` selects Cover; `?part=<chapterId>` selects its opening; `?part=<spreadId>` selects that spread; an absent part selects Album opening.
-- Direct links, reload and browser Back restore the selected part; a foreign or missing part shows feedback and Go to album opening.
+- Direct links, reload and browser Back restore the selected part; a foreign or missing part shows feedback and Go to Synopsis.
 - Spreads / Cover is a toggle that remembers the last interior selection. A direct Cover load returns to Album opening when no interior selection exists.
 - Cover hides the chapter outline and shows the saved album title with the front/back distinction.
 - Cover credits read `by Cosmin & Mara` through 2025 and `by Cosmin, Mara & Iacob` from 2026.
-- Load persisted spread geometry and owner text read-only; empty photo areas remain unlabeled.
+- Load persisted spread geometry and owner text read-only: album title and synopsis for the album opening, chapter name and description for chapter openings. Empty photo areas remain unlabeled.
 - Maximize canvas width with comfortable outer gutters, compact headers, thin preview framing and inconspicuous metadata.
-- Distinguish metadata labels from values; show the full folder path, for example `/photos/2027/selection/Home`.
-- Sidebar-local chevrons animate collapse/reopen while the canvas resizes; narrow screens collapse vertically and reduced-motion users get an immediate transition.
+- Distinguish metadata labels from values; show location, countries, period and full folder path on one row when space permits, with a trailing pencil control and responsive wrapping.
+- A vertical grip with centered embossed dots shares the chapter panel's straight edge; hover feedback stays within its visible bounds.
+- Collapsing leaves only the keyboard/pointer-accessible grip, without the panel's outer box, and resizes the canvas.
+- Collapse/reopen is animated, vertical on narrow screens and immediate for reduced-motion users.
 - Collapsed chapter controls are inaccessible; keyboard focus transfers to the visible toggle, and the selected part remains unchanged.
 - Keep the workspace and dialogs usable on narrow screens without horizontal page overflow.
 - Loading and retryable failure states precede usable workspace content; missing albums retain the dashboard return path.
 
 ### Reader
 
-- One global Reader control enters browser fullscreen from either Cover or Spreads, hiding workspace chrome and metadata.
+- One global Reader control to the left of the Spreads / Cover toggle enters browser fullscreen from either view, hiding workspace chrome and metadata.
 - Fit the current canvas without stretching or cropping; cover and spread previews retain their respective proportions.
 - Left/right arrows traverse Cover, Album opening and all chapter spreads in order, crossing chapter boundaries without wrapping.
-- Reveal reader controls on pointer hover or keyboard focus; endpoint controls are unavailable with accessible explanations.
+- Reveal reader controls on pointer hover or keyboard focus; Previous spread and Next spread are disabled at their endpoints without explanatory text.
 - Escape or Exit reader retains the current part, restores workspace chrome and returns focus to Reader.
 - A fullscreen failure shows readable feedback and leaves the normal workspace usable.
 

@@ -10,7 +10,7 @@ import { findReaderNavigation, findSelection } from "./WorkspaceSelection";
 import "./workspace.css";
 
 export function AlbumWorkspace(props: {
-  album: Pick<Album, "id" | "title">;
+  album: Pick<Album, "id" | "title" | "synopsis">;
   workspace: Workspace;
   client: Pick<AlbumClient, "createChapter" | "updateChapter">;
   onRefresh: () => Promise<void>;
@@ -22,13 +22,14 @@ export function AlbumWorkspace(props: {
   const [dialog, setDialog] = createSignal<{ chapter: Chapter | undefined; opener: HTMLElement }>();
   const [refreshing, setRefreshing] = createSignal(false);
   const [refreshError, setRefreshError] = createSignal(false);
+  const [readerEntry, setReaderEntry] = createSignal<HTMLDivElement>();
   const selection = createMemo(() => findSelection(props.workspace.spreads, part()));
   const selectedSpread = createMemo(() => {
     const selected = selection();
     return selected.kind === "spread" ? selected.spread : undefined;
   });
   const chapter = createMemo(() => props.workspace.chapters.find((candidate) => candidate.id === selectedSpread()?.chapter));
-  const label = createMemo(() => chapter()?.name ?? "Album opening");
+  const label = createMemo(() => chapter()?.name ?? "Synopsis");
   const readerLabel = createMemo(() =>
     selection().kind === "invalid"
       ? ""
@@ -97,25 +98,28 @@ export function AlbumWorkspace(props: {
     >
       <header class="workspace-heading">
         <h1>A year in photographs / {props.workspace.year}</h1>
-        <div class="workspace-mode" role="group" aria-label="Canvas view">
-          <button
-            type="button"
-            aria-pressed={part() !== "cover"}
-            onClick={() => {
-              select(interior());
-            }}
-          >
-            Spreads
-          </button>
-          <button
-            type="button"
-            aria-pressed={part() === "cover"}
-            onClick={() => {
-              select("cover");
-            }}
-          >
-            Cover
-          </button>
+        <div class="workspace-controls" role="group" aria-label="Workspace controls">
+          <div ref={setReaderEntry} />
+          <div class="workspace-mode" role="group" aria-label="Canvas view">
+            <button
+              type="button"
+              aria-pressed={part() !== "cover"}
+              onClick={() => {
+                select(interior());
+              }}
+            >
+              Spreads
+            </button>
+            <button
+              type="button"
+              aria-pressed={part() === "cover"}
+              onClick={() => {
+                select("cover");
+              }}
+            >
+              Cover
+            </button>
+          </div>
         </div>
       </header>
       <Show when={refreshing()}>
@@ -164,16 +168,17 @@ export function AlbumWorkspace(props: {
                     select(null);
                   }}
                 >
-                  Go to album opening
+                  Go to Synopsis
                 </button>
               </div>
             </Show>
             <FullscreenReader
               aspectRatio={part() === "cover" ? coverAspectRatio : spreadAspectRatio}
               label={readerLabel()}
+              entryMount={readerEntry()}
               unavailable={selection().kind === "invalid" ? "Choose an available album part to enter Reader." : refreshReason()}
-              previousReason={navigation().previous === undefined ? "Cover is the first part." : undefined}
-              nextReason={navigation().next === undefined ? "This is the last spread." : undefined}
+              canPrevious={navigation().previous !== undefined}
+              canNext={navigation().next !== undefined}
               onNavigate={(direction) => {
                 const next = direction === -1 ? navigation().previous : navigation().next;
                 /* v8 ignore next -- Endpoint controls and keyboard guards prevent unavailable navigation. */
@@ -184,7 +189,14 @@ export function AlbumWorkspace(props: {
                 <CoverCanvas title={props.album.title} year={props.workspace.year} />
               </Show>
               <Show when={selectedSpread()}>
-                {(spread) => <SpreadCanvas slots={spread().slots} text={chapter()?.name ?? props.album.title} label={label()} />}
+                {(spread) => (
+                  <SpreadCanvas
+                    slots={spread().slots}
+                    title={chapter()?.name ?? props.album.title}
+                    text={chapter()?.description ?? props.album.synopsis}
+                    label={label()}
+                  />
+                )}
               </Show>
             </FullscreenReader>
             <Show when={chapter()}>

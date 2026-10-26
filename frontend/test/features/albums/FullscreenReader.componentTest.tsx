@@ -33,7 +33,7 @@ describe("fullscreen reader browser boundary", () => {
   it("should enter browser fullscreen, navigate by keyboard and controls, and restore Reader focus after Escape or Exit reader", async () => {
     const navigate = vi.fn<(direction: -1 | 1) => void>();
     render(() => (
-      <FullscreenReader aspectRatio={3} previousReason={undefined} nextReason={undefined} unavailable={undefined} onNavigate={navigate} label="Kyoto">
+      <FullscreenReader aspectRatio={3} canPrevious={true} canNext={true} unavailable={undefined} onNavigate={navigate} label="Kyoto">
         <div role="img" aria-label="Persisted canvas" />
       </FullscreenReader>
     ));
@@ -49,8 +49,8 @@ describe("fullscreen reader browser boundary", () => {
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowLeft" });
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowRight" });
-    fireEvent.click(screen.getByRole("button", { name: "Previous part" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next part" }));
+    fireEvent.click(screen.getByRole("button", { name: "Previous spread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next spread" }));
 
     expect(request).toHaveBeenCalledOnce();
     expect(navigate.mock.calls).toEqual([[-1], [1], [-1], [1]]);
@@ -59,7 +59,7 @@ describe("fullscreen reader browser boundary", () => {
 
     fireEvent.keyDown(screen.getByRole("button", { name: "Exit reader" }), { key: "Tab" });
 
-    expect(screen.getByRole("button", { name: "Previous part" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Previous spread" })).toHaveFocus();
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Tab", shiftKey: true });
 
@@ -73,7 +73,7 @@ describe("fullscreen reader browser boundary", () => {
     screen.getByRole("button", { name: "Exit reader" }).blur();
     fireEvent.keyDown(document.body, { key: "Tab" });
 
-    expect(screen.getByRole("button", { name: "Previous part" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Previous spread" })).toHaveFocus();
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Home" });
     fullscreen = null;
@@ -98,15 +98,15 @@ describe("fullscreen reader browser boundary", () => {
   });
 
   it.each([
-    { previousReason: "Cover is the first part.", nextReason: undefined, key: "ArrowLeft", button: "Previous part" },
-    { previousReason: undefined, nextReason: "This is the last spread.", key: "ArrowRight", button: "Next part" },
-  ])("should explain and prevent navigation at $button", async ({ previousReason, nextReason, key, button }) => {
+    { canPrevious: false, canNext: true, key: "ArrowLeft", button: "Previous spread" },
+    { canPrevious: true, canNext: false, key: "ArrowRight", button: "Next spread" },
+  ])("should disable endpoint navigation at $button without explanatory text", async ({ canPrevious, canNext, key, button }) => {
     const navigate = vi.fn();
     render(() => (
       <FullscreenReader
         aspectRatio={3}
-        previousReason={previousReason}
-        nextReason={nextReason}
+        canPrevious={canPrevious}
+        canNext={canNext}
         unavailable={undefined}
         onNavigate={navigate}
         label="Current part"
@@ -121,7 +121,8 @@ describe("fullscreen reader browser boundary", () => {
     fireEvent.keyDown(screen.getByRole("button", { name: "Exit reader" }), { key: "Tab" });
 
     expect(control).toBeDisabled();
-    expect(control).toHaveAccessibleDescription(previousReason ?? nextReason);
+    expect(control).not.toHaveAttribute("aria-describedby");
+    expect(screen.queryByText(/Cover is the first part|This is the last spread/)).not.toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -132,14 +133,7 @@ describe("fullscreen reader browser boundary", () => {
       if (failure === "rejected") request.mockRejectedValue(new Error("denied"));
       if (failure === "exit") exit.mockRejectedValue(new Error("denied"));
       render(() => (
-        <FullscreenReader
-          aspectRatio={3}
-          previousReason={undefined}
-          nextReason={undefined}
-          unavailable={undefined}
-          onNavigate={vi.fn()}
-          label="Cover"
-        >
+        <FullscreenReader aspectRatio={3} canPrevious={true} canNext={true} unavailable={undefined} onNavigate={vi.fn()} label="Cover">
           <div role="img" aria-label="Saved Cover" />
         </FullscreenReader>
       ));
@@ -155,14 +149,7 @@ describe("fullscreen reader browser boundary", () => {
 
   it("should explain why an unavailable selection cannot enter Reader", () => {
     render(() => (
-      <FullscreenReader
-        aspectRatio={3}
-        previousReason={undefined}
-        nextReason={undefined}
-        unavailable="Choose an available album part."
-        onNavigate={vi.fn()}
-        label=""
-      >
+      <FullscreenReader aspectRatio={3} canPrevious={true} canNext={true} unavailable="Choose an available album part." onNavigate={vi.fn()} label="">
         <div />
       </FullscreenReader>
     ));
@@ -180,7 +167,7 @@ describe("fullscreen reader browser boundary", () => {
         }),
     );
     render(() => (
-      <FullscreenReader aspectRatio={3} previousReason={undefined} nextReason={undefined} unavailable={undefined} onNavigate={vi.fn()} label="Cover">
+      <FullscreenReader aspectRatio={3} canPrevious={true} canNext={true} unavailable={undefined} onNavigate={vi.fn()} label="Cover">
         <div />
       </FullscreenReader>
     ));

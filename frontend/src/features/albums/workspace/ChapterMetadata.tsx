@@ -14,75 +14,43 @@ export function ChapterMetadata(props: {
       .map((country) => country.name)
       .join(", "),
   );
-  const edit = (event: MouseEvent & { currentTarget: HTMLButtonElement }) => {
-    props.onEdit(event.currentTarget);
-  };
   return (
     <>
-      <dl class="chapter-metadata">
-        <div>
-          <dt>Location</dt>
-          <dd>
-            <button
-              type="button"
-              aria-label="Change chapter location"
-              disabled={props.unavailable !== undefined}
-              aria-describedby="metadata-feedback"
-              onClick={edit}
-            >
-              {props.chapter.name}
-            </button>
-          </dd>
-        </div>
-        <div>
-          <dt>Countries</dt>
-          <dd>
-            <button
-              type="button"
-              aria-label="Change chapter countries"
-              disabled={props.unavailable !== undefined}
-              aria-describedby="metadata-feedback"
-              onClick={edit}
-            >
-              {countryNames()}
-            </button>
-          </dd>
-        </div>
-        <div>
-          <dt>Period</dt>
-          <dd>
-            <button
-              type="button"
-              aria-label="Change chapter period"
-              disabled={props.unavailable !== undefined}
-              aria-describedby="metadata-feedback"
-              onClick={edit}
-            >
-              {describePeriod(props.chapter)}
-            </button>
-          </dd>
-        </div>
-        <div class="folder-metadata">
-          <dt>Photo folder</dt>
-          <dd>
-            <button
-              type="button"
-              aria-label="Change chapter photo folder"
-              disabled={props.unavailable !== undefined}
-              aria-describedby="metadata-feedback"
-              onClick={edit}
-            >
-              {props.chapter.sourceFolder}
-            </button>
-          </dd>
-        </div>
-        <Show when={props.chapter.description !== ""}>
+      <div class="chapter-metadata-row">
+        <dl class="chapter-metadata">
           <div>
-            <dt>Description</dt>
-            <dd>{props.chapter.description}</dd>
+            <dt>Location</dt>
+            <dd>{props.chapter.name}</dd>
           </div>
-        </Show>
-      </dl>
+          <div>
+            <dt>Countries</dt>
+            <dd>{countryNames()}</dd>
+          </div>
+          <div>
+            <dt>Period</dt>
+            <dd>{describePeriod(props.chapter)}</dd>
+          </div>
+          <div class="folder-metadata">
+            <dt>Photo folder</dt>
+            <dd>{props.chapter.sourceFolder}</dd>
+          </div>
+        </dl>
+        <button
+          type="button"
+          class="icon-button metadata-edit"
+          aria-label="Edit chapter details"
+          title="Edit chapter details"
+          disabled={props.unavailable !== undefined}
+          aria-describedby={props.unavailable !== undefined ? "metadata-feedback" : undefined}
+          onClick={(event) => {
+            props.onEdit(event.currentTarget);
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 14z" />
+          </svg>
+        </button>
+      </div>
       <Show when={props.unavailable}>{(reason) => <p id="metadata-feedback">{reason()}</p>}</Show>
     </>
   );

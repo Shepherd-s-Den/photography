@@ -4,7 +4,7 @@ import { AlbumOpen } from "../../../src/features/albums/open/AlbumOpen";
 import { AlbumRequestError, type AlbumClient } from "../../../src/features/albums/model/Album";
 import type { Chapter, Workspace } from "../../../src/features/albums/model/Workspace";
 
-const album = { id: "album", year: 2026, title: "Saved free-form album title", createdAt: "2026-10-25T12:00:00Z", synopsis: "" };
+const album = { id: "album", year: 2026, title: "Saved free-form album title", createdAt: "2026-10-25T12:00:00Z", synopsis: "Saved album synopsis" };
 const vacation: Chapter = {
   id: "vacation",
   kind: "vacation",
@@ -72,41 +72,67 @@ describe("album workspace browser boundary", () => {
 
   it("should select numbered persisted chapter blocks and photo spreads, remember interiors, restore Back and recover invalid selections", async () => {
     const client = buildClient();
+
     render(() => <AlbumOpen id={album.id} client={client} />);
     await screen.findByRole("heading", { name: "A year in photographs / 2026" });
-
-    expect(screen.getByRole("img", { name: "Album opening composition" })).toHaveAttribute("viewBox", "0 0 2381.102 765.354");
-    expect(screen.queryByText("Photo")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reader" })).toBeEnabled();
+    const controls = within(screen.getByRole("group", { name: "Workspace controls" }));
     const organization = screen.getByRole("navigation", { name: "Album organization" });
     const links = within(organization).getAllByRole("link");
-    const expectedLinks = ["Album opening", "01 Kyoto 02/04/2026 - 14/04/2026", "Kyoto · Photo spread 1", "02 Home Throughout the year"];
+    const expectedLinks = ["Synopsis", "01 Kyoto 02/04/2026 - 14/04/2026", "Kyoto · Photo spread 1", "02 Home Throughout the year"];
 
+    expect(screen.getByRole("img", { name: "Synopsis composition" })).toHaveAttribute("viewBox", "0 0 2381.102 765.354");
+    expect(screen.getByRole("img", { name: "Synopsis composition" })).toHaveTextContent(album.synopsis);
+    expect(screen.getByRole("img", { name: "Synopsis composition" })).toHaveTextContent(album.title);
+    expect(controls.getAllByRole("button").map((button) => button.textContent)).toEqual(["Reader", "Spreads", "Cover"]);
+    expect(screen.queryByText("Photo")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reader" })).toBeEnabled();
     expect(links.map((link) => link.textContent)).toEqual(expectedLinks);
+
     fireEvent.click(screen.getByRole("link", { name: /01 Kyoto/ }));
+
     expect(screen.getByRole("heading", { name: "Kyoto" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Kyoto composition" })).toHaveTextContent(vacation.description);
+    expect(screen.getByRole("img", { name: "Kyoto composition" })).toHaveTextContent(vacation.name);
+    expect(screen.queryByRole("button", { name: /Change chapter/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit chapter details" })).toBeInTheDocument();
     expect(window.location.search).toBe("?part=vacation");
+
     fireEvent.click(screen.getByRole("link", { name: "Kyoto · Photo spread 1" }));
+
     expect(screen.getByRole("heading", { name: "Kyoto · Photo spread" })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Cover" }));
+
     expect(screen.queryByRole("navigation", { name: "Album organization" })).not.toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Cover: back on the left; front on the right/ })).toHaveAccessibleName(/Saved free-form album title/);
     expect(screen.getByText("by Cosmin, Mara & Iacob")).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole("button", { name: "Spreads" }));
+
     expect(window.location.search).toBe("?part=vacation-photo");
-    fireEvent.click(screen.getByRole("link", { name: "Album opening" }));
+
+    fireEvent.click(screen.getByRole("link", { name: "Synopsis" }));
+
     expect(window.location.search).toBe("");
+
     window.history.replaceState(null, "", "?part=home");
     fireEvent(window, new PopStateEvent("popstate"));
+
     expect(screen.getByRole("heading", { name: "Home" })).toBeInTheDocument();
+
     window.history.replaceState(null, "", "?part=cover");
     fireEvent(window, new PopStateEvent("popstate"));
+
     expect(screen.getByRole("heading", { name: "Cover" })).toBeInTheDocument();
+
     window.history.replaceState(null, "", "?part=foreign");
     fireEvent(window, new PopStateEvent("popstate"));
+
     expect(screen.getByRole("alert")).toHaveTextContent("This album part could not be found.");
-    fireEvent.click(screen.getByRole("button", { name: "Go to album opening" }));
-    expect(screen.getByRole("heading", { name: "Album opening" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to Synopsis" }));
+
+    expect(screen.getByRole("heading", { name: "Synopsis" })).toBeInTheDocument();
   });
 
   it.each(["cover", "vacation-opening", "vacation-photo"])(
@@ -118,9 +144,12 @@ describe("album workspace browser boundary", () => {
 
       if (part === "cover") {
         fireEvent.click(screen.getByRole("button", { name: "Spreads" }));
-        expect(screen.getByRole("heading", { name: "Album opening" })).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Synopsis" })).toBeInTheDocument();
       }
       const collapse = screen.getByRole("button", { name: "Collapse chapter sidebar" });
+
+      expect(collapse).toHaveTextContent(/^$/);
+
       fireEvent.click(collapse);
 
       expect(screen.queryByRole("navigation", { name: "Album organization" })).not.toBeInTheDocument();
@@ -164,13 +193,13 @@ describe("album workspace browser boundary", () => {
         const exit = await screen.findByRole("button", { name: "Exit reader" });
 
         if (part === "cover") {
-          expect(screen.getByRole("button", { name: "Previous part" })).toBeDisabled();
+          expect(screen.getByRole("button", { name: "Previous spread" })).toBeDisabled();
 
           fireEvent.keyDown(exit, { key: "ArrowRight" });
 
           expect(window.location.search).toBe("");
 
-          fireEvent.click(screen.getByRole("button", { name: "Next part" }));
+          fireEvent.click(screen.getByRole("button", { name: "Next spread" }));
         }
 
         expect(screen.getByRole("img", { name: "Kyoto composition" })).toBeInTheDocument();
@@ -182,7 +211,7 @@ describe("album workspace browser boundary", () => {
         fireEvent.keyDown(exit, { key: "ArrowRight" });
 
         expect(screen.getByRole("img", { name: "Home composition" })).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Next part" })).toBeDisabled();
+        expect(screen.getByRole("button", { name: "Next spread" })).toBeDisabled();
 
         fireEvent.keyDown(exit, { key: "ArrowLeft" });
 
@@ -192,7 +221,7 @@ describe("album workspace browser boundary", () => {
 
         await waitFor(() => expect(screen.getByRole("button", { name: "Reader" })).toHaveFocus());
         expect(screen.getByRole("heading", { name: "Kyoto · Photo spread" })).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Change chapter photo folder" })).toHaveTextContent(vacation.sourceFolder);
+        expect(screen.getByText(vacation.sourceFolder, { exact: true })).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole("button", { name: "Cover" }));
         fireEvent.click(screen.getByRole("button", { name: "Spreads" }));
@@ -312,7 +341,7 @@ describe("album workspace browser boundary", () => {
     });
     window.history.replaceState(null, "", "?part=vacation-photo");
     render(() => <AlbumOpen id={album.id} client={client} />);
-    const edit = await screen.findByRole("button", { name: "Change chapter photo folder" });
+    const edit = await screen.findByRole("button", { name: "Edit chapter details" });
 
     fireEvent.click(edit);
     expect(screen.queryByRole("combobox", { name: "Chapter type" })).not.toBeInTheDocument();
@@ -381,15 +410,15 @@ describe("album workspace browser boundary", () => {
     });
     expect(client.createChapter).toHaveBeenCalledWith(album.id, { kind: "home", countries: ["ro"], sourceFolder: "/mnt/photos/2026/selection/Home" });
     fireEvent.click(await screen.findByRole("link", { name: /02 Home/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Change chapter countries" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit chapter details" }));
     expect(screen.queryByRole("combobox", { name: "Chapter type" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("First day")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Photo folder" })).toHaveValue(home.sourceFolder);
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByRole("button", { name: "Change chapter countries" })).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Change chapter location" }));
+    expect(screen.getByRole("button", { name: "Edit chapter details" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Edit chapter details" }));
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "Change chapter period" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit chapter details" }));
     fireEvent(screen.getByRole("dialog"), new Event("cancel", { cancelable: true }));
     fireEvent.click(screen.getByRole("button", { name: "Add chapter" }));
     expect(screen.queryByRole("combobox", { name: "Chapter type" })).not.toBeInTheDocument();
