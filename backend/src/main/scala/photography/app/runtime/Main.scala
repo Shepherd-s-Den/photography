@@ -21,11 +21,12 @@ object Main extends IOApp.Simple:
   override def run: IO[Unit] =
     AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
       AppResourcesBuilder.make(config.sqlite).build[IO].use: resources =>
+        val serve = AppManagers.make[IO](resources.sqlite, config.albums.pageSize, config.albums.photoRoot).use: managers =>
+          buildHttpServer(config.http, buildHttpApp(managers)).useForever.void
         for
-          _        <- resources.flyway.migrate
-          _        <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
-          managers <- AppManagers.make[IO](resources.sqlite, config.albums.pageSize, config.albums.photoRoot)
-          _        <- buildHttpServer(config.http, buildHttpApp(managers)).useForever.void
+          _ <- resources.flyway.migrate
+          _ <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
+          _ <- serve
         yield ()
 
   private def buildHttpApp(managers: AppManagers[IO]) =

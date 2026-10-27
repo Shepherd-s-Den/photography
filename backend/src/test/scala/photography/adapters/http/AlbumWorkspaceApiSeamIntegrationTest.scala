@@ -16,6 +16,8 @@ import photography.usecases.{AlbumManager, AlbumWorkspaceManager, ChapterManager
 import photography.usecases.AlbumManager.*
 import photography.usecases.AlbumWorkspaceManager.GetResult
 import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.ChapterPhotoImport.Scheduling
+import photography.usecases.PhotoInventory
 
 import java.nio.file.Path
 import java.time.{Instant, LocalDate}
@@ -46,6 +48,11 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     val emptyPlacements = Vector.empty[SpreadPlacement]
     val opening         = Spread.AlbumStart(SpreadId(new UUID(0L, 11L)), template, photoSlots = emptyPhotos, text, placements = emptyPlacements)
     Album(AlbumId(new UUID(0L, 1L)), year = 2024, title = "Our year", synopsis = "", Instant.EPOCH, opening, Vector(chapter))
+
+  private val emptyInventories           = Map.empty[ChapterId, PhotoInventory.Inventory]
+  private val workspace: GetResult.Found =
+    GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos", photoInventories = emptyInventories)
+
   private val albumPath   = s"/api/albums/${album.id.value}"
   private val chapterPath = s"$albumPath/chapters/${chapter.id.value}"
   private val vacation    =
@@ -75,10 +82,13 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       destination = chapter.destination.copy(name = "Home"),
       period = VisitPeriod(LocalDate.of(2024, 1, 1), days = 366)
     )
-    val emptyAlbum  = album.copy(chapters = Vector.empty[Chapter])
-    val homeAlbum   = album.copy(chapters = Vector(homeChapter))
-    val emptyServer = buildApi(Refs(), workspaceResult = GetResult.Found(emptyAlbum, NonEmptyList.one(country), photoRoot = "/custom"))
-    val homeServer  = buildApi(Refs(), workspaceResult = GetResult.Found(homeAlbum, NonEmptyList.one(country), photoRoot = "/photos"))
+    val emptyAlbum      = album.copy(chapters = Vector.empty[Chapter])
+    val homeAlbum       = album.copy(chapters = Vector(homeChapter))
+    val selectedCountry = NonEmptyList.one(country)
+    val emptyWorkspace  = workspace.copy(album = emptyAlbum, countries = selectedCountry, photoRoot = "/custom")
+    val homeWorkspace   = workspace.copy(album = homeAlbum, countries = selectedCountry)
+    val emptyServer     = buildApi(Refs(), workspaceResult = emptyWorkspace)
+    val homeServer      = buildApi(Refs(), workspaceResult = homeWorkspace)
 
     for
       empty     <- send(emptyServer, Method.GET, s"$albumPath/workspace")
@@ -243,10 +253,10 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
   // scalafix:off DisableSyntax.defaultArgs
   private def buildApi(
       refs: Refs,
-      workspaceResult: GetResult = GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos"),
+      workspaceResult: GetResult = workspace,
       albumResult: GetAlbumResult = GetAlbumResult.Found(album),
-      createResult: CreateResult = CreateResult.Created(chapter.id),
-      updateResult: UpdateResult = UpdateResult.Updated
+      createResult: CreateResult = CreateResult.Created(chapter.id, Scheduling.Queued),
+      updateResult: UpdateResult = UpdateResult.Updated(Scheduling.NotRequested)
   ) =
     val workspaces = new AlbumWorkspaceManager[IO]:
       override def get(id: AlbumId): IO[GetResult] = workspaceResult.pure[IO]
@@ -257,6 +267,8 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
     val chapters = new ChapterManager[IO]:
+      override def refresh(album: AlbumId, chapter: ChapterId): IO[ChapterManager.RefreshResult] =
+        IO.raiseError[ChapterManager.RefreshResult](new AssertionError("Unexpected photo Refresh"))
       override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: PhotoSource) =
         refs.calls.update(_ :+ s"create:${id.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}").as(createResult)
       override def update(

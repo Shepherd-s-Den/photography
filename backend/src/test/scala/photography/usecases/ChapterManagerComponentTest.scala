@@ -9,15 +9,19 @@ import munit.CatsEffectSuite
 import photography.capabilities.IdGenerator
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.ports.{AlbumRepository, ChapterRepository, CountryRepository}
-import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.ports.{AlbumRepository, ChapterRepository}
+import photography.usecases.ChapterManager.{CreateResult, Period, RefreshResult, UpdateResult}
 import photography.usecases.SpreadTemplateManager.ListChapterStartTemplatesResult
+import photography.usecases.ChapterPhotoImport.{Request, Scheduling, Status}
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 
 import java.nio.file.Path
 import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class ChapterManagerComponentTest extends CatsEffectSuite:
+  private given Logger[IO]              = Slf4jLogger.getLogger[IO]
   private val homeName: DestinationName = "Home"
   private val countries                 = NonEmptyList.of(
     Country(CountryId(buildUuid(index = 21)), code = "JP", name = "Japan", AbsoluteLocation(Path.of("/flags/jp.svg"))),
@@ -56,12 +60,14 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     album.copy(chapters = Vector(chapter.copy(spreads = spreads)))
 
   test("should create a multi-country chapter and its empty opening"):
-    val refs = Refs()
+    val refs                  = Refs()
+    val checkNoPreparedImport = refs.preparations.get.map(actual => assertEquals(actual, Vector.empty))
 
     for
-      manager <- buildManager(refs)
-      result  <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
-      writes  <- refs.creations.get
+      manager  <- buildManager(refs, save = _ => checkNoPreparedImport)
+      result   <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
+      writes   <- refs.creations.get
+      prepared <- refs.preparations.get
     yield
       val photoSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), box, bleed = Set.empty)
       val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), box)
@@ -74,68 +80,26 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       val sourceFolder    = chapter.sourceFolder
       val expected        =
         ChapterRepository.NewChapter(chapterId, destinationId, destinationName, countryIds, chapter.period, description = "", sourceFolder, opening)
-      assertEquals(result, CreateResult.Created(expected.id))
+      assertEquals(result, CreateResult.Created(expected.id, Scheduling.Queued))
       assertEquals(writes, Vector((album.id, expected, NonEmptyList.one(expected.id))))
-
-  test("should reject unknown countries and report unavailable catalogs before creating or updating"):
-    val unknownCountry = CountryId(buildUuid(index = 99))
-    val requested      = countries.map(_.id).append(unknownCountry)
-    val rejectedCreate = CreateResult.Rejected(ChapterConflict.UnknownCountries)
-    val rejectedUpdate = UpdateResult.Rejected(ChapterConflict.UnknownCountries)
-    val scenarios      = Vector(
-      (CountryRepository.ListResult.Listed(countries), rejectedCreate, rejectedUpdate),
-      (CountryRepository.ListResult.Failed, CreateResult.Failed, UpdateResult.Failed)
-    )
-
-    scenarios.traverse_ { case (catalog, expectedCreate, expectedUpdate) =>
-      val refs = Refs()
-
-      for
-        manager   <- buildManager(refs, current = album.copy(chapters = Vector(chapter)), countryCatalog = catalog)
-        created   <- manager.create(album.id, chapter.destination.name, requested, Period.Dates(chapter.period), sourceFolder = "/photos/new")
-        updated   <- manager.update(album.id, chapter.id, chapter.destination.name, requested, Period.Dates(chapter.period), chapter.sourceFolder)
-        creations <- refs.creations.get
-        updates   <- refs.updates.get
-      yield
-        assertEquals(created, expectedCreate)
-        assertEquals(updated, expectedUpdate)
-        assertEquals(creations, Vector.empty)
-        assertEquals(updates, Vector.empty)
-    }
-
-  test("should preserve missing album and chapter results when the country catalog is unavailable"):
-    val refs        = Refs()
-    val period      = Period.Dates(chapter.period)
-    val absentAlbum = (AlbumRepository.GetResult.NotFound: AlbumRepository.GetResult).pure[IO].some
-    val unavailable = CountryRepository.ListResult.Failed
-
-    for
-      missingAlbum   <- buildManager(refs, maybeRead = absentAlbum, countryCatalog = unavailable)
-      missingChapter <- buildManager(refs, countryCatalog = unavailable)
-      created        <- missingAlbum.create(album.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
-      updated        <- missingAlbum.update(album.id, chapter.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
-      absent         <- missingChapter.update(album.id, chapter.id, chapter.destination.name, countries.map(_.id), period, chapter.sourceFolder)
-      creations      <- refs.creations.get
-      updates        <- refs.updates.get
-    yield
-      assertEquals(created, CreateResult.AlbumNotFound)
-      assertEquals(updated, UpdateResult.AlbumNotFound)
-      assertEquals(absent, UpdateResult.ChapterNotFound)
-      assertEquals(creations, Vector.empty)
-      assertEquals(updates, Vector.empty)
+      assertEquals(prepared, Vector((expected.id, sourceFolder)))
 
   test(s"should resolve the full year for $homeName including leap days"):
     Vector((2024: AlbumYear, 366: VisitDays), (2026: AlbumYear, 365: VisitDays)).traverse_ { case (year, days) =>
-      val refs    = Refs()
-      val current = album.copy(year = year, chapters = Vector(home.copy(period = VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days))))
+      val refs        = Refs()
+      val period      = VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days)
+      val homeChapter = home.copy(period = period)
+      val current     = album.copy(year = year, chapters = Vector(homeChapter))
 
       for
-        manager <- buildManager(refs, current = current)
-        updated <- manager.update(album.id, home.id, homeName, countries.map(_.id), Period.AlbumYear, home.sourceFolder)
-        updates <- refs.updates.get
+        manager  <- buildManager(refs, current = current)
+        updated  <- manager.update(album.id, home.id, homeName, countries.map(_.id), Period.AlbumYear, home.sourceFolder)
+        updates  <- refs.updates.get
+        prepared <- refs.preparations.get
       yield
-        assertEquals(updated, UpdateResult.Updated)
-        assertEquals(updates.map(_.period), Vector(VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days)))
+        assertEquals(updated, UpdateResult.Updated(Scheduling.NotRequested))
+        assertEquals(updates.map(_.period), Vector(period))
+        assertEquals(prepared, Vector.empty)
     }
 
   test(s"should reject duplicate $homeName chapters, wrong full-year periods and reused folders before writing"):
@@ -206,9 +170,9 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     yield
       assertEquals(beforeLast.spreads.length, 64)
       assertEquals(current.spreads.length, 65)
-      assertEquals(admitted, CreateResult.Created(ChapterId(buildUuid(index = 10))))
+      assertEquals(admitted, CreateResult.Created(ChapterId(buildUuid(index = 10)), Scheduling.Queued))
       assertEquals(rejected, CreateResult.Rejected(ChapterConflict.AtCapacity))
-      assertEquals(updated, UpdateResult.Updated)
+      assertEquals(updated, UpdateResult.Updated(Scheduling.Queued))
       val destinationName: DestinationName = "Kyoto"
       val sourceFolder: PhotoSource        = "/photos/new"
       val chapterOrder                     = NonEmptyList.one(chapter.id)
@@ -231,8 +195,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       updates   <- refs.updates.get
     yield
       val expectedCreations = Vector(NonEmptyList.of(earlier.id, tied.id, ChapterId(buildUuid(index = 10)), chapter.id, later.id, home.id))
-      assertEquals(created, CreateResult.Created(ChapterId(buildUuid(index = 10))))
-      assertEquals(updated, UpdateResult.Updated)
+      assertEquals(created, CreateResult.Created(ChapterId(buildUuid(index = 10)), Scheduling.Queued))
+      assertEquals(updated, UpdateResult.Updated(Scheduling.NotRequested))
       assertEquals(creations.map(_.order), expectedCreations)
       assertEquals(updates.map(_.order), Vector(NonEmptyList.of(earlier.id, tied.id, later.id, chapter.id, home.id)))
 
@@ -253,17 +217,20 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       results <- Vector.fill(2)(()).parTraverse(_ => createChapter)
       saved   <- state.get
     yield
-      assertEquals(results.collect { case CreateResult.Created(_) => () }.size, 1)
+      assertEquals(results.collect { case _: CreateResult.Created => () }.size, 1)
       assertEquals(results.collect { case CreateResult.Rejected(ChapterConflict.AtCapacity) => () }.size, 1)
       assertEquals(saved.spreads.length, 65)
 
-  test("should report missing albums chapters templates and failed writes explicitly"):
+  test("should report missing metadata and rejected writes without preparing or launching imports"):
     val refs    = Refs()
     val current = album.copy(chapters = Vector(chapter))
     val period  = Period.Dates(chapter.period)
     val reads   = Vector(
-      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound)),
-      (AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure), (CreateResult.Failed, UpdateResult.Failed))
+      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound, RefreshResult.AlbumNotFound)),
+      (
+        AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure),
+        (CreateResult.Failed, UpdateResult.Failed, RefreshResult.Failed)
+      )
     )
     val writes = Vector(
       (
@@ -273,26 +240,44 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       ),
       (ChapterRepository.CreateResult.Failed, ChapterRepository.UpdateResult.Failed, (CreateResult.Failed, UpdateResult.Failed)),
       (
-        ChapterRepository.CreateResult.Saved,
+        ChapterRepository.CreateResult.AlbumNotFound,
         ChapterRepository.UpdateResult.ChapterNotFound,
-        (CreateResult.Created(ChapterId(buildUuid(index = 10))), UpdateResult.ChapterNotFound)
+        (CreateResult.AlbumNotFound, UpdateResult.ChapterNotFound)
+      ),
+      (
+        ChapterRepository.CreateResult.UnknownCountries,
+        ChapterRepository.UpdateResult.UnknownCountries,
+        (CreateResult.Rejected(ChapterConflict.UnknownCountries), UpdateResult.Rejected(ChapterConflict.UnknownCountries))
       )
     )
-    val unavailableReads = reads.traverse { case (read, expected) =>
-      buildManager(refs, maybeRead = read.pure[IO].some).flatMap { manager =>
-        (
-          manager.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new"),
-          manager.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
-        ).tupled.map(result => assertEquals(result, expected))
-      }
+    val unavailableReads = reads.traverse_ { case (read, expected) =>
+      val observations = Refs()
+
+      for
+        manager   <- buildManager(observations, maybeRead = read.pure[IO].some)
+        created   <- manager.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+        updated   <- manager.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+        refreshed <- manager.refresh(album.id, chapter.id)
+        prepared  <- observations.preparations.get
+        launched  <- observations.launches.get
+      yield
+        assertEquals((created, updated, refreshed), expected)
+        assertEquals(prepared, Vector.empty)
+        assertEquals(launched, Vector.empty)
     }
-    val unavailableWrites = writes.traverse { case (creation, update, expected) =>
-      buildManager(refs, current = current, createWrite = creation, updateWrite = update).flatMap { manager =>
-        (
-          manager.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new"),
-          manager.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
-        ).tupled.map(result => assertEquals(result, expected))
-      }
+    val unavailableWrites = writes.traverse_ { case (creation, update, expected) =>
+      val observations = Refs()
+
+      for
+        manager  <- buildManager(observations, current = current, createWrite = creation, updateWrite = update)
+        created  <- manager.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+        updated  <- manager.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+        prepared <- observations.preparations.get
+        launched <- observations.launches.get
+      yield
+        assertEquals((created, updated), expected)
+        assertEquals(prepared, Vector.empty)
+        assertEquals(launched, Vector.empty)
     }
 
     for
@@ -301,12 +286,52 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       _           <- unavailableReads
       _           <- unavailableWrites
       absent      <- missing.update(album.id, chapter.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+      refreshed   <- missing.refresh(album.id, chapter.id)
       failed      <- noTemplates.create(album.id, name = "Kyoto", countries.map(_.id), period, sourceFolder = "/photos/new")
+      prepared    <- refs.preparations.get
+      launched    <- refs.launches.get
     yield
       assertEquals(absent, UpdateResult.ChapterNotFound)
       assertEquals(failed, CreateResult.Failed)
+      assertEquals(refreshed, RefreshResult.ChapterNotFound)
+      assertEquals(prepared, Vector.empty)
+      assertEquals(launched, Vector.empty)
+
+  test("should preserve saved creation when launch fails and resolve Refresh from the saved source"):
+    val error      = new RuntimeException("scheduling failed")
+    val countryIds = countries.map(_.id)
+    val name       = chapter.destination.name
+    val period     = Period.Dates(chapter.period)
+    val failures   = Vector(
+      (IO.unit, Scheduling.Failed.pure[IO]),
+      (IO.unit, IO.raiseError[Scheduling](error)),
+      (IO.raiseError[Unit](error), Scheduling.Queued.pure[IO])
+    )
+
+    failures.traverse_ { case (preparation, scheduling) =>
+      val refs = Refs()
+
+      for
+        manager   <- buildManager(refs, current = album.copy(chapters = Vector(chapter)), preparation = preparation, scheduling = scheduling)
+        created   <- manager.create(album.id, name = "Kyoto", countries.map(_.id), Period.Dates(chapter.period), sourceFolder = "/photos/new")
+        refreshed <- manager.refresh(album.id, chapter.id)
+        updated   <- manager.update(album.id, chapter.id, name, countryIds, period, sourceFolder = "/photos/changed")
+        prepared  <- refs.preparations.get
+      yield
+        assertEquals(created, CreateResult.Created(ChapterId(buildUuid(index = 10)), Scheduling.Failed))
+        assertEquals(refreshed, RefreshResult.Scheduled(Scheduling.Failed))
+        assertEquals(updated, UpdateResult.Updated(Scheduling.Failed))
+        val expectedSources = Vector(
+          (ChapterId(buildUuid(index = 10)), "/photos/new": PhotoSource),
+          (chapter.id, chapter.sourceFolder),
+          (chapter.id, "/photos/changed": PhotoSource)
+        )
+        assertEquals(prepared, expectedSources)
+    }
 
   final private case class Refs():
+    val preparations: Ref[IO, Vector[(ChapterId, PhotoSource)]]                                                             = Ref.unsafe(Vector.empty)
+    val launches: Ref[IO, Vector[Request]]                                                                                  = Ref.unsafe(Vector.empty)
     val creations: Ref[IO, Vector[(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId])]] = Ref.unsafe(Vector.empty)
 
     val updates: Ref[
@@ -330,7 +355,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       createWrite: ChapterRepository.CreateResult = ChapterRepository.CreateResult.Saved,
       updateWrite: ChapterRepository.UpdateResult = ChapterRepository.UpdateResult.Saved,
       templates: ListChapterStartTemplatesResult = ListChapterStartTemplatesResult.Listed(NonEmptyList.one(template)),
-      countryCatalog: CountryRepository.ListResult = CountryRepository.ListResult.Listed(countries),
+      preparation: IO[Unit] = IO.unit,
+      scheduling: IO[Scheduling] = Scheduling.Queued.pure[IO],
       save: ChapterRepository.NewChapter => IO[Unit] = _ => IO.unit
   ) =
     given IdGenerator[IO] with
@@ -368,11 +394,14 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       override def listAlbumStartTemplates: IO[SpreadTemplateManager.ListAlbumStartTemplatesResult] =
         IO.raiseError[SpreadTemplateManager.ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
       override def listChapterStartTemplates: IO[ListChapterStartTemplatesResult] = templates.pure[IO]
-    val countryRepository = new CountryRepository[IO]:
-      override def list: IO[CountryRepository.ListResult] = countryCatalog.pure[IO]
     Mutex[IO].map: mutex =>
       given Mutex[IO] = mutex
-      ChapterManager.make(albums, repository, catalog, countryRepository)
+      val imports     = new ChapterPhotoImport[IO]:
+        override def prepare(id: ChapterId, source: PhotoSource): IO[Request] =
+          refs.preparations.update(_ :+ (id, source)) >> preparation.as(Request(id, source, generation = BigInt(0)))
+        override def launch(request: Request): IO[Scheduling] = mutex.lock.surround(refs.launches.update(_ :+ request) >> scheduling)
+        override def status(id: ChapterId): IO[Status]        = Status.Idle.pure[IO]
+      ChapterManager.make(albums, repository, catalog, imports)
   // scalafix:on DisableSyntax.defaultArgs
 
   private def buildUuid(index: Long) = new UUID(0L, index)
