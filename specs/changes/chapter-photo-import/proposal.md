@@ -29,9 +29,37 @@ flowchart LR
 | Record | SQLite enforcement | Application contract |
 | --- | --- | --- |
 | Photo | Primary key; chapter foreign key; unique chapter/source | Stable identity across same-path edits; relative source stays inside its chapter folder. |
-| Thumbnail metadata | Positive dimensions; bytes in `1..300000`; complete ready-image metadata | Publish only after the thumbnail exists; never store copies of originals. |
-| Import state | One chapter-owned record; nonnegative generation/count; closed status values | Persist pending/running/complete/failed state; reject superseded-generation writes. |
+| Thumbnail metadata | Positive dimensions and bytes in `1..300000` via `CHECK`; ready fields all present or all absent via explicit null checks | Publish only after the thumbnail exists; never store copies of originals. |
+| Import state | Chapter primary/foreign key; nonnegative generation/count and closed statuses via `CHECK` | Persist pending/running/complete/failed state; reject superseded-generation writes. |
 | Placement | Photo foreign key with cascading deletion | Remove references on confirmed source deletion; preserve empty slots and their geometry. |
+
+```sql
+CREATE TABLE chapter_photo_import (
+  chapter_id TEXT PRIMARY KEY NOT NULL
+    REFERENCES chapter (id) ON DELETE CASCADE,
+  generation INTEGER NOT NULL CHECK (generation >= 0),
+  status TEXT NOT NULL
+    CHECK (status IN ('pending', 'running', 'complete', 'failed')),
+  unsupported_count INTEGER NOT NULL CHECK (unsupported_count >= 0)
+) STRICT;
+```
+
+Photo metadata retains the source content hash. Current-generation checks and photo writes are atomic; source hashes detect changed bytes, not just timestamps or sizes.
+
+Capture time uses nullable fixed-width ISO local date/time text with nine fractional digits; source/SQLite adapters validate representations and preserve chronological ordering.
+
+Migrations preserve existing databases and legacy capture metadata. Populate local capture time from source EXIF, never reinterpret an epoch value using an assumed timezone.
+
+### Domain values
+
+```scala
+enum PhotoScope:
+  case Chapter(id: ChapterId)
+  case Album(id: AlbumId)
+
+enum ImportStatus:
+  case Pending, Running, Complete, Failed
+```
 
 | Value | Contract |
 | --- | --- |
