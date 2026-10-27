@@ -30,7 +30,8 @@ object AppManagers:
     Resource.eval(Mutex[F]).flatMap: mutex =>
       given Mutex[F] = mutex
       given Transaction[ConnectionIO, F] with
-        override def run[A](program: ConnectionIO[A]): F[A] = program.transact(sqlite)
+        override def run[A](program: ConnectionIO[A]): F[A]     = program.transact(sqlite)
+        override def resolve[A](program: ConnectionIO[A]): F[A] = program.transact(sqlite)
       val templateRepository = SqliteSpreadTemplateRepository.make[F](sqlite)
       val templates          = SpreadTemplateManager.make(templateRepository)
       val albumRepository    = SqliteAlbumRepository.make[F](sqlite)

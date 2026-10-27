@@ -27,7 +27,8 @@ object Main extends IOApp.Simple:
     AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
       AppResourcesBuilder.make(config.sqlite).build[IO].use: resources =>
         given Transaction[ConnectionIO, IO] with
-          override def run[A](program: ConnectionIO[A]): IO[A] = program.transact(resources.sqlite)
+          override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(resources.sqlite)
+          override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(resources.sqlite)
         val photos     = SqlitePhotoRepository.make
         val thumbnails = FileThumbnailStorage.make[IO](config.thumbnails.root)
         val recovery   = PhotoWriteRecovery.make(photos, thumbnails)

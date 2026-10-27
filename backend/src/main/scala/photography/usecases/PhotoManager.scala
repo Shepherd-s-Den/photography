@@ -1,5 +1,6 @@
 package photography.usecases
 
+import cats.MonadThrow
 import cats.effect.Async
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
@@ -15,13 +16,13 @@ trait PhotoManager[F[_]]:
   def refresh(chapter: ChapterId, source: PhotoSource): F[RefreshResult]
 
 object PhotoManager:
-  def make[F[_]: Async: IdGenerator: Logger, Db[_]](
+  def make[F[_]: Async: IdGenerator: Logger, Db[_]: MonadThrow](
       photoStorage: PhotoStorage[F],
       photos: PhotoRepository[Db],
       generator: PhotoThumbnailGenerator[F]
   )(using Transaction[Db, F]): PhotoManager[F] = new LivePhotoManager(photoStorage, photos, generator)
 
-  final private class LivePhotoManager[F[_]: Async: IdGenerator: Logger, Db[_]](
+  final private class LivePhotoManager[F[_]: Async: IdGenerator: Logger, Db[_]: MonadThrow](
       photoStorage: PhotoStorage[F],
       photos: PhotoRepository[Db],
       thumbnails: PhotoThumbnailGenerator[F]
@@ -66,30 +67,64 @@ object PhotoManager:
       thumbnails.generate(content).flatMap:
         case PhotoThumbnailGenerator.GenerationResult.Failed           => Vector(Issue.Generation(original.filename)).pure[F]
         case PhotoThumbnailGenerator.GenerationResult.Generated(image) =>
-          val maybeCaption = maybePrevious.flatMap(_.maybeCaption)
-          val identity     = maybePrevious.fold(IdGenerator[F].generateId.map(PhotoId(_)))(_.id.pure[F])
-          identity.flatMap: id =>
-            IdGenerator[F].generateId.map(ThumbnailLocation(_)).flatMap: location =>
-              publish(location, Photo(id, chapter, original, metadata, _, maybeCaption), image, maybePrevious)
+          val maybeCaption                                 = maybePrevious.flatMap(_.maybeCaption)
+          val identity                                     = maybePrevious.fold(IdGenerator[F].generateId.map(PhotoId(_)))(_.id.pure[F])
+          val publication: F[PhotoWriteIntent.Publication] =
+            for
+              id       <- identity
+              location <- IdGenerator[F].generateId.map(ThumbnailLocation(_))
+              writeId  <- IdGenerator[F].generateId.map(PhotoWriteIntentId(_))
+            yield PhotoWriteIntent.Publication(writeId, chapter, id, location, maybePrevious = maybePrevious.map(_.thumbnail.location))
+          publication.flatMap(intent => publish(intent, Photo(intent.photo, chapter, original, metadata, _, maybeCaption), image))
 
-    private def publish(location: ThumbnailLocation, photo: Thumbnail => Photo, image: EncodedThumbnail, maybePrevious: Option[Photo]) =
+    private def publish(intent: PhotoWriteIntent.Publication, photo: Thumbnail => Photo, image: EncodedThumbnail) =
       Async[F].uncancelable: _ =>
-        photoStorage.storeThumbnail(location, image).attempt.flatMap:
-          case Right(ThumbnailStorage.StoreResult.Failed) => cleanup(location).map(Issue.Storage +: _)
-          case Left(error) => Logger[F].error(error)("Photo thumbnail storage failed") >> cleanup(location).map(Issue.Storage +: _)
-          case Right(ThumbnailStorage.StoreResult.Stored(thumbnail)) =>
-            Transaction[Db, F].run(photos.save(photo(thumbnail))).attempt.flatMap:
-              case Right(PhotoRepository.WriteResult.Applied) =>
-                maybePrevious.traverse(old => cleanup(old.thumbnail.location)).map(_.getOrElse(Vector.empty[Issue]))
-              case Right(PhotoRepository.WriteResult.Failed) => cleanup(location).map(Issue.Persistence +: _)
-              case Left(error) => Logger[F].error(error)("Photo persistence failed") >> cleanup(location).map(Issue.Persistence +: _)
+        Transaction[Db, F].run(recordWrite(intent)) >>
+          photoStorage.storeThumbnail(intent.location, image).attempt.flatMap:
+            case Right(ThumbnailStorage.StoreResult.Failed) => finishWrite(intent, Vector(intent.location)).map(Issue.Storage +: _)
+            case Left(error)                                =>
+              Logger[F].error(error)("Photo thumbnail storage failed") >> finishWrite(intent, Vector(intent.location)).map(Issue.Storage +: _)
+            case Right(ThumbnailStorage.StoreResult.Stored(thumbnail)) =>
+              val locations = intent.location +: intent.maybePrevious.toList.toVector
+              Transaction[Db, F].run(photos.save(photo(thumbnail))).attempt.flatMap:
+                case Right(PhotoRepository.WriteResult.Applied) => finishWrite(intent, locations)
+                case Right(PhotoRepository.WriteResult.Failed)  => finishWrite(intent, locations).map(Issue.Persistence +: _)
+                case Left(error)                                =>
+                  Logger[F].error(error)("Photo persistence failed") >> finishWrite(intent, locations).map(Issue.Persistence +: _)
+      .handleErrorWith(error => failed(error, Issue.Persistence))
 
     private def retire(photo: Photo) =
       Async[F].uncancelable: _ =>
-        Transaction[Db, F].run(photos.remove(photo.id)).flatMap:
-          case PhotoRepository.WriteResult.Applied => cleanup(photo.thumbnail.location)
-          case PhotoRepository.WriteResult.Failed  => Vector(Issue.Persistence).pure[F]
+        IdGenerator[F].generateId.map(PhotoWriteIntentId(_)).flatMap: id =>
+          val intent: PhotoWriteIntent.Retirement = PhotoWriteIntent.Retirement(id, photo.chapter, photo.id, photo.thumbnail.location)
+          val remove                              = recordWrite(intent) >> photos.remove(photo.id).flatMap:
+            case PhotoRepository.WriteResult.Applied => ().pure[Db]
+            case PhotoRepository.WriteResult.Failed  => new IllegalStateException("Photo removal rejected").raiseError[Db, Unit]
+          Transaction[Db, F].run(remove).attempt.flatMap:
+            case Right(())   => finishWrite(intent, Vector(intent.location))
+            case Left(error) =>
+              Logger[F].error(error)("Photo retirement failed") >> finishWrite(intent, Vector(intent.location)).map(Issue.Persistence +: _)
       .handleErrorWith(error => failed(error, Issue.Persistence))
+
+    private def recordWrite(intent: PhotoWriteIntent) =
+      photos.recordWrite(intent).flatMap:
+        case PhotoRepository.RecordWriteResult.Recorded => ().pure[Db]
+        case PhotoRepository.RecordWriteResult.Failed   => new IllegalStateException("Photo write evidence rejected").raiseError[Db, Unit]
+
+    private def finishWrite(intent: PhotoWriteIntent, locations: Vector[ThumbnailLocation]) =
+      Transaction[Db, F].resolve(photos.listChapter(intent.chapter)).flatMap:
+        case PhotoRepository.ListResult.Failed          => Vector(Issue.WriteReferences(intent.id)).pure[F]
+        case PhotoRepository.ListResult.Listed(current) =>
+          val unused = locations.distinct.filterNot(location => current.exists(_.thumbnail.location.value === location.value))
+          unused.traverse(cleanup).map(_.flatten).flatMap: issues =>
+            if issues.nonEmpty then issues.pure[F] else completeWrite(intent.id)
+      .handleErrorWith(error => failed(error, Issue.WriteReferences(intent.id)))
+
+    private def completeWrite(id: PhotoWriteIntentId) =
+      Transaction[Db, F].resolve(photos.completeWrite(id)).flatMap:
+        case PhotoRepository.CompleteWriteResult.Completed => Vector.empty[Issue].pure[F]
+        case PhotoRepository.CompleteWriteResult.Failed    => Vector(Issue.WriteCompletion(id)).pure[F]
+      .handleErrorWith(error => failed(error, Issue.WriteCompletion(id)))
 
     private def cleanup(location: ThumbnailLocation) =
       photoStorage.removeThumbnail(location).attempt.flatMap:
@@ -109,3 +144,5 @@ object PhotoManager:
     case Undecodable(filename: PhotoFilename)
     case Unstable(filename: PhotoFilename)
     case Cleanup(location: ThumbnailLocation)
+    case WriteReferences(id: PhotoWriteIntentId)
+    case WriteCompletion(id: PhotoWriteIntentId)

@@ -59,6 +59,7 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
     given Transaction[Db, IO] with
       override def run[A](program: Db[A]): IO[A] =
         maybeTransactionError.fold(program.run(0).flatMap { case (steps, result) => IO(assertEquals(steps, 2)).as(result) })(IO.raiseError[A])
+      override def resolve[A](program: Db[A]): IO[A] = program.runA(0)
     val photos = new PhotoRepository[Db]:
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
         StateT.modify[IO, Int](_ + 1).as(listed)

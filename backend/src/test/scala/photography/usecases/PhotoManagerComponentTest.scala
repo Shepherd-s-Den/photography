@@ -1,7 +1,9 @@
 package photography.usecases
 
 import cats.data.Kleisli
-import cats.effect.{Deferred, IO, Ref}
+import cats.Id
+import cats.effect.{Deferred, IO, Outcome, Ref}
+import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
@@ -18,21 +20,19 @@ import java.util.UUID
 final class PhotoManagerComponentTest extends CatsEffectSuite:
   private type Db[A] = Kleisli[IO, Unit, A]
   private given Logger[IO] = Slf4jLogger.getLogger[IO]
-  private given IdGenerator[IO] with
-    override def generateId: IO[UUID] = new UUID(0L, 9L).pure[IO]
-  private val chapter   = ChapterId(new UUID(0L, 1L))
-  private val original  = OriginalPhotoLocation(source = "/photos/trip", filename = "one.jpg")
-  private val metadata  = PhotoMetadata(hash = "original", maybeCapturedLocal = None, PhotoDimensions(width = 120, height = 80))
-  private val content   = PhotoContent(Vector(1.toByte).refineEither[MinLength[1]].fold[PhotoBytes](message => fail(message), identity))
-  private val encoded   = Vector(1.toByte).refineEither[ThumbnailBytesConstraint].fold[ThumbnailBytes](message => fail(message), identity)
-  private val image     = EncodedThumbnail(encoded, ThumbnailDimensions(width = 60, height = 40), ThumbnailQuality.Standard)
-  private val thumbnail = Thumbnail(ThumbnailLocation(new UUID(0L, 3L)), version = "version", image.dimensions, image.quality, bytes = 1)
-  private val stored    = thumbnail.copy(location = ThumbnailLocation(new UUID(0L, 9L)))
-  private val existing  = Photo(PhotoId(new UUID(0L, 4L)), chapter, original, metadata, thumbnail, maybeCaption = "Retained".some)
-  private val complete  = PhotoStorage.DiscoveryResult.Complete(Vector(original), unsupportedCount = 2)
-  private val absent    = PhotoStorage.DiscoveryResult.Complete(Vector.empty[OriginalPhotoLocation], unsupportedCount = 0)
-  private val read      = PhotoStorage.ReadResult.Read(content, metadata)
-  private val error     = new RuntimeException("boundary failed")
+  private val chapter      = ChapterId(new UUID(0L, 1L))
+  private val original     = OriginalPhotoLocation(source = "/photos/trip", filename = "one.jpg")
+  private val metadata     = PhotoMetadata(hash = "original", maybeCapturedLocal = None, PhotoDimensions(width = 120, height = 80))
+  private val content      = PhotoContent(Vector(1.toByte).refineEither[MinLength[1]].fold[PhotoBytes](message => fail(message), identity))
+  private val encoded      = Vector(1.toByte).refineEither[ThumbnailBytesConstraint].fold[ThumbnailBytes](message => fail(message), identity)
+  private val image        = EncodedThumbnail(encoded, ThumbnailDimensions(width = 60, height = 40), ThumbnailQuality.Standard)
+  private val thumbnail    = Thumbnail(ThumbnailLocation(new UUID(0L, 3L)), version = "version", image.dimensions, image.quality, bytes = 1)
+  private val stored       = thumbnail.copy(location = ThumbnailLocation(new UUID(0L, 9L)))
+  private val existing     = Photo(PhotoId(new UUID(0L, 4L)), chapter, original, metadata, thumbnail, maybeCaption = "Retained".some)
+  private val complete     = PhotoStorage.DiscoveryResult.Complete(Vector(original), unsupportedCount = 2)
+  private val absent       = PhotoStorage.DiscoveryResult.Complete(Vector.empty[OriginalPhotoLocation], unsupportedCount = 0)
+  private val read         = PhotoStorage.ReadResult.Read(content, metadata)
+  private val error        = new RuntimeException("boundary failed")
 
   test("should await publication, preserve identity and caption, and retire only the previous thumbnail"):
     Vector(
@@ -42,6 +42,17 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
         val save = (photo: Photo) =>
           IO(assertEquals(photo, existing.copy(metadata = changed, thumbnail = stored))).as(PhotoRepository.WriteResult.Applied)
+        val expectedEvents = Vector(
+          "transaction",
+          "read",
+          "generate",
+          "transaction",
+          "record",
+          "store",
+          "transaction",
+          s"remove:${thumbnail.location.value}",
+          "complete"
+        )
         val previous = existing.copy(thumbnail = thumbnail.copy(quality = previousQuality))
         val manager  = buildManager(
           events,
@@ -53,7 +64,7 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
           events.get.map: actual =>
             assertEquals(result.issues, Vector.empty[Issue])
             assertEquals(result.unsupportedCount, 2)
-            assertEquals(actual, Vector("transaction", "read", "generate", "store", "transaction", s"remove:${thumbnail.location.value}"))
+            assertEquals(actual, expectedEvents)
     }
 
   test("should generate new identities and skip unchanged hashes at the selected quality"):
@@ -141,7 +152,7 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
             manager.refresh(chapter, original.source).flatMap: actual =>
               events.get.map: recorded =>
                 assertEquals(actual.issues, issues ++ cleanupIssues)
-                assertEquals(recorded.lastOption, s"remove:${stored.location.value}".some)
+                assert(recorded.contains(s"remove:${stored.location.value}"))
         }
     }
 
@@ -157,7 +168,7 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
         failedDelete <- removeFailure.refresh(chapter, original.source)
       yield
         assertEquals(storage.issues, Vector(Issue.Storage))
-        assertEquals(recorded.count(_ === "transaction"), 1)
+        assertEquals(recorded.count(_ === "transaction"), 2)
         assertEquals(cleanup.issues, Vector(Issue.Cleanup(thumbnail.location)))
         assertEquals(failedDelete.issues, Vector(Issue.Persistence))
 
@@ -171,48 +182,96 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
             assertEquals(result.issues, Vector(Issue.Storage, Issue.Cleanup(stored.location)))
             assertEquals(recorded.lastOption, s"remove:${stored.location.value}".some)
             assert(!recorded.contains(s"remove:${thumbnail.location.value}"))
-            assertEquals(recorded.count(_ === "transaction"), 1)
+            assertEquals(recorded.count(_ === "transaction"), 2)
     }
 
-  test("should finish compensating a stored thumbnail before honoring cancellation"):
-    (Ref.of[IO, Vector[String]](Vector.empty), Deferred[IO, Unit], Deferred[IO, Unit]).tupled.flatMap:
-      case (events, saving, release) =>
-        val save    = (_: Photo) => saving.complete(()).void >> release.get.as(PhotoRepository.WriteResult.Failed)
-        val manager = buildManager(events, existingPhotos = Vector.empty[Photo], save = save)
-        for
-          refresh      <- manager.refresh(chapter, original.source).start
-          _            <- saving.get
-          cancellation <- refresh.cancel.start
-          _            <- IO.cede
-          _            <- release.complete(())
-          _            <- cancellation.join
-          result       <- refresh.join
-          recorded     <- events.get
-        yield
-          assert(result.isCanceled)
-          assertEquals(recorded.lastOption, s"remove:${stored.location.value}".some)
+  test("should finish publication and absent-photo retirement handoffs before honoring cancellation"):
+    Vector((false, false), (false, true), (true, false), (true, true)).traverse_ { case (retiring, committed) =>
+      (Ref.of[IO, Vector[String]](Vector.empty), Deferred[IO, Unit], Deferred[IO, Unit]).tupled.flatMap:
+        case (events, saving, release) =>
+          val writeResult = if committed then PhotoRepository.WriteResult.Applied else PhotoRepository.WriteResult.Failed
+          val handoff     = saving.complete(()).void >> release.get
+          val save        = (_: Photo) => handoff.as(writeResult)
+          val remove      = (_: PhotoId) => if committed then writeResult.pure[IO] else handoff.as(writeResult)
+          val cleaning    =
+            if retiring && committed then handoff.as(ThumbnailStorage.RemoveResult.Removed) else ThumbnailStorage.RemoveResult.Removed.pure[IO]
+          val reading   = PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
+          val discovery = if retiring then absent else complete
+          val manager = buildManager(events, discovery = discovery.pure[IO], save = save, remove = remove, cleaning = cleaning, readResult = reading)
+          val removed = if committed then thumbnail.location else stored.location
+          val expectedRemovals = if retiring && !committed then Vector.empty[String] else Vector(s"remove:${removed.value}")
+          val program          =
+            for
+              refresh      <- manager.refresh(chapter, original.source).flatTap(_ => IO.cede).start
+              _            <- saving.get
+              cancellation <- refresh.cancel.start
+              _            <- cancellation.join
+              result       <- refresh.join
+              recorded     <- events.get
+            yield
+              assert(result.isCanceled)
+              assertEquals(recorded.filter(_.startsWith("remove:")), expectedRemovals)
+              assertEquals(recorded.lastOption, "complete".some)
 
-  test("should commit and retire the previous thumbnail before honoring publication cancellation"):
-    (Ref.of[IO, Vector[String]](Vector.empty), Deferred[IO, Unit], Deferred[IO, Unit]).tupled.flatMap:
-      case (events, saving, release) =>
-        val save = (photo: Photo) =>
-          IO(assertEquals(photo, existing.copy(metadata = metadata.copy(hash = "changed"), thumbnail = stored))) >>
-            saving.complete(()).void >> release.get.as(PhotoRepository.WriteResult.Applied)
-        val reading = PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
-        val manager = buildManager(events, save = save, readResult = reading)
+          for
+            control <- TestControl.execute(program)
+            _       <- control.tick
+            waiting <- control.results
+            _       <- release.complete(())
+            _       <- control.tick
+            result  <- control.results
+          yield
+            assertEquals(waiting, None)
+            assertEquals(result, Outcome.succeeded[Id, Throwable, Unit](()).some)
+    }
+
+  test("should preserve absent photos when a retirement identity cannot be allocated"):
+    Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
+      val manager = buildManager(events, discovery = absent.pure[IO], nextId = IO.raiseError[UUID](error))
+
+      for
+        result <- manager.refresh(chapter, original.source)
+        actual <- events.get
+      yield
+        assertEquals(result.issues, Vector(Issue.Persistence))
+        assertEquals(actual, Vector("transaction"))
+
+  test("should retain the primary failure when evidence recording, reference resolution or completion fails"):
+    val id = PhotoWriteIntentId(new UUID(0L, 9L))
+    Vector(false, true).traverse_ { throws =>
+      val recording  = if throws then IO.raiseError[PhotoRepository.RecordWriteResult](error) else PhotoRepository.RecordWriteResult.Failed.pure[IO]
+      val resolving  = if throws then IO.raiseError[Unit](error) else IO.unit
+      val completing =
+        if throws then IO.raiseError[PhotoRepository.CompleteWriteResult](error) else PhotoRepository.CompleteWriteResult.Failed.pure[IO]
+      Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
+        val noEvidence = buildManager(events, existingPhotos = Vector.empty[Photo], recording = recording)
+        val listed     = events.get.map: recorded =>
+          if recorded.contains("store") then PhotoRepository.ListResult.Failed
+          else PhotoRepository.ListResult.Listed(photos = Vector.empty[Photo])
+        val noReferences = buildManager(
+          events,
+          existingPhotos = Vector.empty[Photo],
+          storage = ThumbnailStorage.StoreResult.Failed.pure[IO],
+          resolving = resolving,
+          maybeListed = listed.some
+        )
+        val noCompletion =
+          buildManager(events, existingPhotos = Vector.empty[Photo], save = _ => PhotoRepository.WriteResult.Failed.pure[IO], completing = completing)
+
         for
-          refresh      <- manager.refresh(chapter, original.source).start
-          _            <- saving.get
-          cancellation <- refresh.cancel.start
-          _            <- IO.cede
-          _            <- release.complete(())
-          _            <- cancellation.join
-          result       <- refresh.join
-          recorded     <- events.get
+          rejected   <- noEvidence.refresh(chapter, original.source)
+          before     <- events.get
+          _          <- events.set(Vector.empty)
+          unresolved <- noReferences.refresh(chapter, original.source)
+          untouched  <- events.get
+          incomplete <- noCompletion.refresh(chapter, original.source)
         yield
-          assert(result.isCanceled)
-          assertEquals(recorded.lastOption, s"remove:${thumbnail.location.value}".some)
-          assert(!recorded.contains(s"remove:${stored.location.value}"))
+          assertEquals(rejected.issues, Vector(Issue.Persistence))
+          assert(!before.contains("store"))
+          assertEquals(unresolved.issues, Vector(Issue.Storage, Issue.WriteReferences(id)))
+          assert(!untouched.exists(_.startsWith("remove:")))
+          assertEquals(incomplete.issues, Vector(Issue.Persistence, Issue.WriteCompletion(id)))
+    }
 
   // scalafix:off DisableSyntax.defaultArgs
   private def buildManager(
@@ -226,10 +285,18 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       maybeListed: Option[IO[PhotoRepository.ListResult]] = None,
       quality: ThumbnailQuality = ThumbnailQuality.Standard,
       save: Photo => IO[PhotoRepository.WriteResult] = _ => PhotoRepository.WriteResult.Applied.pure[IO],
-      remove: PhotoId => IO[PhotoRepository.WriteResult] = _ => PhotoRepository.WriteResult.Applied.pure[IO]
+      remove: PhotoId => IO[PhotoRepository.WriteResult] = _ => PhotoRepository.WriteResult.Applied.pure[IO],
+      recording: IO[PhotoRepository.RecordWriteResult] = PhotoRepository.RecordWriteResult.Recorded.pure[IO],
+      completing: IO[PhotoRepository.CompleteWriteResult] = PhotoRepository.CompleteWriteResult.Completed.pure[IO],
+      resolving: IO[Unit] = IO.unit,
+      nextId: IO[UUID] = new UUID(0L, 9L).pure[IO]
   ): PhotoManager[IO] =
+    given IdGenerator[IO] with
+      override def generateId: IO[UUID] = nextId
+    val current = Ref.unsafe[IO, Vector[Photo]](existingPhotos)
     given Transaction[Db, IO] with
-      override def run[A](program: Db[A]): IO[A] = events.update(_ :+ "transaction") >> program.run(())
+      override def run[A](program: Db[A]): IO[A]     = events.update(_ :+ "transaction") >> program.run(())
+      override def resolve[A](program: Db[A]): IO[A] = resolving >> program.run(())
     val photoStorage = new PhotoStorage[IO]:
       override def discoverOriginals(source: PhotoSource): IO[PhotoStorage.DiscoveryResult] = IO(assertEquals(source, original.source)) >>
         discovery
@@ -242,15 +309,20 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
     val removePhoto = remove
     val repository  = new PhotoRepository[Db]:
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](IO(assertEquals(id, chapter)) >>
-          maybeListed.getOrElse(PhotoRepository.ListResult.Listed(existingPhotos).pure[IO]))
-      override def save(photo: Photo): Db[PhotoRepository.WriteResult]     = Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](writePhoto(photo))
+        val listed = maybeListed.getOrElse(current.get.map(photos => PhotoRepository.ListResult.Listed(photos)))
+        Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](IO(assertEquals(id, chapter)) >> listed)
+      override def save(photo: Photo): Db[PhotoRepository.WriteResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](writePhoto(photo).flatTap:
+          case PhotoRepository.WriteResult.Applied => current.update(photos => photos.filterNot(_.id.value === photo.id.value) :+ photo)
+          case PhotoRepository.WriteResult.Failed  => IO.unit)
       override def remove(photo: PhotoId): Db[PhotoRepository.WriteResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](removePhoto(photo))
+        Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](removePhoto(photo).flatTap:
+          case PhotoRepository.WriteResult.Applied => current.update(_.filterNot(_.id.value === photo.value))
+          case PhotoRepository.WriteResult.Failed  => IO.unit)
       override def recordWrite(intent: PhotoWriteIntent): Db[PhotoRepository.RecordWriteResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](PhotoRepository.RecordWriteResult.Failed.pure[IO])
+        Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](events.update(_ :+ "record") >> recording)
       override def completeWrite(id: PhotoWriteIntentId): Db[PhotoRepository.CompleteWriteResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](PhotoRepository.CompleteWriteResult.Failed.pure[IO])
+        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](events.update(_ :+ "complete") >> completing)
       override def listUnfinishedWrites: Db[PhotoRepository.ListUnfinishedWritesResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.ListUnfinishedWritesResult](PhotoRepository.ListUnfinishedWritesResult.Failed.pure[IO])
     val selectedQuality = quality
