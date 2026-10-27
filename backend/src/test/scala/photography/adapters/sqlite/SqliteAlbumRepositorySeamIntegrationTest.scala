@@ -276,6 +276,9 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       val insertSecondText   = sql"""INSERT INTO spread_text_slot VALUES ($secondTextSlotId, $secondOpeningId, 0, 0, 100, 100)"""
       val insertFirstChapter = sql"""INSERT INTO chapter (id, album_id, destination_id, description, start_ms, end_ms, position, source_folder)
         VALUES ($chapterId, $albumId, $destinationId, '', 0, 86400000, 0, '/photos/coast')"""
+      val insertPhoto = sql"""INSERT INTO photo (id, chapter_id, source, source_hash, width, height, thumbnail,
+        thumbnail_version, thumbnail_width, thumbnail_height, thumbnail_quality, thumbnail_bytes)
+        VALUES ($photoId, $chapterId, 'photo.jpg', 'hash', 100, 100, $photoId, 'version', 100, 100, 'low', 1)"""
       val initialiseChapter =
         for
           _ <- sql"DELETE FROM country WHERE code IN ('IS', 'JP')".update.run
@@ -285,7 +288,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           _ <- sql"INSERT INTO country VALUES (${buildUuid(index = 430).toString}, 'JP', 'Japan', '/flags/jp.svg')".update.run
           _ <- sql"INSERT INTO destination_country VALUES ($destinationId, ${buildUuid(index = 430).toString}, 1)".update.run
           _ <- insertFirstChapter.update.run
-          _ <- sql"INSERT INTO photo VALUES ($photoId, $chapterId, 'photo.jpg', NULL, NULL, 100, 100, NULL)".update.run
+          _ <- insertPhoto.update.run
           _ <- sql"INSERT INTO spread_template VALUES ($templateId, 'Chapter', 'chapter_start')".update.run
           _ <- insertTemplateSlot.update.run
           _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($templateId, 'text', 0, 0, 100, 100)".update.run

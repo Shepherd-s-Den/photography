@@ -8,7 +8,7 @@ import io.github.iltotore.iron.constraint.numeric.GreaterEqual
 import org.typelevel.log4cats.Logger
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
-import photography.ports.{PhotoRepository, PhotoStorage}
+import photography.ports.{PhotoRepository, PhotoStorage, ThumbnailStorage}
 import photography.usecases.PhotoManager.*
 
 trait PhotoManager[F[_]]:
@@ -75,9 +75,9 @@ object PhotoManager:
     private def publish(location: ThumbnailLocation, photo: Thumbnail => Photo, image: EncodedThumbnail, maybePrevious: Option[Photo]) =
       Async[F].uncancelable: _ =>
         photoStorage.storeThumbnail(location, image).attempt.flatMap:
-          case Right(PhotoStorage.StoreResult.Failed) => cleanup(location).map(Issue.Storage +: _)
+          case Right(ThumbnailStorage.StoreResult.Failed) => cleanup(location).map(Issue.Storage +: _)
           case Left(error) => Logger[F].error(error)("Photo thumbnail storage failed") >> cleanup(location).map(Issue.Storage +: _)
-          case Right(PhotoStorage.StoreResult.Stored(thumbnail)) =>
+          case Right(ThumbnailStorage.StoreResult.Stored(thumbnail)) =>
             Transaction[Db, F].run(photos.save(photo(thumbnail))).attempt.flatMap:
               case Right(PhotoRepository.WriteResult.Applied) =>
                 maybePrevious.traverse(old => cleanup(old.thumbnail.location)).map(_.getOrElse(Vector.empty[Issue]))
@@ -93,9 +93,9 @@ object PhotoManager:
 
     private def cleanup(location: ThumbnailLocation) =
       photoStorage.removeThumbnail(location).attempt.flatMap:
-        case Right(PhotoStorage.RemoveResult.Removed) => Vector.empty[Issue].pure[F]
-        case Right(PhotoStorage.RemoveResult.Failed)  => Vector(Issue.Cleanup(location)).pure[F]
-        case Left(error)                              => failed(error, Issue.Cleanup(location))
+        case Right(ThumbnailStorage.RemoveResult.Removed) => Vector.empty[Issue].pure[F]
+        case Right(ThumbnailStorage.RemoveResult.Failed)  => Vector(Issue.Cleanup(location)).pure[F]
+        case Left(error)                                  => failed(error, Issue.Cleanup(location))
 
     private def failed(error: Throwable, issue: Issue) =
       Logger[F].error(error)(s"Photo reconciliation failed: $issue").as(Vector(issue))

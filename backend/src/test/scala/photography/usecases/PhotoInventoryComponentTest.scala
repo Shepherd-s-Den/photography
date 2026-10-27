@@ -66,6 +66,12 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
         StateT.liftF(IO.raiseError[PhotoRepository.WriteResult](new RuntimeException("unexpected write")))
       override def remove(value: PhotoId): Db[PhotoRepository.WriteResult] =
         StateT.liftF(IO.raiseError[PhotoRepository.WriteResult](new RuntimeException("unexpected removal")))
+      override def recordWrite(intent: PhotoWriteIntent): Db[PhotoRepository.RecordWriteResult] =
+        StateT.liftF(IO.raiseError[PhotoRepository.RecordWriteResult](new AssertionError("Unexpected evidence creation")))
+      override def completeWrite(id: PhotoWriteIntentId): Db[PhotoRepository.CompleteWriteResult] =
+        StateT.liftF(IO.raiseError[PhotoRepository.CompleteWriteResult](new AssertionError("Unexpected evidence completion")))
+      override def listUnfinishedWrites: Db[PhotoRepository.ListUnfinishedWritesResult] =
+        StateT.liftF(IO.raiseError[PhotoRepository.ListUnfinishedWritesResult](new AssertionError("Unexpected evidence listing")))
     val placements = new PhotoPlacementRepository[Db]:
       override def findPlacedPhotos(id: ChapterId): Db[PhotoPlacementRepository.FindResult] =
         StateT.modify[IO, Int](_ + 1).as(placed)

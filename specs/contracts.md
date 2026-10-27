@@ -6,6 +6,7 @@
 
 - [SQLite migrations](../backend/src/main/resources/db/) define the schema contract, including four `AlbumStart` layouts, 27 chapter-start layouts and all 249 ISO 3166-1 countries/territories; foreign-key enforcement is enabled on every connection.
 - The [OpenAPI specification](http-api.openapi.json) defines year-required album creation, metadata reads and free-form rename, deletion, pagination, workspace reads, multi-country chapter creation/update and `AlbumStart`-template listing, including representation and error contracts.
+- Photo persistence requires complete source/thumbnail metadata and independently retains publication/retirement write evidence after photo or chapter removal. Evidence recording and photo removal compose in one database transaction; completion tolerates an already absent intent.
 
 ## Frontend delivery
 

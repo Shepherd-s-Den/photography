@@ -19,4 +19,6 @@ The undeployed application separates the Flyway schema (V1) from its authoritati
 
 The supported runtime is one backend instance. The chapter manager owns chapter integrity rules; its shared mutex coordinates concurrent editors' read/decision/write operations. SQLite provides basic relational constraints and transactions for atomic chapter metadata, country associations, opening slots and supplied order.
 
+The undeployed photo schema now requires complete thumbnail metadata and retains unfinished write evidence independently of photo deletion. Existing development databases with the earlier V1 checksum need a fresh explicit `PHOTOGRAPHY_SQLITE_PATH`; existing databases and spike data are not upgraded or removed automatically. Startup resolves recorded writes before serving; see [operations](specs/operational.md#local-service). Live photo importing remains inactive.
+
 Workspace HTTP responses expose `/photos` as the default photo root; set `PHOTOGRAPHY_PHOTO_ROOT` to override it with an absolute path. Chapter source folders are saved as full paths and need not exist yet.

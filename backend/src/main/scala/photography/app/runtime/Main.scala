@@ -7,9 +7,14 @@ import org.http4s.HttpApp
 import org.http4s.ember.server.EmberServerBuilder
 import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import org.typelevel.doobie.ConnectionIO
+import org.typelevel.doobie.implicits.*
 import photography.adapters.http.{AlbumApi, AlbumWorkspaceApi, HealthRoutes, SpreadTemplateApi, StaticSite}
+import photography.adapters.filesystem.FileThumbnailStorage
+import photography.adapters.sqlite.SqlitePhotoRepository
 import photography.app.config.{AppConfig, HttpServerConfig}
-import photography.capabilities.{Clock, IdGenerator}
+import photography.capabilities.{Clock, IdGenerator, Transaction}
+import photography.usecases.PhotoWriteRecovery
 import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
@@ -21,10 +26,20 @@ object Main extends IOApp.Simple:
   override def run: IO[Unit] =
     AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
       AppResourcesBuilder.make(config.sqlite).build[IO].use: resources =>
-        val serve = AppManagers.make[IO](resources.sqlite, config.albums.pageSize, config.albums.photoRoot).use: managers =>
+        given Transaction[ConnectionIO, IO] with
+          override def run[A](program: ConnectionIO[A]): IO[A] = program.transact(resources.sqlite)
+        val photos     = SqlitePhotoRepository.make
+        val thumbnails = FileThumbnailStorage.make[IO](config.thumbnails.root)
+        val recovery   = PhotoWriteRecovery.make(photos, thumbnails)
+        val recover    = recovery.recover.flatMap:
+          case PhotoWriteRecovery.RecoveryResult.Recovered       => IO.unit
+          case failure: PhotoWriteRecovery.RecoveryResult.Failed =>
+            IO.raiseError[Unit](new IllegalStateException(s"Photo write recovery failed: ${failure.issues}"))
+        val serve = AppManagers.make[IO](resources.sqlite, config.albums.pageSize, config.albums.photoRoot, photos).use: managers =>
           buildHttpServer(config.http, buildHttpApp(managers)).useForever.void
         for
           _ <- resources.flyway.migrate
+          _ <- recover
           _ <- logger.info(s"Migrations applied; serving on ${config.http.host}:${config.http.port}")
           _ <- serve
         yield ()
