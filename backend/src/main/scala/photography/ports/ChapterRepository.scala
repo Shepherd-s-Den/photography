@@ -19,14 +19,6 @@ trait ChapterRepository[F[_]]:
   ): F[ChapterRepository.UpdateResult]
 
 object ChapterRepository:
-  trait PhotoReader[F[_]]:
-    def findPhotoContext(chapter: ChapterId): F[PhotoReader.FindResult]
-
-  object PhotoReader:
-    enum FindResult:
-      case Found(album: AlbumId, source: PhotoSource)
-      case NotFound, Failed
-
   final case class NewChapter(
       id: ChapterId,
       destinationId: DestinationId,

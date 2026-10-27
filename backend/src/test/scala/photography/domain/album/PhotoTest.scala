@@ -1,33 +1,24 @@
 package photography.domain.album
 
 import cats.syntax.all.*
-import io.github.iltotore.iron.autoRefine
+import io.github.iltotore.iron.*
 import munit.FunSuite
-import java.util.UUID
 
 final class PhotoTest extends FunSuite:
-  test("should construct complete thumbnails only within the selected quality's byte and pixel ceilings"):
-    ThumbnailQuality.values.toVector.foreach { quality =>
-      val location   = ThumbnailLocation(new UUID(0L, 1L))
-      val dimensions = PhotoDimensions(quality.longestEdge, height = 1)
-      val content    = PhotoContent(bytes = Vector.fill(quality.maximumBytes)(1.toByte))
-      val oversized  = PhotoDimensions(width = 4096, height = 1)
+  test("should restrict thumbnail measurements and encoded content to positive bounded values"):
+    Vector(0, 1, 2048, 2049, 300000, 300001).foreach { value =>
+      val pixels = value.refineEither[ThumbnailPixelCountConstraint]
+      val bytes  = value.refineEither[ThumbnailByteCountConstraint]
+      val image  = Vector.fill(value)(1.toByte).refineEither[ThumbnailBytesConstraint]
 
-      val encoded = EncodedThumbnail.from(content, dimensions, quality)
-      val stored  = Thumbnail.from(location, version = "v1", dimensions, quality, bytes = quality.maximumBytes)
-      val actual  = stored.map(value => (value.location.value, value.version: String, value.dimensions, value.quality, value.bytes))
+      assertEquals(pixels.isRight, value >= 1 && value <= 2048)
+      assertEquals(bytes.isRight, value >= 1 && value <= 300000)
+      assertEquals(image.isRight, bytes.isRight)
+    }
 
-      assertEquals(encoded.map(_.content), content.some)
-      assertEquals(encoded.map(_.dimensions), dimensions.some)
-      assertEquals(encoded.map(_.quality), quality.some)
-      assertEquals(actual, (location.value, "v1", dimensions, quality, quality.maximumBytes).some)
-      Vector(0, quality.maximumBytes + 1).foreach { bytes =>
-        assertEquals(EncodedThumbnail.from(PhotoContent(bytes = Vector.fill(bytes)(1.toByte)), dimensions, quality), None)
-        assertEquals(Thumbnail.from(location, version = "v1", dimensions, quality, bytes), None)
-      }
-      assertEquals(EncodedThumbnail.from(content, oversized, quality), None)
-      assertEquals(Thumbnail.from(location, version = "v1", oversized, quality, bytes = 1), None)
-      val tooTall = oversized.copy(width = 1, height = 4096)
-      assertEquals(EncodedThumbnail.from(content, tooTall, quality), None)
-      assertEquals(Thumbnail.from(location, version = "v1", tooTall, quality, bytes = 1), None)
+  test("should represent original filenames without paths or parent-directory references"):
+    Vector("one.JPG", "", " ", ".", "..", "../one.jpg", "trip/one.jpg", "trip\\one.jpg", "one\u0000.jpg", "drive:one.jpg").foreach { value =>
+      val filename = value.refineEither[PhotoFilenameConstraint]
+
+      assertEquals(filename.isRight, value === "one.JPG")
     }

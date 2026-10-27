@@ -1,7 +1,6 @@
 package photography.domain.album
 
 import java.time.LocalDateTime
-import java.util.Locale
 import java.util.UUID
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
@@ -26,61 +25,44 @@ final case class Photo(
     maybeCaption: Option[String]
 )
 
-object Photo:
-  given Ordering[Photo] = Ordering.by: photo =>
-    val filename = photo.original.filename
-    (
-      photo.metadata.maybeCapturedLocal.isEmpty,
-      photo.metadata.maybeCapturedLocal.getOrElse(LocalDateTime.MIN),
-      filename.toLowerCase(Locale.ROOT),
-      filename,
-      photo.chapter.value.toString
-    )
+type PhotoFilenameConstraint       = Not[Blank] & Match["(?!\\.{1,2}$)[^/\\\\\\x00:]+"]
+type PhotoFilename                 = String :| PhotoFilenameConstraint
+type ThumbnailPixelCountConstraint = Interval.Closed[1, 2048]
+type ThumbnailPixelCount           = Int :| ThumbnailPixelCountConstraint
+type ThumbnailByteCountConstraint  = Interval.Closed[1, 300000]
+type ThumbnailByteCount            = Int :| ThumbnailByteCountConstraint
+type ThumbnailBytesConstraint      = MinLength[1] & MaxLength[300000]
+type ThumbnailBytes                = Vector[Byte] :| ThumbnailBytesConstraint
+type PhotoBytes                    = Vector[Byte] :| MinLength[1]
 
-final case class OriginalPhotoLocation(source: PhotoSource, relative: RelativeLocation):
-  def filename: String = (relative: String).substring((relative: String).lastIndexOf('/') + 1)
-
+final case class OriginalPhotoLocation(source: PhotoSource, filename: PhotoFilename)
 object OriginalPhotoLocation:
-  given Eq[OriginalPhotoLocation] = Eq.by(original => (original.source: String, original.relative: String))
+  given Eq[OriginalPhotoLocation] = Eq.by(original => (original.source: String, original.filename: String))
 
 final case class PhotoMetadata(hash: String :| Not[Blank], maybeCapturedLocal: Option[LocalDateTime], dimensions: PhotoDimensions)
-final case class PhotoContent(bytes: Vector[Byte])
+final case class PhotoContent(bytes: PhotoBytes)
 
 opaque type ThumbnailLocation = UUID
 object ThumbnailLocation:
   def apply(value: UUID): ThumbnailLocation               = value
   extension (location: ThumbnailLocation) def value: UUID = location
 
-enum ThumbnailQuality(val longestEdge: PixelCount, val maximumBytes: Int):
+final case class ThumbnailDimensions(width: ThumbnailPixelCount, height: ThumbnailPixelCount)
+
+enum ThumbnailQuality(val longestEdge: ThumbnailPixelCount, val maximumBytes: ThumbnailByteCount):
   case Low      extends ThumbnailQuality(longestEdge = 1024, maximumBytes = 75000)
   case Standard extends ThumbnailQuality(longestEdge = 1536, maximumBytes = 150000)
   case High     extends ThumbnailQuality(longestEdge = 2048, maximumBytes = 300000)
 
-  def accepts(dimensions: PhotoDimensions, bytes: Int): Boolean =
-    bytes > 0 && bytes <= maximumBytes && dimensions.width <= longestEdge && dimensions.height <= longestEdge
-
 object ThumbnailQuality:
   given Eq[ThumbnailQuality] = Eq.by(_.ordinal)
 
-final class EncodedThumbnail private (val content: PhotoContent, val dimensions: PhotoDimensions, val quality: ThumbnailQuality)
-object EncodedThumbnail:
-  def from(content: PhotoContent, dimensions: PhotoDimensions, quality: ThumbnailQuality): Option[EncodedThumbnail] =
-    Option.when(quality.accepts(dimensions, content.bytes.size))(new EncodedThumbnail(content, dimensions, quality))
+final case class EncodedThumbnail(bytes: ThumbnailBytes, dimensions: ThumbnailDimensions, quality: ThumbnailQuality)
 
-final class Thumbnail private (
-    val location: ThumbnailLocation,
-    val version: String :| Not[Blank],
-    val dimensions: PhotoDimensions,
-    val quality: ThumbnailQuality,
-    val bytes: Int
+final case class Thumbnail(
+    location: ThumbnailLocation,
+    version: String :| Not[Blank],
+    dimensions: ThumbnailDimensions,
+    quality: ThumbnailQuality,
+    bytes: ThumbnailByteCount
 )
-
-object Thumbnail:
-  def from(
-      location: ThumbnailLocation,
-      version: String :| Not[Blank],
-      dimensions: PhotoDimensions,
-      quality: ThumbnailQuality,
-      bytes: Int
-  ): Option[Thumbnail] =
-    Option.when(quality.accepts(dimensions, bytes))(new Thumbnail(location, version, dimensions, quality, bytes))

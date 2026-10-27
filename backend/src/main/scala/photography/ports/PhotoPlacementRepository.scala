@@ -2,8 +2,8 @@ package photography.ports
 
 import photography.domain.album.{ChapterId, PhotoId}
 
-trait PhotoPlacementRepository[F[_]]:
-  def findPlacedPhotos(chapter: ChapterId): F[PhotoPlacementRepository.FindResult]
+trait PhotoPlacementRepository[Db[_]]:
+  def findPlacedPhotos(chapter: ChapterId): Db[PhotoPlacementRepository.FindResult]
 
 object PhotoPlacementRepository:
   enum FindResult:
