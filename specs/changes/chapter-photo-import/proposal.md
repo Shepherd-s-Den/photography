@@ -21,7 +21,7 @@ Save a chapter and open its workspace without waiting for directory discovery or
 | `PhotoManager[F]` use case | Reconcile supplied chapter/source metadata: compare hashes/quality, generate/store thumbnails and persist complete photos through its three collaborators. |
 | `PhotoInventory[F]` use case | Compose photo/placement reads in one database snapshot, order the returned view and derive counts. |
 | `PhotoThumbnailGenerator[F]` use case | Generate from supplied in-memory content with injected quality settings; suspend Thumbnailator in `Async[F].blocking` (`IO.blocking` for IO), never on a compute thread. |
-| `PhotoFileSystem[F]` port / NAS adapter | Discover/read originals in place; store/delete individual thumbnails in application-owned storage. Translate photo locations to filesystem paths and suspend filesystem IO; originals are read-only. |
+| `PhotoStorage[F]` port / NAS adapter | Discover/read originals in place; store/delete individual thumbnails in application-owned storage. Translate photo locations to filesystem paths and suspend filesystem IO; originals are read-only. |
 | `PhotoRepository[Db]` port / SQLite adapter | Read/save/remove complete photos and durable photo-write evidence; placement and filesystem operations remain separate. |
 | `PhotoPlacementRepository[F]` port / SQLite adapter | Read authoritative placed-photo identities for counts. Existing foreign-key cascades enforce reference integrity on photo deletion, preserving slots; no placement-write API is needed. |
 | Durable photo write evidence | Photo persistence records per-photo publication/retirement intents before effects; startup finalization consumes them, following plant-journal. This is technical write evidence, not chapter import status. |
@@ -43,7 +43,7 @@ trait PhotoThumbnailGenerator[F[_]]:
 Driven ports supply only the filesystem and metadata operations consumed by reconciliation and chapter inventory reads:
 
 ```scala
-trait PhotoFileSystem[F[_]]:
+trait PhotoStorage[F[_]]:
   def discoverOriginals(source: PhotoSource): F[OriginalDiscoveryResult]
   def readOriginal(location: OriginalPhotoLocation): F[OriginalPhotoReadResult]
   def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): F[ThumbnailStoreResult]

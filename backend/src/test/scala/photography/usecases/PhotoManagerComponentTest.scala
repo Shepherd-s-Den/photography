@@ -11,7 +11,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
-import photography.ports.{PhotoFileSystem, PhotoRepository}
+import photography.ports.{PhotoRepository, PhotoStorage}
 import photography.usecases.PhotoManager.*
 import java.util.UUID
 
@@ -29,9 +29,9 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
   private val thumbnail = Thumbnail(ThumbnailLocation(new UUID(0L, 3L)), version = "version", image.dimensions, image.quality, bytes = 1)
   private val stored    = thumbnail.copy(location = ThumbnailLocation(new UUID(0L, 9L)))
   private val existing  = Photo(PhotoId(new UUID(0L, 4L)), chapter, original, metadata, thumbnail, maybeCaption = "Retained".some)
-  private val complete  = PhotoFileSystem.DiscoveryResult.Complete(Vector(original), unsupportedCount = 2)
-  private val absent    = PhotoFileSystem.DiscoveryResult.Complete(Vector.empty[OriginalPhotoLocation], unsupportedCount = 0)
-  private val read      = PhotoFileSystem.ReadResult.Read(content, metadata)
+  private val complete  = PhotoStorage.DiscoveryResult.Complete(Vector(original), unsupportedCount = 2)
+  private val absent    = PhotoStorage.DiscoveryResult.Complete(Vector.empty[OriginalPhotoLocation], unsupportedCount = 0)
+  private val read      = PhotoStorage.ReadResult.Read(content, metadata)
   private val error     = new RuntimeException("boundary failed")
 
   test("should await publication, preserve identity and caption, and retire only the previous thumbnail"):
@@ -45,7 +45,7 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
         val previous = existing.copy(thumbnail = thumbnail.copy(quality = previousQuality))
         val manager  = buildManager(
           events,
-          readResult = PhotoFileSystem.ReadResult.Read(content, changed).pure[IO],
+          readResult = PhotoStorage.ReadResult.Read(content, changed).pure[IO],
           existingPhotos = Vector(previous),
           save = save
         )
@@ -86,8 +86,8 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
 
   test("should retain inventory when discovery or inventory reading fails"):
     Vector(
-      (PhotoFileSystem.DiscoveryResult.Failed.pure[IO], PhotoRepository.ListResult.Listed(Vector(existing)).pure[IO], Issue.Discovery),
-      (IO.raiseError[PhotoFileSystem.DiscoveryResult](error), PhotoRepository.ListResult.Failed.pure[IO], Issue.Unexpected),
+      (PhotoStorage.DiscoveryResult.Failed.pure[IO], PhotoRepository.ListResult.Listed(Vector(existing)).pure[IO], Issue.Discovery),
+      (IO.raiseError[PhotoStorage.DiscoveryResult](error), PhotoRepository.ListResult.Failed.pure[IO], Issue.Unexpected),
       (complete.pure[IO], PhotoRepository.ListResult.Failed.pure[IO], Issue.Persistence),
       (complete.pure[IO], IO.raiseError[PhotoRepository.ListResult](error), Issue.Persistence)
     ).traverse_ { case (discovery, listed, issue) =>
@@ -100,22 +100,22 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
 
   test("should retain previous photos and continue after individual read or generation failures"):
     Vector(
-      (PhotoFileSystem.ReadResult.Failed.pure[IO], PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO], Issue.Read(original.filename)),
+      (PhotoStorage.ReadResult.Failed.pure[IO], PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO], Issue.Read(original.filename)),
       (
-        PhotoFileSystem.ReadResult.Unstable.pure[IO],
+        PhotoStorage.ReadResult.Unstable.pure[IO],
         PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO],
         Issue.Unstable(original.filename)
       ),
       (
-        PhotoFileSystem.ReadResult.Undecodable.pure[IO],
+        PhotoStorage.ReadResult.Undecodable.pure[IO],
         PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO],
         Issue.Undecodable(original.filename)
       ),
-      (IO.raiseError[PhotoFileSystem.ReadResult](error), PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO], Issue.Unexpected),
+      (IO.raiseError[PhotoStorage.ReadResult](error), PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO], Issue.Unexpected),
       (read.pure[IO], PhotoThumbnailGenerator.GenerationResult.Failed.pure[IO], Issue.Generation(original.filename))
     ).traverse_ { case (reading, generation, issue) =>
       Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
-        val discovery = PhotoFileSystem.DiscoveryResult.Complete(Vector(original, original.copy(filename = "two.jpg")), unsupportedCount = 0)
+        val discovery = PhotoStorage.DiscoveryResult.Complete(Vector(original, original.copy(filename = "two.jpg")), unsupportedCount = 0)
         buildManager(events, discovery = discovery.pure[IO], readResult = reading, generation = generation, existingPhotos = Vector.empty[Photo])
           .refresh(chapter, original.source).flatMap: actual =>
             events.get.map: recorded =>
@@ -131,9 +131,9 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       (IO.raiseError[PhotoRepository.WriteResult](error), Vector(Issue.Persistence))
     ).traverse_ { case (writing, issues) =>
       Vector(
-        (PhotoFileSystem.RemoveResult.Removed.pure[IO], Vector.empty[Issue]),
-        (PhotoFileSystem.RemoveResult.Failed.pure[IO], Vector(Issue.Cleanup(stored.location))),
-        (IO.raiseError[PhotoFileSystem.RemoveResult](error), Vector(Issue.Cleanup(stored.location)))
+        (PhotoStorage.RemoveResult.Removed.pure[IO], Vector.empty[Issue]),
+        (PhotoStorage.RemoveResult.Failed.pure[IO], Vector(Issue.Cleanup(stored.location))),
+        (IO.raiseError[PhotoStorage.RemoveResult](error), Vector(Issue.Cleanup(stored.location)))
       )
         .traverse_ { case (cleaning, cleanupIssues) =>
           Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
@@ -147,8 +147,8 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
 
   test("should expose storage failures without writes, and cleanup failures after successful persistence"):
     Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
-      val storeFailure   = buildManager(events, existingPhotos = Vector.empty[Photo], storage = PhotoFileSystem.StoreResult.Failed.pure[IO])
-      val cleanupFailure = buildManager(events, discovery = absent.pure[IO], cleaning = PhotoFileSystem.RemoveResult.Failed.pure[IO])
+      val storeFailure   = buildManager(events, existingPhotos = Vector.empty[Photo], storage = PhotoStorage.StoreResult.Failed.pure[IO])
+      val cleanupFailure = buildManager(events, discovery = absent.pure[IO], cleaning = PhotoStorage.RemoveResult.Failed.pure[IO])
       val removeFailure  = buildManager(events, discovery = absent.pure[IO], remove = _ => IO.raiseError[PhotoRepository.WriteResult](error))
       for
         storage      <- storeFailure.refresh(chapter, original.source)
@@ -162,10 +162,10 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
         assertEquals(failedDelete.issues, Vector(Issue.Persistence))
 
   test("should compensate partial storage failures at their preallocated location and preserve cleanup errors"):
-    Vector(PhotoFileSystem.StoreResult.Failed.pure[IO], IO.raiseError[PhotoFileSystem.StoreResult](error)).traverse_ { storage =>
+    Vector(PhotoStorage.StoreResult.Failed.pure[IO], IO.raiseError[PhotoStorage.StoreResult](error)).traverse_ { storage =>
       Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
-        val reading = PhotoFileSystem.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
-        val manager = buildManager(events, storage = storage, cleaning = PhotoFileSystem.RemoveResult.Failed.pure[IO], readResult = reading)
+        val reading = PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
+        val manager = buildManager(events, storage = storage, cleaning = PhotoStorage.RemoveResult.Failed.pure[IO], readResult = reading)
         manager.refresh(chapter, original.source).flatMap: result =>
           events.get.map: recorded =>
             assertEquals(result.issues, Vector(Issue.Storage, Issue.Cleanup(stored.location)))
@@ -198,7 +198,7 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
         val save = (photo: Photo) =>
           IO(assertEquals(photo, existing.copy(metadata = metadata.copy(hash = "changed"), thumbnail = stored))) >>
             saving.complete(()).void >> release.get.as(PhotoRepository.WriteResult.Applied)
-        val reading = PhotoFileSystem.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
+        val reading = PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
         val manager = buildManager(events, save = save, readResult = reading)
         for
           refresh      <- manager.refresh(chapter, original.source).start
@@ -217,11 +217,11 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
   // scalafix:off DisableSyntax.defaultArgs
   private def buildManager(
       events: Ref[IO, Vector[String]],
-      discovery: IO[PhotoFileSystem.DiscoveryResult] = complete.pure[IO],
-      readResult: IO[PhotoFileSystem.ReadResult] = read.pure[IO],
+      discovery: IO[PhotoStorage.DiscoveryResult] = complete.pure[IO],
+      readResult: IO[PhotoStorage.ReadResult] = read.pure[IO],
       generation: IO[PhotoThumbnailGenerator.GenerationResult] = PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO],
-      storage: IO[PhotoFileSystem.StoreResult] = PhotoFileSystem.StoreResult.Stored(stored).pure[IO],
-      cleaning: IO[PhotoFileSystem.RemoveResult] = PhotoFileSystem.RemoveResult.Removed.pure[IO],
+      storage: IO[PhotoStorage.StoreResult] = PhotoStorage.StoreResult.Stored(stored).pure[IO],
+      cleaning: IO[PhotoStorage.RemoveResult] = PhotoStorage.RemoveResult.Removed.pure[IO],
       existingPhotos: Vector[Photo] = Vector(existing),
       maybeListed: Option[IO[PhotoRepository.ListResult]] = None,
       quality: ThumbnailQuality = ThumbnailQuality.Standard,
@@ -230,13 +230,13 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
   ): PhotoManager[IO] =
     given Transaction[Db, IO] with
       override def run[A](program: Db[A]): IO[A] = events.update(_ :+ "transaction") >> program.run(())
-    val files = new PhotoFileSystem[IO]:
-      override def discoverOriginals(source: PhotoSource): IO[PhotoFileSystem.DiscoveryResult] = IO(assertEquals(source, original.source)) >>
+    val photoStorage = new PhotoStorage[IO]:
+      override def discoverOriginals(source: PhotoSource): IO[PhotoStorage.DiscoveryResult] = IO(assertEquals(source, original.source)) >>
         discovery
-      override def readOriginal(location: OriginalPhotoLocation): IO[PhotoFileSystem.ReadResult] = events.update(_ :+ "read") >> readResult
-      override def storeThumbnail(location: ThumbnailLocation, value: EncodedThumbnail): IO[PhotoFileSystem.StoreResult] =
+      override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] = events.update(_ :+ "read") >> readResult
+      override def storeThumbnail(location: ThumbnailLocation, value: EncodedThumbnail): IO[PhotoStorage.StoreResult] =
         IO(assertEquals(location, stored.location)) >> IO(assertEquals(value, image)) >> events.update(_ :+ "store") >> storage
-      override def removeThumbnail(location: ThumbnailLocation): IO[PhotoFileSystem.RemoveResult] =
+      override def removeThumbnail(location: ThumbnailLocation): IO[PhotoStorage.RemoveResult] =
         events.update(_ :+ s"remove:${location.value}") >> cleaning
     val writePhoto  = save
     val removePhoto = remove
@@ -252,5 +252,5 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       override def quality: ThumbnailQuality                                                   = selectedQuality
       override def generate(value: PhotoContent): IO[PhotoThumbnailGenerator.GenerationResult] =
         IO(assertEquals(value, content)) >> events.update(_ :+ "generate") >> generation
-    PhotoManager.make(files, repository, generator)
+    PhotoManager.make(photoStorage, repository, generator)
   // scalafix:on DisableSyntax.defaultArgs

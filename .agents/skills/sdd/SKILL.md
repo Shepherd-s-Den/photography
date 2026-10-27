@@ -12,7 +12,7 @@ This file sequences classify → spike → spec → tests → implementation →
 
 Make the smallest change that satisfies the request. Keep each rule in one owning document; update other docs only when their owned facts change, and keep changes proportional to the product slice.
 
-**Spec amendments during implementation:** amend an existing spec in the Implementation PR when implementation reveals a changed contract. A separate Spec PR or permission request is unnecessary. Update the affected criteria before their tests and implementation; include the amendment in the independent review against `spec-quality.md` as well as the implementation checklists.
+**Spec amendments during implementation:** ask the maintainer before changing an approved spec. Once authorized, amend it in the Implementation PR when implementation reveals a changed contract. Update the affected criteria before their tests and implementation; review the amendment against `spec-quality.md` as well as the implementation checklists.
 
 ## Setup
 
@@ -22,9 +22,11 @@ Make the smallest change that satisfies the request. Keep each rule in one ownin
 
 For each feature, pin a stable `main` revision. Keep spike snapshots, scratch data, and phase evidence under ignored `.agent-work/<slug>/`; use the real app and its local launcher, adding only the behavior under exploration.
 
-Before Phase 1, create `.agent-work/<slug>/checklist.md` listing every gate below plus the full text of each checklist that will apply. For an Implementation PR that means the shared [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface the PR changes (`frontend/**` → frontend, `backend/**` → backend) — never the other stack's leaf. Check items off as you go. A checked box is a claim to verify, not proof by itself — see [`reviewer.md`](reviewer.md) for how it gets verified.
+Before Phase 1, create `.agent-work/<slug>/checklist.md` tracking lifecycle gates and linking applicable source checklists with their revision or content fingerprint. Record each item's status and evidence there rather than copying rule text. Classify every changed/untracked file: `backend/**` and `frontend/**` load [`checklists/code-quality.md`](checklists/code-quality.md) plus their respective stack leaves; a mixed slice loads both.
 
 Re-read that checklist before every phase's work, including after any interruption, tangent, or unrelated request. Do not open a PR, hand off for review, or start the next phase while an earlier gate sits unchecked — creating the checklist once is not the same as following it.
+
+**Architecture before implementation:** follow [`executor.md`](executor.md#tests)'s caller-first design-map gate before tests or production changes. Review evidence, final repairs and handling missed rules follow [`reviewer.md`](reviewer.md).
 
 **PR-opening gate:** complete the executor's self-checks and the single independent review phase in [`reviewer.md`](reviewer.md), adjudicate every finding, independently verify final repairs, and rerun affected gates before publishing or updating a ready PR. Record evidence and dispositions against the final candidate in the local checklist. “Stop once the PR is open” is an endpoint, not a waiver of these prerequisites; only an explicit maintainer waiver changes them.
 
@@ -40,7 +42,7 @@ Retain the runnable spike through implementation and final local comparison. Aft
 
 ## Adjudication
 
-When executor and reviewer disagree, this file decides — the reviewer only reports, the executor's work is already done. Weigh the disputed artifact against the checklist item, pick a side, then direct a fix or record a justified exception in `.agent-work/<slug>/checklist.md`. A phase gate needing that checklist waits on this.
+When executor and reviewer disagree, the orchestrator adjudicates against the governing rule. Rejecting a finding requires evidence that the rule is satisfied or inapplicable; accepting it requires a fix. Departing from a violated rule requires explicit maintainer authorization cited in the local checklist. A rationale alone is not an exception, and the gate remains blocked until resolved.
 
 ## Phases
 
@@ -50,7 +52,7 @@ Before drafting a spec, read the archived [Album dashboard and open](../../../sp
 2. **Spike** — once per feature, before its spec, using the workflow above. Gate: the user confirms the journey and its findings are recorded for the spec; reuse that confirmation across its Implementation PRs.
 3. **Spec PR** — After spike confirmation, follow [`executor.md`](executor.md#spec-pr)'s technical-contract-first guidance using the active model, living docs and confirmed findings. Run the Markdown wrapping check on the proposal and every changed Markdown file; failure blocks the PR. Pass `spec-quality.md`, keep criteria observable and Doc Sync minimal, complete the independent review in [`reviewer.md`](reviewer.md), adjudicate findings, and merge before implementation.
 4. **Tests** — projected from the merged spec, before implementation. Gate: every acceptance criterion and enumerated edge case maps to a test; changed tests fail for the right reason first.
-5. **Implementation PR(s)** — one or more, each within the approved spec. Gate: every gate in `AGENTS.md` exits zero; the shared [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes, and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (this PR's slice), pass.
+5. **Implementation PR(s)** — one or more, each within the approved spec. Gate: every gate in `AGENTS.md` exits zero; [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes, and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (this PR's slice), pass.
 6. **Local verification, then Archive + Living Docs PR** — after every Implementation PR has merged, run the implemented journey through the local application and check it against the approved spec and the behavior the user confirmed in the spike. Resolve discrepancies before archiving. The Archive PR introduces no new product behavior. Gate: the local journey matches the spec; every `Doc Sync` entry is applied verbatim; [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) passes against the complete merged change; the spec is moved to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
 
 Phase detail: [`executor.md`](executor.md). Review protocol: [`reviewer.md`](reviewer.md). Change-spec template: [`templates/change-spec.md`](templates/change-spec.md). `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:test-driven-development` are available when a design or test set is non-obvious.

@@ -4,14 +4,14 @@ import photography.domain.album.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.GreaterEqual
 
-trait PhotoFileSystem[F[_]]:
-  def discoverOriginals(source: PhotoSource): F[PhotoFileSystem.DiscoveryResult]
-  def readOriginal(location: OriginalPhotoLocation): F[PhotoFileSystem.ReadResult]
+trait PhotoStorage[F[_]]:
+  def discoverOriginals(source: PhotoSource): F[PhotoStorage.DiscoveryResult]
+  def readOriginal(location: OriginalPhotoLocation): F[PhotoStorage.ReadResult]
   // The supplied exclusive location identifies even partial artifacts after a failed store.
-  def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): F[PhotoFileSystem.StoreResult]
-  def removeThumbnail(location: ThumbnailLocation): F[PhotoFileSystem.RemoveResult]
+  def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): F[PhotoStorage.StoreResult]
+  def removeThumbnail(location: ThumbnailLocation): F[PhotoStorage.RemoveResult]
 
-object PhotoFileSystem:
+object PhotoStorage:
   enum DiscoveryResult:
     case Complete(originals: Vector[OriginalPhotoLocation], unsupportedCount: Int :| GreaterEqual[0])
     case Failed
