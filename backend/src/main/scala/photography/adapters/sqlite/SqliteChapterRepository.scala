@@ -45,7 +45,7 @@ object SqliteChapterRepository:
         name: DestinationName,
         countries: NonEmptyList[CountryId],
         period: VisitPeriod,
-        sourceFolder: SourceFolder,
+        sourceFolder: PhotoSource,
         order: NonEmptyList[ChapterId]
     ): F[UpdateResult] =
       val operation = IdGenerator[F].generateId.flatMap: destination =>
@@ -97,7 +97,7 @@ object SqliteChapterRepository:
         destination: DestinationId,
         description: String,
         period: VisitPeriod,
-        folder: SourceFolder
+        folder: PhotoSource
     ) =
       val start  = period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
       val end    = period.firstDay.plusDays(period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
@@ -107,7 +107,7 @@ object SqliteChapterRepository:
                 ${folder: String})"""
       insert.update.run.flatMap(requireOne)
 
-    private def updateMetadata(album: AlbumId, chapter: ChapterId, destination: UUID, period: VisitPeriod, folder: SourceFolder) =
+    private def updateMetadata(album: AlbumId, chapter: ChapterId, destination: UUID, period: VisitPeriod, folder: PhotoSource) =
       val start = period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
       val end   = period.firstDay.plusDays(period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
       sql"""UPDATE chapter SET destination_id = $destination, start_ms = $start, end_ms = $end, source_folder = ${folder: String}

@@ -111,6 +111,7 @@ Cover --> Back["Empty back slot"]
 ## Doc Sync
 
 - `specs/design.md` — Architecture constraints: state that all backend APIs use REST over HTTP.
+- `specs/design.md` — Album composition: an album's spreads are non-empty and ordered; the first spread is an `AlbumStart`, followed by chapter blocks, each a `ChapterStart` followed by zero or more `PhotosOnly` spreads.
 - `specs/contracts.md` — Contract inventory: identify SQLite migrations as the schema contract, including the four seeded AlbumStart layouts and connection-level foreign-key enforcement.
 - `specs/contracts.md` — Contract inventory: point to the OpenAPI specification for the five album routes and AlbumStart-template listing, including request, response, pagination, and error contracts.
 - `specs/operational.md` — Local service: the launcher installs locked frontend dependencies and builds assets before starting services; preparation failures stop startup.

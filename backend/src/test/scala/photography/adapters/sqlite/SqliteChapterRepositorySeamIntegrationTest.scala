@@ -39,7 +39,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val chapters                 = SqliteChapterRepository.make[IO](xa)
       val newName: DestinationName = "Changed"
       val newCountries             = NonEmptyList.of(otherCountry, country)
-      val newFolder: SourceFolder  = "/photos/changed"
+      val newFolder: PhotoSource   = "/photos/changed"
 
       for
         _       <- seedAlbum(xa)
@@ -144,7 +144,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val chapters                     = SqliteChapterRepository.make[IO](xa)
       val missing                      = AlbumId(new UUID(2L, 2L))
       val revisedName: DestinationName = "Changed"
-      val revisedFolder: SourceFolder  = "/photos/changed"
+      val revisedFolder: PhotoSource   = "/photos/changed"
       val revisedCountries             = NonEmptyList.one(otherCountry.id)
       val trigger                      = sql"""CREATE TRIGGER fail_update BEFORE UPDATE OF position ON chapter WHEN NEW.position = 0
                            BEGIN SELECT RAISE(IGNORE); END"""
@@ -238,13 +238,13 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val photos   = template.photoSlots.zipWithIndex.map { case (box, position) =>
           SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(index.toLong, position.toLong)), box, bleed = Set(SpreadEdge.Left))
         }
-        val textSlot                   = SpreadSlot.Text(TextSpreadSlotId(new UUID(index.toLong, 101L)), template.textSlot)
-        val emptyPlacements            = Vector.empty[SpreadPlacement]
-        val opening                    = Spread.ChapterStart(SpreadId(new UUID(index.toLong, 100L)), template.id, photos, textSlot, emptyPlacements)
-        val chapterId                  = ChapterId(new UUID(index.toLong, 102L))
-        val destinationId              = DestinationId(new UUID(index.toLong, 103L))
-        val countryIds                 = NonEmptyList.of(country.id, otherCountry.id)
-        val sourceFolder: SourceFolder = s"/photos/$index".refineUnsafe
-        val description                = "Retained description"
+        val textSlot                  = SpreadSlot.Text(TextSpreadSlotId(new UUID(index.toLong, 101L)), template.textSlot)
+        val emptyPlacements           = Vector.empty[SpreadPlacement]
+        val opening                   = Spread.ChapterStart(SpreadId(new UUID(index.toLong, 100L)), template.id, photos, textSlot, emptyPlacements)
+        val chapterId                 = ChapterId(new UUID(index.toLong, 102L))
+        val destinationId             = DestinationId(new UUID(index.toLong, 103L))
+        val countryIds                = NonEmptyList.of(country.id, otherCountry.id)
+        val sourceFolder: PhotoSource = s"/photos/$index".refineUnsafe
+        val description               = "Retained description"
         ChapterRepository.NewChapter(chapterId, destinationId, name = "Trip", countryIds, period, description, sourceFolder, opening).pure[IO]
       case value => IO.raiseError[ChapterRepository.NewChapter](new IllegalStateException(s"Missing chapter templates: $value"))

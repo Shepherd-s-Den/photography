@@ -9,7 +9,7 @@ Repair verification and affected late-change checks complete that phase. Complet
 | Work item | Checklist(s) |
 | --- | --- |
 | Spec PR | `checklists/spec-quality.md` |
-| Each Implementation PR | shared `checklists/code-quality.md` + the stack leaf for each surface the PR changes (`code-quality-frontend.md` for `frontend/**`, `code-quality-backend.md` for `backend/**`, and no other) + `checklists/implementation-completeness.md`, against that PR's own slice |
+| Each Implementation PR | Shared quality + stack leaves selected under `SKILL.md` + implementation completeness, against this slice. Re-derive every item from source, not the executor's statuses. |
 | Archive PR | `checklists/implementation-completeness.md`, re-run against the **complete merged change** — every Implementation PR together against the full spec, not just the last one |
 
 Spike has no work item of its own — it produces no PR, and its scratch notes in `.agent-work/` never reach one. Its only trace anyone else can check is the Spec PR's `Grounded in` field and the proposal's own content. Verify that grounding names concrete work actually tried and findings actually observed. Treat unsupported claims in `Grounded in` or elsewhere as ungrounded; a general assertion beside invented design details does not pass.
@@ -34,3 +34,11 @@ Report each area as pass, fail or not applicable with source evidence. For a Spe
 3. **Adjudicate findings.** The reviewer reports exact violations, their governing rule and the caller or ownership consequence; it never edits the candidate or grants merge approval. The orchestrator fixes accepted findings and records evidence for rejected ones. Keep reports/dispositions in `.agent-work/<slug>/review/`.
 4. **Verify final repairs.** Independently recheck repairs and affected late changes against the exact final candidate; rerun affected gates. This completes the one review phase rather than starting another whole-work-item review.
 5. **Publication:** the orchestrator verifies the final checklist evidence, independent assessment and repair verification before applying `SKILL.md`'s PR-opening gate. Missing or disputed evidence remains a blocker. Merge remains a separate maintainer decision.
+
+## What blocks a pass
+
+Architectural and convention violations are findings even when tests pass and no runtime defect is demonstrated. Apply the shared architecture questions and selected stack rules before checking implementation coverage; a tested implementation is not evidence that its boundaries are correct.
+
+Review prompts must not pre-label disputed architecture as correct, supply the implementer's size justifications as conclusions, or filter out required conventions as “style noise.” A reviewer may reject a finding with evidence; it may not narrow the governing checklist to high-severity runtime bugs.
+
+When a maintainer identifies a violation missed by a review, record the missed rule and failed reasoning, reopen its gate, and apply the corrected check to the complete diff. Replaying the known-bad decision must now produce a blocking finding; adding prose without demonstrating that result does not validate the revised gate.

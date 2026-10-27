@@ -14,7 +14,7 @@ trait ChapterRepository[F[_]]:
       name: DestinationName,
       countries: NonEmptyList[CountryId],
       period: VisitPeriod,
-      sourceFolder: SourceFolder,
+      sourceFolder: PhotoSource,
       order: NonEmptyList[ChapterId]
   ): F[ChapterRepository.UpdateResult]
 
@@ -26,7 +26,7 @@ object ChapterRepository:
       countries: NonEmptyList[CountryId],
       period: VisitPeriod,
       description: String,
-      sourceFolder: SourceFolder,
+      sourceFolder: PhotoSource,
       opening: Spread.ChapterStart
   )
 

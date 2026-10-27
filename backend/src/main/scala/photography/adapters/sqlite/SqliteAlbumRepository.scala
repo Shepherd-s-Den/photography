@@ -263,7 +263,7 @@ object SqliteAlbumRepository:
 
     private given Meta[AlbumYear]      = Meta[Int].tiemap[AlbumYear](_.refineEither)(value => value: Int)
     private given Meta[AlbumTitle]     = Meta[String].tiemap[AlbumTitle](_.refineEither)(value => value: String)
-    private given Meta[SourceFolder]   = Meta[String].tiemap[SourceFolder](_.refineEither)(value => value: String)
+    private given Meta[PhotoSource]    = Meta[String].tiemap[PhotoSource](_.refineEither)(value => value: String)
     private given Meta[Instant]        = Meta[Long].timap[Instant](Instant.ofEpochMilli)(_.toEpochMilli)
     private given Meta[InDesignPoints] = Meta[Double].tiemap[InDesignPoints](_.refineEither)(value => value: Double)
     private given Meta[Zoom]           = Meta[Double].tiemap[Zoom](_.refineEither)(value => value: Double)
@@ -299,6 +299,6 @@ object SqliteAlbumRepository:
       position: Int,
       maybeTemplateKind: Option[String]
   )
-  private type ChapterRow   = (UUID, UUID, DestinationName, String, Instant, Instant, SourceFolder)
+  private type ChapterRow   = (UUID, UUID, DestinationName, String, Instant, Instant, PhotoSource)
   private type SlotRow      = (id: UUID, kind: String, box: SlotBox)
   private type PlacementRow = (UUID, UUID, UUID, InDesignPoints, InDesignPoints, Boolean, Zoom, CaptionCorner)

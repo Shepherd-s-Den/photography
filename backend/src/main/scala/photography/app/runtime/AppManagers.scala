@@ -7,7 +7,7 @@ import org.typelevel.doobie.Transactor
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
 import photography.capabilities.{Clock, IdGenerator}
-import photography.domain.album.SourceFolder
+import photography.domain.album.PhotoSource
 import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, SpreadTemplateManager}
 
 final case class AppManagers[F[_]](
@@ -21,7 +21,7 @@ object AppManagers:
   def make[F[_]: Async: Logger: Clock: IdGenerator](
       sqlite: Transactor[F],
       pageSize: AlbumPageSize,
-      photoRoot: SourceFolder
+      photoRoot: PhotoSource
   ): F[AppManagers[F]] =
     Mutex[F].map: mutex =>
       given Mutex[F]         = mutex

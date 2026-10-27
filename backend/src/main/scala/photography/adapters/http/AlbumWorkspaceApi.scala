@@ -130,21 +130,21 @@ object AlbumWorkspaceApi:
       yield Period.Dates(VisitPeriod(start, days))
 
     private val folderDecoder = Decoder.decodeString.emap: value =>
-      value.refineEither[SourceFolderConstraint].leftMap(_ => "Supply an absolute source folder without traversal")
+      value.refineEither[PhotoSourceConstraint].leftMap(_ => "Supply an absolute source folder without traversal")
 
     private val creationDecoder = Decoder.instance: cursor =>
       cursor.get[String]("kind").flatMap:
         case "home"     => detailsDecoder(isHome = true)(cursor)
         case "vacation" => detailsDecoder(isHome = false)(cursor)
-        case _ => DecodingFailure("Choose vacation or home", cursor.history).asLeft[(DestinationName, NonEmptyList[CountryId], Period, SourceFolder)]
+        case _ => DecodingFailure("Choose vacation or home", cursor.history).asLeft[(DestinationName, NonEmptyList[CountryId], Period, PhotoSource)]
 
     private def detailsDecoder(isHome: Boolean) =
-      Decoder.instance[(DestinationName, NonEmptyList[CountryId], Period, SourceFolder)]: cursor =>
+      Decoder.instance[(DestinationName, NonEmptyList[CountryId], Period, PhotoSource)]: cursor =>
         for
           name      <- decodeName(cursor, isHome)
           countries <- cursor.get[NonEmptyList[CountryId]]("countries")(using countryDecoder)
           period    <- if isHome then Period.AlbumYear.asRight else periodDecoder(cursor)
-          folder    <- cursor.get[SourceFolder]("sourceFolder")(using folderDecoder)
+          folder    <- cursor.get[PhotoSource]("sourceFolder")(using folderDecoder)
         yield (name, countries, period, folder)
 
     private def decodeName(cursor: HCursor, isHome: Boolean) =

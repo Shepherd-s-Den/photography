@@ -140,13 +140,13 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
 
   test(s"should reject duplicate $homeName chapters, wrong full-year periods and reused folders before writing"):
     val scenarios = Vector(
-      (album.copy(chapters = Vector(home)), homeName, Period.AlbumYear, "/photos/new": SourceFolder, ChapterConflict.HomeExists),
-      (album, homeName, Period.Dates(chapter.period), "/photos/new": SourceFolder, ChapterConflict.HomePeriodMismatch),
+      (album.copy(chapters = Vector(home)), homeName, Period.AlbumYear, "/photos/new": PhotoSource, ChapterConflict.HomeExists),
+      (album, homeName, Period.Dates(chapter.period), "/photos/new": PhotoSource, ChapterConflict.HomePeriodMismatch),
       (
         album,
         homeName,
         Period.Dates(VisitPeriod(firstDay = LocalDate.of(2026, 1, 1), days = 366)),
-        "/photos/new": SourceFolder,
+        "/photos/new": PhotoSource,
         ChapterConflict.HomePeriodMismatch
       ),
       (
@@ -210,7 +210,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       assertEquals(rejected, CreateResult.Rejected(ChapterConflict.AtCapacity))
       assertEquals(updated, UpdateResult.Updated)
       val destinationName: DestinationName = "Kyoto"
-      val sourceFolder: SourceFolder       = "/photos/new"
+      val sourceFolder: PhotoSource        = "/photos/new"
       val chapterOrder                     = NonEmptyList.one(chapter.id)
       val expectedWrites = Vector((album.id, chapter.id, destinationName, updatedCountries.map(_.id), chapter.period, sourceFolder, chapterOrder))
       assertEquals(writes, expectedWrites)
@@ -317,7 +317,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
           name: DestinationName,
           countries: NonEmptyList[CountryId],
           period: VisitPeriod,
-          folder: SourceFolder,
+          folder: PhotoSource,
           order: NonEmptyList[ChapterId]
       )]
     ] = Ref.unsafe(Vector.empty)
@@ -360,7 +360,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
           name: DestinationName,
           countries: NonEmptyList[CountryId],
           period: VisitPeriod,
-          sourceFolder: SourceFolder,
+          sourceFolder: PhotoSource,
           order: NonEmptyList[ChapterId]
       ): IO[ChapterRepository.UpdateResult] =
         refs.updates.update(_ :+ (parent, chapter, name, countries, period, sourceFolder, order)).as(updateWrite)

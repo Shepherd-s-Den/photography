@@ -14,8 +14,8 @@ object ChapterId:
 
 type RelativeLocationConstraint = Not[Blank] & Match["(?!/)(?!.*[:\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
 type RelativeLocation           = String :| RelativeLocationConstraint
-type SourceFolderConstraint     = Match["/(?!.*[\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
-type SourceFolder               = String :| SourceFolderConstraint
+type PhotoSourceConstraint      = Match["/(?!.*[\\\\\\x00])(?!(?:.*/)?\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*"]
+type PhotoSource                = String :| PhotoSourceConstraint
 type VisitDays                  = Long :| Positive
 
 final case class VisitPeriod(firstDay: LocalDate, days: VisitDays)
@@ -25,7 +25,7 @@ final case class Chapter(
     destination: Destination,
     period: VisitPeriod,
     description: String,
-    sourceFolder: SourceFolder,
+    sourceFolder: PhotoSource,
     opening: Spread.ChapterStart,
     spreads: Vector[Spread.PhotosOnly]
 )
