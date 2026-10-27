@@ -18,12 +18,22 @@ Follow the Spike workflow in [`SKILL.md`](SKILL.md). This file adds no separate 
 
 For a feature, wait until the user has run the local spike and confirmed the intended behavior before preparing or finalizing the proposal. Carry that confirmed behavior into the spec; a review pass over an unconfirmed draft does not satisfy the Spec PR gate.
 
-Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec when one exists; otherwise use the template and `spec-quality.md` for altitude and density. When a spike preceded this phase, ground `Domain / Design Notes` and `Alternatives Considered` in its findings.
+Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec for density; derive current facts from living docs and confirmed findings.
+
+**Technical contract first.** Make the feature's mechanism the core of `Domain / Design Notes`: concrete use cases, orchestration, consumed ports, domain/persistence changes and sequence diagrams.
+
+Show each trigger, the orchestrating use case and its injected collaborators, boundary calls/results, asynchronous acknowledgments, publication order and failure paths. Include UI delivery/reconnection when background work changes visible state.
+
+Use compact Scala signatures/types, SQLite constraints and sequence diagrams where they settle an actual contract. Verify named library/framework capabilities against source; explain dependencies by the capability they provide.
+
+The section is complete when a reader can trace every trigger through effects and committed state to the UI without inventing a missing owner or transition. Add prose only for guarantees the technical contracts leave ambiguous.
+
+Keep concrete adapter internals, file layouts and slice execution notes in ignored work evidence; the single proposal owns the agreed technical contracts.
 
 - **Feature:** current → new behavior, acceptance criteria, invariants, tradeoffs, Doc Sync.
 - **Investigation:** hypotheses and evidence for/against each, narrowing to a proven root cause — the spec's `What & Why` ends up stating that root cause and the hypotheses it ruled out.
 
-Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then satisfy `SKILL.md`'s PR-opening gate before opening the Spec PR — the proposal and planning artifacts only, no production code. Do not start implementation until it is reviewed and merged.
+Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then satisfy `SKILL.md`'s PR-opening gate before publishing the proposal. Execution notes remain ignored; implementation starts only after the Spec PR is reviewed and merged.
 
 ## Tests
 

@@ -12,7 +12,7 @@ This file sequences classify → spike → spec → tests → implementation →
 
 Make the smallest change that satisfies the request. Keep each rule in one owning document; update other docs only when their owned facts change, and keep changes proportional to the product slice.
 
-**Spec amendments during implementation:** amend an existing spec in the Implementation PR when implementation reveals a changed contract. A separate Spec PR or permission request is unnecessary. Update the affected criteria before their tests and implementation; include the amendment in both review rounds against `spec-quality.md` as well as the implementation checklists.
+**Spec amendments during implementation:** amend an existing spec in the Implementation PR when implementation reveals a changed contract. A separate Spec PR or permission request is unnecessary. Update the affected criteria before their tests and implementation; include the amendment in the independent review against `spec-quality.md` as well as the implementation checklists.
 
 ## Setup
 
@@ -26,7 +26,7 @@ Before Phase 1, create `.agent-work/<slug>/checklist.md` listing every gate belo
 
 Re-read that checklist before every phase's work, including after any interruption, tangent, or unrelated request. Do not open a PR, hand off for review, or start the next phase while an earlier gate sits unchecked — creating the checklist once is not the same as following it.
 
-**PR-opening gate:** complete the executor's self-checks and both sequential fresh-reviewer rounds in [`reviewer.md`](reviewer.md), adjudicate every finding, and rerun affected gates after fixes before creating, reopening, or marking any PR ready. Record both rounds' evidence and dispositions against the final branch contents in the local checklist. “Stop once the PR is open” is an endpoint, not a waiver of these prerequisites; only an explicit maintainer waiver changes them.
+**PR-opening gate:** complete the executor's self-checks and the single independent review phase in [`reviewer.md`](reviewer.md), adjudicate every finding, independently verify final repairs, and rerun affected gates before publishing or updating a ready PR. Record evidence and dispositions against the final candidate in the local checklist. “Stop once the PR is open” is an endpoint, not a waiver of these prerequisites; only an explicit maintainer waiver changes them.
 
 ## Spike
 
@@ -48,7 +48,7 @@ Before drafting a spec, read the archived [Album dashboard and open](../../../sp
 
 1. **Classify** — `feature` or `investigation`; branch named to match. Per AGENTS.md, a spec is required only when the change adds or revises knowledge a living doc should record; only the maintainer may waive that requirement, explicitly. Gate: the classification, the spec requirement (or waiver), and the build-vs-reuse/split-now call (`DESIGN-PRINCIPLES.md` §7) are recorded.
 2. **Spike** — once per feature, before its spec, using the workflow above. Gate: the user confirms the journey and its findings are recorded for the spec; reuse that confirmation across its Implementation PRs.
-3. **Spec PR** — After spike confirmation, draft structure first and use the active model, living docs, and spike as authority. Run the Markdown wrapping check on the proposal and every changed Markdown file; failure blocks the PR. Pass `spec-quality.md`, keep criteria observable and Doc Sync minimal, complete both independent rounds in [`reviewer.md`](reviewer.md), adjudicate findings, and merge before implementation.
+3. **Spec PR** — After spike confirmation, follow [`executor.md`](executor.md#spec-pr)'s technical-contract-first guidance using the active model, living docs and confirmed findings. Run the Markdown wrapping check on the proposal and every changed Markdown file; failure blocks the PR. Pass `spec-quality.md`, keep criteria observable and Doc Sync minimal, complete the independent review in [`reviewer.md`](reviewer.md), adjudicate findings, and merge before implementation.
 4. **Tests** — projected from the merged spec, before implementation. Gate: every acceptance criterion and enumerated edge case maps to a test; changed tests fail for the right reason first.
 5. **Implementation PR(s)** — one or more, each within the approved spec. Gate: every gate in `AGENTS.md` exits zero; the shared [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes, and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (this PR's slice), pass.
 6. **Local verification, then Archive + Living Docs PR** — after every Implementation PR has merged, run the implemented journey through the local application and check it against the approved spec and the behavior the user confirmed in the spike. Resolve discrepancies before archiving. The Archive PR introduces no new product behavior. Gate: the local journey matches the spec; every `Doc Sync` entry is applied verbatim; [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) passes against the complete merged change; the spec is moved to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
