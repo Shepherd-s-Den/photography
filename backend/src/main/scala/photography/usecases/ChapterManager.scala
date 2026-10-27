@@ -59,7 +59,8 @@ object ChapterManager:
             chapter                          <- EitherT.liftF(buildChapter(name, countries, resolved, sourceFolder, template, photoSlots, textSlot))
             id                               <- persistCreation(album, current.chapters, chapter).eitherT
           yield id
-        program.value.flatMap(_.traverse(id => photos.prepare(id, sourceFolder).attempt.map(request => (id, request))))
+        program.value.flatMap: outcome =>
+          outcome.traverse(id => photos.prepare(id, sourceFolder).attempt.tupleLeft(id))
       MonadCancelThrow[F].uncancelable: _ =>
         creation.flatMap:
           case Left(failure)        => translateCreateFailure(failure).pure[F]

@@ -112,10 +112,11 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
             written <- refs.saves.get
             deleted <- refs.removed.get
           yield
+            val expectedStatus = Status.Finished(PhotoManager.RefreshResult(unsupportedCount = 0, issues = Vector.empty[PhotoManager.Issue]))
             assertEquals(idle, Status.Idle)
             assertEquals(written.map(_.original.source), Vector(source))
             assertEquals(deleted.size, if supersede then 1 else 0)
-            assertEquals(status, Status.Finished(PhotoManager.RefreshResult(unsupportedCount = 0, issues = Vector.empty[PhotoManager.Issue])))
+            assertEquals(status, expectedStatus)
       yield ()
     }
 
@@ -133,10 +134,11 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       assertEquals(result, Scheduling.Failed)
       assertEquals(status, Status.LaunchFailed)
 
-  private def awaitFinished(imports: ChapterPhotoImport[IO]) = (IO.cede >> imports.status(chapter)).map:
-    case Status.Finished(_) => true
-    case _                  => false
-  .iterateUntil(identity).void
+  private def awaitFinished(imports: ChapterPhotoImport[IO]) =
+    val finished = (IO.cede >> imports.status(chapter)).map:
+      case Status.Finished(_) => true
+      case _                  => false
+    finished.iterateUntil(identity).void
 
   final private case class Refs():
     val scans: Ref[IO, Vector[PhotoSource]]         = Ref.unsafe(Vector.empty)

@@ -10,7 +10,8 @@ import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterReposito
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.ports.{PhotoPlacementRepository, PhotoRepository, PhotoStorage}
-import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
+import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
+import photography.usecases.{PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
@@ -45,7 +46,6 @@ object AppManagers:
         val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, photoRoot)
         AppManagers(albums, chapters, templates, workspaces)
 
-  // Static ports keep real photo IO inactive until the adapter slice.
   private def buildPhotoRepository =
     new PhotoRepository[ConnectionIO]:
       override def listChapter(chapter: ChapterId): ConnectionIO[PhotoRepository.ListResult] =

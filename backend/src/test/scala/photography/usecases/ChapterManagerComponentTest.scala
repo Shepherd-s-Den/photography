@@ -10,7 +10,7 @@ import photography.capabilities.IdGenerator
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.{AlbumRepository, ChapterRepository}
-import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.ChapterManager.{CreateResult, Period, RefreshResult, UpdateResult}
 import photography.usecases.SpreadTemplateManager.ListChapterStartTemplatesResult
 import photography.usecases.ChapterPhotoImport.{Request, Scheduling, Status}
 import org.typelevel.log4cats.Logger
@@ -60,10 +60,11 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     album.copy(chapters = Vector(chapter.copy(spreads = spreads)))
 
   test("should create a multi-country chapter and its empty opening"):
-    val refs = Refs()
+    val refs                  = Refs()
+    val checkNoPreparedImport = refs.preparations.get.map(actual => assertEquals(actual, Vector.empty))
 
     for
-      manager  <- buildManager(refs, save = _ => refs.preparations.get.map(actual => assertEquals(actual, Vector.empty)))
+      manager  <- buildManager(refs, save = _ => checkNoPreparedImport)
       result   <- manager.create(album.id, chapter.destination.name, countries.map(_.id), Period.Dates(chapter.period), chapter.sourceFolder)
       writes   <- refs.creations.get
       prepared <- refs.preparations.get
@@ -85,8 +86,10 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
 
   test(s"should resolve the full year for $homeName including leap days"):
     Vector((2024: AlbumYear, 366: VisitDays), (2026: AlbumYear, 365: VisitDays)).traverse_ { case (year, days) =>
-      val refs    = Refs()
-      val current = album.copy(year = year, chapters = Vector(home.copy(period = VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days))))
+      val refs        = Refs()
+      val period      = VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days)
+      val homeChapter = home.copy(period = period)
+      val current     = album.copy(year = year, chapters = Vector(homeChapter))
 
       for
         manager  <- buildManager(refs, current = current)
@@ -95,7 +98,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         prepared <- refs.preparations.get
       yield
         assertEquals(updated, UpdateResult.Updated(Scheduling.NotRequested))
-        assertEquals(updates.map(_.period), Vector(VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days)))
+        assertEquals(updates.map(_.period), Vector(period))
         assertEquals(prepared, Vector.empty)
     }
 
@@ -223,10 +226,10 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val current = album.copy(chapters = Vector(chapter))
     val period  = Period.Dates(chapter.period)
     val reads   = Vector(
-      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound, ChapterManager.RefreshResult.AlbumNotFound)),
+      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound, RefreshResult.AlbumNotFound)),
       (
         AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure),
-        (CreateResult.Failed, UpdateResult.Failed, ChapterManager.RefreshResult.Failed)
+        (CreateResult.Failed, UpdateResult.Failed, RefreshResult.Failed)
       )
     )
     val writes = Vector(
@@ -290,7 +293,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     yield
       assertEquals(absent, UpdateResult.ChapterNotFound)
       assertEquals(failed, CreateResult.Failed)
-      assertEquals(refreshed, ChapterManager.RefreshResult.ChapterNotFound)
+      assertEquals(refreshed, RefreshResult.ChapterNotFound)
       assertEquals(prepared, Vector.empty)
       assertEquals(launched, Vector.empty)
 
@@ -316,7 +319,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         prepared  <- refs.preparations.get
       yield
         assertEquals(created, CreateResult.Created(ChapterId(buildUuid(index = 10)), Scheduling.Failed))
-        assertEquals(refreshed, ChapterManager.RefreshResult.Scheduled(Scheduling.Failed))
+        assertEquals(refreshed, RefreshResult.Scheduled(Scheduling.Failed))
         assertEquals(updated, UpdateResult.Updated(Scheduling.Failed))
         val expectedSources = Vector(
           (ChapterId(buildUuid(index = 10)), "/photos/new": PhotoSource),

@@ -24,14 +24,13 @@ import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
-  private val emptyInventories = Map.empty[ChapterId, PhotoInventory.Inventory]
-  private val country          = Country(CountryId(new UUID(0L, 8L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
-  private val otherCountry     = country.copy(id = CountryId(new UUID(0L, 9L)), code = "JP", name = "Japan")
-  private val box              = SlotBox(x = 10.0, y = 20.0, width = 30.0, height = 40.0)
-  private val text             = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 6L)), box)
-  private val photo            = SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(0L, 7L)), box, bleed = Set.empty)
-  private val template         = SpreadTemplateId(new UUID(0L, 4L))
-  private val chapter          =
+  private val country      = Country(CountryId(new UUID(0L, 8L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
+  private val otherCountry = country.copy(id = CountryId(new UUID(0L, 9L)), code = "JP", name = "Japan")
+  private val box          = SlotBox(x = 10.0, y = 20.0, width = 30.0, height = 40.0)
+  private val text         = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 6L)), box)
+  private val photo        = SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(0L, 7L)), box, bleed = Set.empty)
+  private val template     = SpreadTemplateId(new UUID(0L, 4L))
+  private val chapter      =
     val destination = Destination(DestinationId(new UUID(0L, 10L)), name = "Coast", NonEmptyList.one(country))
     val opening     = Spread.ChapterStart(SpreadId(new UUID(0L, 3L)), template, Vector(photo), text, placements = Vector.empty[SpreadPlacement])
     val photos      = Spread.PhotosOnly(SpreadId(new UUID(0L, 5L)), template, NonEmptyList.one(photo), placements = Vector.empty[SpreadPlacement])
@@ -49,6 +48,11 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     val emptyPlacements = Vector.empty[SpreadPlacement]
     val opening         = Spread.AlbumStart(SpreadId(new UUID(0L, 11L)), template, photoSlots = emptyPhotos, text, placements = emptyPlacements)
     Album(AlbumId(new UUID(0L, 1L)), year = 2024, title = "Our year", synopsis = "", Instant.EPOCH, opening, Vector(chapter))
+
+  private val emptyInventories           = Map.empty[ChapterId, PhotoInventory.Inventory]
+  private val workspace: GetResult.Found =
+    GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos", photoInventories = emptyInventories)
+
   private val albumPath   = s"/api/albums/${album.id.value}"
   private val chapterPath = s"$albumPath/chapters/${chapter.id.value}"
   private val vacation    =
@@ -78,18 +82,13 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       destination = chapter.destination.copy(name = "Home"),
       period = VisitPeriod(LocalDate.of(2024, 1, 1), days = 366)
     )
-    val emptyAlbum  = album.copy(chapters = Vector.empty[Chapter])
-    val homeAlbum   = album.copy(chapters = Vector(homeChapter))
-    val emptyServer =
-      buildApi(
-        Refs(),
-        workspaceResult = GetResult.Found(emptyAlbum, NonEmptyList.one(country), photoRoot = "/custom", photoInventories = emptyInventories)
-      )
-    val homeServer =
-      buildApi(
-        Refs(),
-        workspaceResult = GetResult.Found(homeAlbum, NonEmptyList.one(country), photoRoot = "/photos", photoInventories = emptyInventories)
-      )
+    val emptyAlbum      = album.copy(chapters = Vector.empty[Chapter])
+    val homeAlbum       = album.copy(chapters = Vector(homeChapter))
+    val selectedCountry = NonEmptyList.one(country)
+    val emptyWorkspace  = workspace.copy(album = emptyAlbum, countries = selectedCountry, photoRoot = "/custom")
+    val homeWorkspace   = workspace.copy(album = homeAlbum, countries = selectedCountry)
+    val emptyServer     = buildApi(Refs(), workspaceResult = emptyWorkspace)
+    val homeServer      = buildApi(Refs(), workspaceResult = homeWorkspace)
 
     for
       empty     <- send(emptyServer, Method.GET, s"$albumPath/workspace")
@@ -254,8 +253,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
   // scalafix:off DisableSyntax.defaultArgs
   private def buildApi(
       refs: Refs,
-      workspaceResult: GetResult =
-        GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos", photoInventories = emptyInventories),
+      workspaceResult: GetResult = workspace,
       albumResult: GetAlbumResult = GetAlbumResult.Found(album),
       createResult: CreateResult = CreateResult.Created(chapter.id, Scheduling.Queued),
       updateResult: UpdateResult = UpdateResult.Updated(Scheduling.NotRequested)

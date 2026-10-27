@@ -11,7 +11,6 @@ import photography.ports.{PhotoRepository, PhotoStorage}
 import photography.usecases.ChapterPhotoImport.*
 
 trait ChapterPhotoImport[F[_]]:
-  /** Register saved metadata while holding the chapter-mutation mutex; launch after releasing it. */
   def prepare(chapter: ChapterId, source: PhotoSource): F[Request]
   def launch(request: Request): F[Scheduling]
   def status(chapter: ChapterId): F[Status]
@@ -42,7 +41,8 @@ object ChapterPhotoImport:
             val generation = maybePrevious.fold(BigInt(0))(_.request.generation + 1)
             val request    = Request(chapter, source, generation = generation)
             val previous   = maybePrevious.toList.flatMap(entry => entry.previous ++ entry.maybeWorker.toList).toVector
-            (current.updated(chapter, Entry(request, Status.Queued, maybeWorker = None, previous = previous)), request)
+            val queued     = Entry(request, Status.Queued, maybeWorker = None, previous = previous)
+            (current.updated(chapter, queued), request)
 
     override def launch(request: Request): F[Scheduling] =
       val launch = summon[Mutex[F]].lock.surround:
@@ -50,16 +50,18 @@ object ChapterPhotoImport:
           current.get(request.chapter) match
             case Some(entry) if entry.request === request && entry.maybeWorker.isEmpty && isActive(entry.status) =>
               supervisor.supervise(run(request)).flatMap: worker =>
-                state.update(_.updatedWith(request.chapter)(_.map(_.copy(
-                  maybeWorker = worker.some,
-                  previous = Vector.empty[Fiber[F, Throwable, Unit]]
-                ))))
-                  .as((Scheduling.Queued, entry.previous))
+                val register = state.update: current =>
+                  current.updatedWith(request.chapter): maybeEntry =>
+                    maybeEntry.map: active =>
+                      active.copy(maybeWorker = worker.some, previous = Vector.empty[Fiber[F, Throwable, Unit]])
+                register.as((Scheduling.Queued, entry.previous))
             case _ => (Scheduling.Coalesced, Vector.empty[Fiber[F, Throwable, Unit]]).pure[F]
       Async[F].uncancelable: _ =>
-        launch.flatMap { case (scheduling, previous) => previous.traverse_(worker => supervisor.supervise(worker.cancel).void).as(scheduling) }
-          .handleErrorWith: error =>
-            Logger[F].error(error)("Photo import launch failed") >> recordStatus(request, Status.LaunchFailed).as(Scheduling.Failed)
+        launch.flatMap { case (scheduling, previous) =>
+          val cancelPrevious = previous.traverse_(worker => supervisor.supervise(worker.cancel).void)
+          cancelPrevious.as(scheduling)
+        }.handleErrorWith: error =>
+          Logger[F].error(error)("Photo import launch failed") >> recordStatus(request, Status.LaunchFailed).as(Scheduling.Failed)
 
     override def status(chapter: ChapterId): F[Status] =
       state.get.map(_.get(chapter).fold[Status](Status.Idle)(_.status))
@@ -69,7 +71,8 @@ object ChapterPhotoImport:
         override def run[A](program: Db[A]): F[A] =
           summon[Mutex[F]].lock.surround:
             state.get.flatMap: current =>
-              if current.get(request.chapter).exists(_.request === request) then transaction.run(program)
+              val isCurrent = current.get(request.chapter).exists(_.request === request)
+              if isCurrent then transaction.run(program)
               else Async[F].raiseError(new IllegalStateException("Photo import source was superseded"))
       val manager = PhotoManager.make(storage, photos, generator)
       val started = summon[Mutex[F]].lock.surround(recordStatus(request, Status.Running))
@@ -77,8 +80,8 @@ object ChapterPhotoImport:
 
     private def recordStatus(request: Request, status: Status) =
       state.update: current =>
-        current.updatedWith(request.chapter):
-          _.map(entry => if entry.request === request then entry.copy(status = status) else entry)
+        current.updatedWith(request.chapter): maybeEntry =>
+          maybeEntry.map(entry => if entry.request === request then entry.copy(status = status) else entry)
 
     private def isActive(status: Status) = status match
       case Status.Queued | Status.Running => true

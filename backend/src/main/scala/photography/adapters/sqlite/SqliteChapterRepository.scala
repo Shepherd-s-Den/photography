@@ -26,20 +26,18 @@ object SqliteChapterRepository:
       val distinctSlotIds = opening.photoSlots.forall(_.id.value =!= opening.textSlot.id.value)
       val isInitial       = opening.placements.isEmpty && opening.photoSlots.nonEmpty && distinctSlotIds
       val initial         = Either.cond(isInitial, (), new IllegalArgumentException("Expected an empty chapter opening with photo slots"))
-      val query           = albumExists(album).flatMap:
+      val write           =
+        for
+          _ <- initial.liftTo[ConnectionIO]
+          _ <- validateOpening(chapter.opening.template, chapter.opening.photoSlots.map(_.box), chapter.opening.textSlot.box)
+          _ <- insertDestination(chapter.destinationId.value, chapter.name, chapter.countries)
+          _ <- insertChapter(album, chapter.id, chapter.destinationId, chapter.description, chapter.period, chapter.sourceFolder)
+          _ <- insertOpening(chapter.id, chapter.opening.id, chapter.opening.template, chapter.opening.photoSlots, chapter.opening.textSlot)
+          _ <- persistOrder(album, order)
+        yield CreateResult.Saved: CreateResult
+      val query = albumExists(album).flatMap:
         case false => CreateResult.AlbumNotFound.pure[ConnectionIO]
-        case true  => countryReferencesExist(chapter.countries).ifM(
-            ifTrue =
-              for
-                _ <- initial.liftTo[ConnectionIO]
-                _ <- validateOpening(chapter.opening.template, chapter.opening.photoSlots.map(_.box), chapter.opening.textSlot.box)
-                _ <- insertDestination(chapter.destinationId.value, chapter.name, chapter.countries)
-                _ <- insertChapter(album, chapter.id, chapter.destinationId, chapter.description, chapter.period, chapter.sourceFolder)
-                _ <- insertOpening(chapter.id, chapter.opening.id, chapter.opening.template, chapter.opening.photoSlots, chapter.opening.textSlot)
-                _ <- persistOrder(album, order)
-              yield CreateResult.Saved: CreateResult,
-            ifFalse = CreateResult.UnknownCountries.pure[ConnectionIO]
-          )
+        case true  => countryReferencesExist(chapter.countries).ifM(ifTrue = write, ifFalse = CreateResult.UnknownCountries.pure[ConnectionIO])
       execute(query.transact(transactor), CreateResult.Failed)
 
     override def update(
@@ -57,16 +55,15 @@ object SqliteChapterRepository:
           case true  =>
             sql"SELECT destination_id FROM chapter WHERE id = ${chapter.value} AND album_id = ${album.value}".query[UUID].option.flatMap:
               case None           => UpdateResult.ChapterNotFound.pure[ConnectionIO]
-              case Some(previous) => countryReferencesExist(countries).ifM(
-                  ifTrue =
-                    for
-                      _ <- insertDestination(destination, name, countries)
-                      _ <- updateMetadata(album, chapter, destination, period, sourceFolder)
-                      _ <- deleteUnreferencedDestination(previous)
-                      _ <- persistOrder(album, order)
-                    yield UpdateResult.Saved: UpdateResult,
-                  ifFalse = UpdateResult.UnknownCountries.pure[ConnectionIO]
-                )
+              case Some(previous) =>
+                val write =
+                  for
+                    _ <- insertDestination(destination, name, countries)
+                    _ <- updateMetadata(album, chapter, destination, period, sourceFolder)
+                    _ <- deleteUnreferencedDestination(previous)
+                    _ <- persistOrder(album, order)
+                  yield UpdateResult.Saved: UpdateResult
+                countryReferencesExist(countries).ifM(ifTrue = write, ifFalse = UpdateResult.UnknownCountries.pure[ConnectionIO])
         query.transact(transactor)
       execute(operation, UpdateResult.Failed)
 

@@ -31,22 +31,17 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     Country(CountryId(new UUID(0L, 5L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
   )
   private val chapter =
-    val opening = Spread.ChapterStart(
-      SpreadId(new UUID(0L, 7L)),
-      album.opening.template,
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      album.opening.textSlot,
-      placements = Vector.empty[SpreadPlacement]
-    )
-    Chapter(
-      ChapterId(new UUID(0L, 6L)),
-      Destination(DestinationId(new UUID(0L, 8L)), name = "Coast", countries),
-      VisitPeriod(LocalDate.of(2026, 1, 1), days = 1),
-      description = "",
-      sourceFolder = "/photos/coast",
-      opening,
-      spreads = Vector.empty[Spread.PhotosOnly]
-    )
+    val id              = ChapterId(new UUID(0L, 6L))
+    val openingId       = SpreadId(new UUID(0L, 7L))
+    val template        = album.opening.template
+    val textSlot        = album.opening.textSlot
+    val emptyPhotos     = Vector.empty[SpreadSlot.Photo]
+    val emptyPlacements = Vector.empty[SpreadPlacement]
+    val emptySpreads    = Vector.empty[Spread.PhotosOnly]
+    val opening         = Spread.ChapterStart(openingId, template, photoSlots = emptyPhotos, textSlot, placements = emptyPlacements)
+    val destination     = Destination(DestinationId(new UUID(0L, 8L)), name = "Coast", countries)
+    val period          = VisitPeriod(LocalDate.of(2026, 1, 1), days = 1)
+    Chapter(id, destination, period, description = "", sourceFolder = "/photos/coast", opening, spreads = emptySpreads)
   private val emptyInventory = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty)
 
   test("should assemble the complete album and selectable countries with the configured photo root"):
@@ -56,20 +51,18 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     manager.get(album.id).map(result => assertEquals(result, expected))
 
   test("should load each chapter inventory once and preserve explicit inventory failures"):
-    val other    = chapter.copy(id = ChapterId(new UUID(0L, 9L)), sourceFolder = "/photos/other")
-    val current  = album.copy(chapters = Vector(chapter, other))
-    val expected =
-      GetResult.Found(current, countries, photoRoot = "/photos", photoInventories = Map(chapter.id -> emptyInventory, other.id -> emptyInventory))
-    val failedRead = buildManager(
-      GetAlbumResult.Found(current),
-      CountryRepository.ListResult.Listed(countries),
-      inventory = _ => PhotoInventory.ListResult.Failed.pure[IO]
-    ).get(album.id)
+    val other       = chapter.copy(id = ChapterId(new UUID(0L, 9L)), sourceFolder = "/photos/other")
+    val current     = album.copy(chapters = Vector(chapter, other))
+    val inventories = Map(chapter.id -> emptyInventory, other.id -> emptyInventory)
+    val expected    = GetResult.Found(current, countries, photoRoot = "/photos", photoInventories = inventories)
+    val savedAlbum  = GetAlbumResult.Found(current)
+    val catalog     = CountryRepository.ListResult.Listed(countries)
+    val failedRead  = buildManager(savedAlbum, catalog, inventory = _ => PhotoInventory.ListResult.Failed.pure[IO]).get(album.id)
 
     for
       reads <- Ref.of[IO, Vector[ChapterId]](Vector.empty)
       photos = (id: ChapterId) => reads.update(_ :+ id).as(PhotoInventory.ListResult.Listed(emptyInventory))
-      result <- buildManager(GetAlbumResult.Found(current), CountryRepository.ListResult.Listed(countries), photos).get(album.id)
+      result <- buildManager(savedAlbum, catalog, inventory = photos).get(album.id)
       actual <- reads.get
       failed <- failedRead
     yield
