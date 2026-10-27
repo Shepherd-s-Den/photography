@@ -16,13 +16,21 @@ describe("findComponentsForPath", () => {
   });
 
   it("should map pipeline paths to the pipeline component", () => {
-    const workflowComponents = Selection.findComponentsForPath(".github/workflows/verify-main.yml");
+    const paths = [
+      "scripts/local.py",
+      "scripts/verify",
+      ".dagger/src/index.ts",
+      "dagger.json",
+      ".github/workflows/build.yml",
+      ".github/workflows/verify-main.yml",
+      ".githooks/pre-push",
+      ".agents/skills/sdd/scripts/check_markdown_wrapping.py",
+      ".mise.toml",
+    ];
 
-    expect(Selection.findComponentsForPath("scripts/local.py")).toEqual(["pipeline"]);
-    expect(Selection.findComponentsForPath(".dagger/src/index.ts")).toEqual(["pipeline"]);
-    expect(Selection.findComponentsForPath("dagger.json")).toEqual(["pipeline"]);
-    expect(Selection.findComponentsForPath(".github/workflows/build.yml")).toEqual(["pipeline"]);
-    expect(workflowComponents).toEqual(["pipeline"]);
+    for (const path of paths) {
+      expect(Selection.findComponentsForPath(path), path).toEqual(["pipeline"]);
+    }
   });
 
   it("should ignore documentation and unrelated paths", () => {

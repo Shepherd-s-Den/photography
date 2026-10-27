@@ -18,17 +18,15 @@ Follow the Spike workflow in [`SKILL.md`](SKILL.md). This file adds no separate 
 
 For a feature, wait until the user has run the local spike and confirmed the intended behavior before preparing or finalizing the proposal. Carry that confirmed behavior into the spec; a review pass over an unconfirmed draft does not satisfy the Spec PR gate.
 
-Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec for density; derive current facts from living docs and confirmed findings.
+Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent when one exists; the current template and `spec-quality.md` govern altitude and density. Derive current facts from living docs and confirmed findings.
 
-**Technical contract first: caller-first APIs.** Start with a concrete trigger-to-UI sequence; derive the smallest application API from real callers' available inputs and consumed results. Distinguish use cases from driven ports.
+**Behavior/contract first.** Trace the concrete trigger through observable outcomes, committed state, failure order and UI delivery. Use diagrams or tables where they resolve a flow or contract question; add only prose that clarifies remaining guarantees.
 
-Keep coordination inside its owner and derive views from already available data. Before adding a method, try an existing boundary or local derivation; retain it only when a caller needs a distinct responsibility.
+State changed domain, persisted-data and boundary guarantees and who enforces them. Distinguish database constraints from application rules and verify constraint mechanisms against current sources.
 
-Show orchestration, injected collaborators, changed domain/schema contracts, asynchronous acknowledgments, publication/failure order and UI delivery. Use compact signatures and sequence diagrams; source-verify named dependencies and their effect/runtime requirements.
+Keep signatures, module/file layouts, adapter internals and slice execution notes in the ignored implementation design map. The proposal owns agreed behavior and domain contracts; its structure follows intent rather than a diff walkthrough.
 
-Walk scenarios through every signature and parameter using reviewer.md's seam-definition evidence: prove necessity, not just a possible caller. Apply stack-specific API/type/effect conventions to spec sketches too; add prose only for guarantees contracts leave ambiguous.
-
-Keep concrete adapter internals, file layouts and slice execution notes in ignored work evidence; the single proposal owns the agreed technical contracts.
+When a spike preceded this phase, ground design notes and any real alternatives in its findings.
 
 - **Feature:** current → new behavior, acceptance criteria, invariants, tradeoffs, Doc Sync.
 - **Investigation:** hypotheses and evidence for/against each, narrowing to a proven root cause — the spec's `What & Why` ends up stating that root cause and the hypotheses it ruled out.
@@ -38,6 +36,8 @@ Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), t
 ## Tests
 
 Before writing tests or production code for each slice, build a short design map in `.agent-work/<slug>/`: module responsibility, consuming boundary and proposed call/signature/result; invariants and enforcing boundary; effects and dependency owners/lifetimes; policy authority; owning suite; exact source/test precedents inspected. Use the blocking questions in [`checklists/code-quality.md`](checklists/code-quality.md), not a proposed file list.
+
+Derive caller-first APIs from a concrete trigger-to-UI sequence and real callers' available inputs and consumed results; distinguish application operations from driven ports. Before adding a method, try an existing boundary or local derivation. Walk scenarios through every signature and parameter using `reviewer.md`'s seam-definition evidence; prove necessity, not just a possible caller. Source-verify dependency effects, resource lifetimes and transaction guarantees, and apply the stack's API/type conventions.
 
 Check each row against the consuming boundary and applicable stack leaf. Stop on an unanswered question or failed condition; resolve the API or ownership before implementation. Apply `SKILL.md`'s adjudication rule for departures. Update the map when a new module or changed boundary emerges.
 
@@ -49,7 +49,9 @@ Implement the approved behavior within the checked design map. Split into multip
 
 Make the tests pass, then run the gates `AGENTS.md` defines; never weaken a gate to pass one. Self-check the shared quality checklist, stack leaves selected under `SKILL.md` and [`implementation-completeness.md`](checklists/implementation-completeness.md) against this slice. Replace proposed design-map calls with actual symbols and consumption. Run a second whole-diff pass for callable surfaces, declarations, syntax, capabilities and test structure before the review protocol.
 
-The handoff identifies the exact baseline and candidate revision or content manifest, every changed/untracked file, design-map answers, checklist evidence and command results. Missing evidence is an open gate. Follow [`reviewer.md`](reviewer.md) for the independent review, repair verification and missed-rule recovery.
+Run the slice locally against its real boundaries and obtain the maintainer's behavior confirmation before opening its PR, as required by `SKILL.md`. Keep local runs isolated from production state unless the maintainer explicitly authorizes that access.
+
+The handoff identifies the exact baseline and candidate revision or content manifest, every changed/untracked file, design-map answers, checklist evidence, local confirmation and command results. Missing evidence is an open gate. Follow [`reviewer.md`](reviewer.md) for the independent review, repair verification and missed-rule recovery.
 
 ## Archive PR
 

@@ -18,7 +18,7 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 - [ ] Pure and effectful business modules use a caller-defined trait, companion factory and private final Live implementation.
 - [ ] Orchestration remains visible in service methods; effect sequencing is linear and errors remain explicit.
 - [ ] Resource acquisition, use, and release follow the selected Typelevel effect library's resource-safe primitive.
-- [ ] Low-information values such as `None` and `Option.empty` use named arguments; domain-meaningful values remain positional.
+- [ ] Name arguments whose types do not reveal their role, including literals, collections, `Nil`, booleans and optional values, in constructors and public/private calls alike. Self-describing domain values remain positional.
 - [ ] Production dependencies are introduced only for a documented capability and kept out of pure domain modules.
 - [ ] Destructure only when every field is required; otherwise access named fields. Tuple callbacks use `case (fieldA, fieldB)` when both are needed; positional accessors such as `._1` are not allowed.
 - [ ] Each statement in a for-comprehension occupies one physical line. Extract multiline SQL and expressions into named vals or private defs before sequencing them.
@@ -28,6 +28,7 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 ## Declarations and ordering
 
 - [ ] Order everything most important first: parameters, methods, nested types, APIs and declarations. In a module: trait → companion `make` → private final Live → companion-owned result types.
+- [ ] Every computational/helper method name contains an action or predicate verb. Inventory all declarations, including private helpers and suite-local builders, rather than checking only changed names.
 - [ ] Result types live in the companion of the trait whose methods return them. Top-level types are only for config or shared values such as `AlbumPageSize`.
 - [ ] Private members omit return types unless the type is `Unit` or the member is public API.
 - [ ] Trait APIs never return `Either`; use per-operation sum types.
@@ -57,8 +58,8 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 
 - [ ] Test names start with "should" and describe high-level acceptance behavior.
 - [ ] Each suite names an existing production module and exercises its public contract. Type declarations and implementation helpers do not acquire fictional component suites. Fold tests covering one flow into one scenario; when the module changes, reshape its suite rather than add coverage-only tests.
-- [ ] Use `ComponentTest` for use-case tests, `SeamIntegrationTest` for adapter seams. Name the file after the component.
-- [ ] Test data is deterministic and suite-local. A module with collaborators has a local `buildX` method creating anonymous substitutes from response/failure parameters; a pure module without collaborators needs no builder. Reusable data setup must own meaningful scenario construction, not a parallel fixture object model.
+- [ ] Apply the shared checklist's seam definition before choosing a suite tier. Use `ComponentTest` for application operations with substituted ports and `SeamIntegrationTest` for an adapter crossing its actual external boundary. Name the file after that owner; package placement or a remote dependency elsewhere does not establish a seam.
+- [ ] Test data is deterministic and suite-local. A module with collaborators has a local `buildX` creating anonymous substitutes, with observation `Refs` first when present and only scenario-varying responses as inputs; a pure module without collaborators needs no builder. Apply the architecture gate to builders; reusable setup owns meaningful scenario construction, not fixture/configuration bags.
 - [ ] Test setup follows the inspected reference suite. There are no fixture carrier classes or shared assertion/fixture-loader frameworks.
 - [ ] At most one suite-local `Refs` per test records observations; responses come from builder parameters, not `Refs`.
 - [ ] Suite order within a file: reusable non-trivial mock data, then use-case tests, then observable `Refs` (only if needed), then `buildX` helpers.

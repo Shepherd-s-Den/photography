@@ -4,7 +4,7 @@
 
 ## Overview
 
-The pipeline maps changed paths to independent backend, frontend, and pipeline checks. Documentation-only changes select no component. `verify --all` runs every check regardless of the diff.
+The pipeline maps changed paths to independent backend, frontend, and pipeline checks. Documentation-only changes select no Dagger component; the shared verification entrypoint still checks Markdown and the pipeline module. `verify --all` runs every component check regardless of the diff.
 
 ```mermaid
 flowchart LR
@@ -16,5 +16,6 @@ flowchart LR
 
 - `backend/` changes run the backend gate in a pinned JDK and sbt container.
 - `frontend/` changes run the frontend gate in a pinned Node container.
-- `.dagger/`, `dagger.json`, and `.github/` changes run the Dagger module's type, lint, format, and unit-test gates.
+- `.dagger/`, `dagger.json`, `.mise.toml`, `.github/`, `.githooks/`, `scripts/`, and `.agents/skills/sdd/scripts/` changes select the pipeline gate.
 - The pipeline module owns path selection and containerized component checks.
+- `scripts/verify` owns the shared local/CI gate sequence; `.githooks/pre-push` owns validation of outgoing revisions and base selection.

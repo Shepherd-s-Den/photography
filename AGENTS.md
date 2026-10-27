@@ -14,6 +14,7 @@ Classify each change through the SDD skill before implementation. A reviewed cha
 - A frontend change passes `dagger call frontend-check`.
 - A pipeline change passes the module's type, lint, format, and test checks (`npm ci --prefix .dagger && dagger develop && npm --prefix .dagger run verify`) and `dagger call pipeline-check`.
 - Every change passes `dagger call verify`; use `dagger call verify --all` when the change affects shared behavior or affected-component selection is uncertain.
+- Pull-request CI and the enabled pre-push hook run `bash scripts/verify <base-commit-or-ref>` for Markdown, pipeline-module and affected-component gates. See [pipeline operations](ci/specs/operational.md#local-push-verification) for hook setup and revision requirements.
 
 ## Engineering boundaries
 

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "Usage: bash scripts/verify <base-commit-or-ref>" >&2
+  exit 1
+fi
+
+TOP=$(git rev-parse --show-toplevel)
+base=$(git rev-parse --verify "$1^{commit}")
+merge_base=$(git merge-base "$base" HEAD)
+cd "$TOP"
+
+git diff --name-only --diff-filter=ACMR -z "$merge_base" HEAD -- '*.md' |
+  while IFS= read -r -d '' file; do
+    python3 .agents/skills/sdd/scripts/check_markdown_wrapping.py "$file"
+  done
+
+npm ci --prefix .dagger --no-audit --no-fund
+dagger develop
+npm --prefix .dagger run verify
+dagger call verify --base="$base"

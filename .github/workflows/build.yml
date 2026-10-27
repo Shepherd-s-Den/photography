@@ -20,15 +20,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Check Markdown prose wrapping
-        env:
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -o pipefail
-          base="origin/$GITHUB_BASE_REF"
-          git diff --name-only --diff-filter=ACMR -z "$base...$PR_HEAD_SHA" -- '*.md' |
-            xargs -0 -r python3 .agents/skills/sdd/scripts/check_markdown_wrapping.py
-
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
@@ -40,12 +31,4 @@ jobs:
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
       - name: Verify changed components
-        run: |
-          npm ci --prefix .dagger --no-audit --no-fund
-          dagger develop
-          base="origin/$GITHUB_BASE_REF"
-          components=$(dagger call changed --base="$base")
-          if [[ ",$components," == *,pipeline,* ]]; then
-            npm --prefix .dagger run verify
-          fi
-          dagger call verify --base="$base"
+        run: bash scripts/verify "origin/${GITHUB_BASE_REF}"
