@@ -1,0 +1,68 @@
+package photography.usecases
+
+import cats.MonadThrow
+import cats.syntax.all.*
+import org.typelevel.log4cats.Logger
+import photography.capabilities.Transaction
+import photography.domain.album.*
+import photography.ports.{PhotoRepository, ThumbnailStorage}
+import photography.usecases.PhotoWriteRecovery.*
+
+trait PhotoWriteRecovery[F[_]]:
+  def recover: F[RecoveryResult]
+
+object PhotoWriteRecovery:
+  def make[F[_]: MonadThrow: Logger, Db[_]](
+      photos: PhotoRepository[Db],
+      storage: ThumbnailStorage[F]
+  )(using Transaction[Db, F]): PhotoWriteRecovery[F] = new LivePhotoWriteRecovery(photos, storage)
+
+  final private class LivePhotoWriteRecovery[F[_]: MonadThrow: Logger, Db[_]](
+      photos: PhotoRepository[Db],
+      storage: ThumbnailStorage[F]
+  )(using Transaction[Db, F]) extends PhotoWriteRecovery[F]:
+    override def recover: F[RecoveryResult] =
+      Transaction[Db, F].run(photos.listUnfinishedWrites).flatMap:
+        case PhotoRepository.ListUnfinishedWritesResult.Failed          => RecoveryResult.Failed(issues = Vector(Issue.Listing)).pure[F]
+        case PhotoRepository.ListUnfinishedWritesResult.Listed(intents) =>
+          intents.traverse(recoverWrite).map: results =>
+            val issues = results.flatten
+            if issues.isEmpty then RecoveryResult.Recovered else RecoveryResult.Failed(issues = issues)
+      .handleErrorWith(error => failed(error, Issue.Listing).map(issues => RecoveryResult.Failed(issues = issues)))
+
+    private def recoverWrite(intent: PhotoWriteIntent) =
+      Transaction[Db, F].run(photos.listChapter(intent.chapter)).flatMap:
+        case PhotoRepository.ListResult.Failed          => Vector(Issue.References(intent.id)).pure[F]
+        case PhotoRepository.ListResult.Listed(current) =>
+          val locations = intent match
+            case publication: PhotoWriteIntent.Publication => publication.location +: publication.maybePrevious.toList.toVector
+            case retirement: PhotoWriteIntent.Retirement   => Vector(retirement.location)
+          val unused = locations.distinct.filterNot(location => current.exists(_.thumbnail.location.value === location.value))
+          unused.traverse(location => cleanup(intent.id, location)).map(_.flatten).flatMap: issues =>
+            if issues.nonEmpty then issues.pure[F] else complete(intent.id)
+      .handleErrorWith(error => failed(error, Issue.References(intent.id)))
+
+    private def cleanup(id: PhotoWriteIntentId, location: ThumbnailLocation) =
+      storage.removeThumbnail(location).flatMap:
+        case ThumbnailStorage.RemoveResult.Removed => Vector.empty[Issue].pure[F]
+        case ThumbnailStorage.RemoveResult.Failed  => Vector(Issue.Cleanup(id, location)).pure[F]
+      .handleErrorWith(error => failed(error, Issue.Cleanup(id, location)))
+
+    private def complete(id: PhotoWriteIntentId) =
+      Transaction[Db, F].run(photos.completeWrite(id)).flatMap:
+        case PhotoRepository.CompleteWriteResult.Completed => Vector.empty[Issue].pure[F]
+        case PhotoRepository.CompleteWriteResult.Failed    => Vector(Issue.Completion(id)).pure[F]
+      .handleErrorWith(error => failed(error, Issue.Completion(id)))
+
+    private def failed(error: Throwable, issue: Issue) =
+      Logger[F].error(error)(s"Photo write recovery failed: $issue").as(Vector(issue))
+
+  enum RecoveryResult:
+    case Recovered
+    case Failed(issues: Vector[Issue])
+
+  enum Issue:
+    case Listing
+    case References(id: PhotoWriteIntentId)
+    case Cleanup(id: PhotoWriteIntentId, location: ThumbnailLocation)
+    case Completion(id: PhotoWriteIntentId)

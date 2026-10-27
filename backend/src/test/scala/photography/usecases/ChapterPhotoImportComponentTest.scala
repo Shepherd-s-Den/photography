@@ -14,7 +14,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
-import photography.ports.{PhotoRepository, PhotoStorage}
+import photography.ports.{PhotoRepository, PhotoStorage, ThumbnailStorage}
 import photography.usecases.ChapterPhotoImport.{Scheduling, Status}
 import java.util.UUID
 
@@ -168,6 +168,12 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
         Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](refs.saves.update(_ :+ photo).as(PhotoRepository.WriteResult.Applied))
       override def remove(id: PhotoId): Db[PhotoRepository.WriteResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](PhotoRepository.WriteResult.Applied.pure[IO])
+      override def recordWrite(intent: PhotoWriteIntent): Db[PhotoRepository.RecordWriteResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](PhotoRepository.RecordWriteResult.Failed.pure[IO])
+      override def completeWrite(id: PhotoWriteIntentId): Db[PhotoRepository.CompleteWriteResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](PhotoRepository.CompleteWriteResult.Failed.pure[IO])
+      override def listUnfinishedWrites: Db[PhotoRepository.ListUnfinishedWritesResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.ListUnfinishedWritesResult](PhotoRepository.ListUnfinishedWritesResult.Failed.pure[IO])
     val generator = new PhotoThumbnailGenerator[IO]:
       override def quality: ThumbnailQuality                                                     = ThumbnailQuality.Standard
       override def generate(content: PhotoContent): IO[PhotoThumbnailGenerator.GenerationResult] =
@@ -179,10 +185,10 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult]    = refs.scans.update(_ :+ value) >> discover(value)
       override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =
         IO.raiseError[PhotoStorage.ReadResult](new AssertionError("Unexpected read"))
-      override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): IO[PhotoStorage.StoreResult] =
-        IO.raiseError[PhotoStorage.StoreResult](new AssertionError("Unexpected store"))
-      override def removeThumbnail(location: ThumbnailLocation): IO[PhotoStorage.RemoveResult] =
-        IO.raiseError[PhotoStorage.RemoveResult](new AssertionError("Unexpected removal"))
+      override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
+        IO.raiseError[ThumbnailStorage.StoreResult](new AssertionError("Unexpected store"))
+      override def removeThumbnail(location: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =
+        IO.raiseError[ThumbnailStorage.RemoveResult](new AssertionError("Unexpected removal"))
 
   private def buildPublicationStorage(refs: Refs, stored: Deferred[IO, Unit], release: Deferred[IO, Unit]) =
     new PhotoStorage[IO]:
@@ -191,8 +197,8 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
         refs.scans.update(_ :+ value).as(PhotoStorage.DiscoveryResult.Complete(originals, unsupportedCount = 0))
       override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =
         PhotoStorage.ReadResult.Read(content, metadata).pure[IO]
-      override def storeThumbnail(location: ThumbnailLocation, value: EncodedThumbnail): IO[PhotoStorage.StoreResult] =
+      override def storeThumbnail(location: ThumbnailLocation, value: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
         val thumbnail = Thumbnail(location, version = "version", value.dimensions, value.quality, bytes = 1)
-        stored.complete(()).void >> release.get.as(PhotoStorage.StoreResult.Stored(thumbnail))
-      override def removeThumbnail(location: ThumbnailLocation): IO[PhotoStorage.RemoveResult] =
-        refs.removed.update(_ :+ location).as(PhotoStorage.RemoveResult.Removed)
+        stored.complete(()).void >> release.get.as(ThumbnailStorage.StoreResult.Stored(thumbnail))
+      override def removeThumbnail(location: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =
+        refs.removed.update(_ :+ location).as(ThumbnailStorage.RemoveResult.Removed)

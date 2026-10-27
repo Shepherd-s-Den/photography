@@ -206,8 +206,11 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       FROM spread_photo_slot WHERE spread_id = ${opening.value} ORDER BY id LIMIT 1"""
     val insertSpread = sql"""INSERT INTO spread (id, template_id, kind, chapter_id, position)
       VALUES ($spread, $template, 'photos_only', ${chapter.value}, 1)"""
+    val insertPhoto = sql"""INSERT INTO photo (id, chapter_id, source, source_hash, width, height, thumbnail,
+      thumbnail_version, thumbnail_width, thumbnail_height, thumbnail_quality, thumbnail_bytes)
+      VALUES ($photo, ${chapter.value}, 'photo.jpg', 'hash', 100, 100, $photo, 'version', 100, 100, 'low', 1)"""
     for
-      _ <- sql"INSERT INTO photo (id, chapter_id, source, width, height) VALUES ($photo, ${chapter.value}, 'photo.jpg', 100, 100)".update.run
+      _ <- insertPhoto.update.run
       _ <- insertPlacement.update.run
       _ <- sql"INSERT INTO spread_template (id, name, kind) VALUES ($template, 'Photo layout', 'photos_only')".update.run
       _ <- sql"INSERT INTO spread_template_slot (template_id, kind, x, y, width, height) VALUES ($template, 'photo', 0, 0, 100, 100)".update.run

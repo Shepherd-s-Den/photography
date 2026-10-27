@@ -42,12 +42,30 @@ CREATE TABLE photo (
     id TEXT PRIMARY KEY NOT NULL,
     chapter_id TEXT NOT NULL REFERENCES chapter (id) ON DELETE CASCADE,
     source TEXT NOT NULL,
-    thumbnail TEXT,
+    source_hash TEXT NOT NULL,
+    captured_local TEXT,
+    thumbnail TEXT NOT NULL,
+    thumbnail_version TEXT NOT NULL,
+    thumbnail_width INTEGER NOT NULL CHECK (thumbnail_width BETWEEN 1 AND 2048),
+    thumbnail_height INTEGER NOT NULL CHECK (thumbnail_height BETWEEN 1 AND 2048),
+    thumbnail_quality TEXT NOT NULL CHECK (thumbnail_quality IN ('low', 'standard', 'high')),
+    thumbnail_bytes INTEGER NOT NULL CHECK (thumbnail_bytes BETWEEN 1 AND
+        CASE thumbnail_quality WHEN 'low' THEN 75000 WHEN 'standard' THEN 150000 WHEN 'high' THEN 300000 END),
     captured_at_ms INTEGER,
-    width INTEGER NOT NULL,
-    height INTEGER NOT NULL,
+    width INTEGER NOT NULL CHECK (width > 0),
+    height INTEGER NOT NULL CHECK (height > 0),
     caption TEXT,
     UNIQUE (chapter_id, source)
+) STRICT;
+
+CREATE TABLE photo_write_intent (
+    id TEXT PRIMARY KEY NOT NULL,
+    chapter_id TEXT NOT NULL,
+    photo_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('publication', 'retirement')),
+    location TEXT NOT NULL,
+    previous TEXT,
+    CHECK (kind = 'publication' OR previous IS NULL)
 ) STRICT;
 
 CREATE TABLE camera (

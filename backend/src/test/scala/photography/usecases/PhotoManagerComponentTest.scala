@@ -11,7 +11,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
-import photography.ports.{PhotoRepository, PhotoStorage}
+import photography.ports.{PhotoRepository, PhotoStorage, ThumbnailStorage}
 import photography.usecases.PhotoManager.*
 import java.util.UUID
 
@@ -131,9 +131,9 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       (IO.raiseError[PhotoRepository.WriteResult](error), Vector(Issue.Persistence))
     ).traverse_ { case (writing, issues) =>
       Vector(
-        (PhotoStorage.RemoveResult.Removed.pure[IO], Vector.empty[Issue]),
-        (PhotoStorage.RemoveResult.Failed.pure[IO], Vector(Issue.Cleanup(stored.location))),
-        (IO.raiseError[PhotoStorage.RemoveResult](error), Vector(Issue.Cleanup(stored.location)))
+        (ThumbnailStorage.RemoveResult.Removed.pure[IO], Vector.empty[Issue]),
+        (ThumbnailStorage.RemoveResult.Failed.pure[IO], Vector(Issue.Cleanup(stored.location))),
+        (IO.raiseError[ThumbnailStorage.RemoveResult](error), Vector(Issue.Cleanup(stored.location)))
       )
         .traverse_ { case (cleaning, cleanupIssues) =>
           Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
@@ -147,8 +147,8 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
 
   test("should expose storage failures without writes, and cleanup failures after successful persistence"):
     Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
-      val storeFailure   = buildManager(events, existingPhotos = Vector.empty[Photo], storage = PhotoStorage.StoreResult.Failed.pure[IO])
-      val cleanupFailure = buildManager(events, discovery = absent.pure[IO], cleaning = PhotoStorage.RemoveResult.Failed.pure[IO])
+      val storeFailure   = buildManager(events, existingPhotos = Vector.empty[Photo], storage = ThumbnailStorage.StoreResult.Failed.pure[IO])
+      val cleanupFailure = buildManager(events, discovery = absent.pure[IO], cleaning = ThumbnailStorage.RemoveResult.Failed.pure[IO])
       val removeFailure  = buildManager(events, discovery = absent.pure[IO], remove = _ => IO.raiseError[PhotoRepository.WriteResult](error))
       for
         storage      <- storeFailure.refresh(chapter, original.source)
@@ -162,10 +162,10 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
         assertEquals(failedDelete.issues, Vector(Issue.Persistence))
 
   test("should compensate partial storage failures at their preallocated location and preserve cleanup errors"):
-    Vector(PhotoStorage.StoreResult.Failed.pure[IO], IO.raiseError[PhotoStorage.StoreResult](error)).traverse_ { storage =>
+    Vector(ThumbnailStorage.StoreResult.Failed.pure[IO], IO.raiseError[ThumbnailStorage.StoreResult](error)).traverse_ { storage =>
       Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
         val reading = PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
-        val manager = buildManager(events, storage = storage, cleaning = PhotoStorage.RemoveResult.Failed.pure[IO], readResult = reading)
+        val manager = buildManager(events, storage = storage, cleaning = ThumbnailStorage.RemoveResult.Failed.pure[IO], readResult = reading)
         manager.refresh(chapter, original.source).flatMap: result =>
           events.get.map: recorded =>
             assertEquals(result.issues, Vector(Issue.Storage, Issue.Cleanup(stored.location)))
@@ -220,8 +220,8 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       discovery: IO[PhotoStorage.DiscoveryResult] = complete.pure[IO],
       readResult: IO[PhotoStorage.ReadResult] = read.pure[IO],
       generation: IO[PhotoThumbnailGenerator.GenerationResult] = PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO],
-      storage: IO[PhotoStorage.StoreResult] = PhotoStorage.StoreResult.Stored(stored).pure[IO],
-      cleaning: IO[PhotoStorage.RemoveResult] = PhotoStorage.RemoveResult.Removed.pure[IO],
+      storage: IO[ThumbnailStorage.StoreResult] = ThumbnailStorage.StoreResult.Stored(stored).pure[IO],
+      cleaning: IO[ThumbnailStorage.RemoveResult] = ThumbnailStorage.RemoveResult.Removed.pure[IO],
       existingPhotos: Vector[Photo] = Vector(existing),
       maybeListed: Option[IO[PhotoRepository.ListResult]] = None,
       quality: ThumbnailQuality = ThumbnailQuality.Standard,
@@ -234,9 +234,9 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       override def discoverOriginals(source: PhotoSource): IO[PhotoStorage.DiscoveryResult] = IO(assertEquals(source, original.source)) >>
         discovery
       override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] = events.update(_ :+ "read") >> readResult
-      override def storeThumbnail(location: ThumbnailLocation, value: EncodedThumbnail): IO[PhotoStorage.StoreResult] =
+      override def storeThumbnail(location: ThumbnailLocation, value: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
         IO(assertEquals(location, stored.location)) >> IO(assertEquals(value, image)) >> events.update(_ :+ "store") >> storage
-      override def removeThumbnail(location: ThumbnailLocation): IO[PhotoStorage.RemoveResult] =
+      override def removeThumbnail(location: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =
         events.update(_ :+ s"remove:${location.value}") >> cleaning
     val writePhoto  = save
     val removePhoto = remove
@@ -247,6 +247,12 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       override def save(photo: Photo): Db[PhotoRepository.WriteResult]     = Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](writePhoto(photo))
       override def remove(photo: PhotoId): Db[PhotoRepository.WriteResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](removePhoto(photo))
+      override def recordWrite(intent: PhotoWriteIntent): Db[PhotoRepository.RecordWriteResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](PhotoRepository.RecordWriteResult.Failed.pure[IO])
+      override def completeWrite(id: PhotoWriteIntentId): Db[PhotoRepository.CompleteWriteResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](PhotoRepository.CompleteWriteResult.Failed.pure[IO])
+      override def listUnfinishedWrites: Db[PhotoRepository.ListUnfinishedWritesResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.ListUnfinishedWritesResult](PhotoRepository.ListUnfinishedWritesResult.Failed.pure[IO])
     val selectedQuality = quality
     val generator       = new PhotoThumbnailGenerator[IO]:
       override def quality: ThumbnailQuality                                                   = selectedQuality
