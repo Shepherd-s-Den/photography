@@ -14,43 +14,42 @@ Save a chapter and open its workspace without waiting for directory discovery or
 
 ### Orchestration and boundaries
 
-`PhotoManager` coordinates asynchronous reconciliation, browsing and change notifications. Inject the filesystem port, metadata repository and in-memory thumbnail-generator use case once at construction.
+`PhotoManager` coordinates chapter reconciliation and inventory updates. Inject the filesystem port, metadata repository and effectful thumbnail-generator use case once at construction.
 
 | Boundary | Owns |
 | --- | --- |
 | `PhotoManager[F]` use case | Schedule/coalesce work; compare hashes/quality; decide removals/replacements; publish complete rows; coordinate cleanup and notify subscribers. |
-| `PhotoThumbnailGenerator` use case | Derive a thumbnail from supplied in-memory source content and injected quality settings; no filesystem/database access. |
-| `PhotoFileSystem[F]` port / NAS adapter | Enumerate/read originals in place; publish/read/list/delete managed thumbnails in the separate application-owned root. Original locations are read-only. |
+| `PhotoThumbnailGenerator[F]` use case | Generate from supplied in-memory content with injected quality settings; suspend Thumbnailator in `Async[F].blocking` (`IO.blocking` for IO), never on a compute thread. |
+| `PhotoFileSystem[F]` port / NAS adapter | Enumerate/read originals in place; publish/list/delete thumbnails in the separate application-owned root. Suspend filesystem IO; original locations are read-only. |
 | `PhotoRepository[F]` port / SQLite adapter | Read photo metadata; atomically insert/replace complete rows and remove references/placements; query live thumbnail references across all albums. |
-| http4s / browser adapters | Map commands, inventory, thumbnail reads and change streams to HTTP/SSE; reconcile UI inventory and fetch visible images. |
+| Existing workspace read / browser store | Load each chapter's inventory once; chapter selectors consume their collection, Synopsis/Cover combine/sort those same collections without another album-photo read. |
+| http4s delivery | Adapt commands/inventory/SSE; serve versioned thumbnail URLs from the application thumbnail root through bounded static-file delivery, independently of PhotoManager. |
 
 ```scala
 import fs2.Stream
 
 trait PhotoManager[F[_]]:
   def refresh(chapter: ChapterId): F[RefreshResult]
-  def invalidate(chapter: ChapterId): F[Unit]
   def listChapter(chapter: ChapterId): F[PhotoInventoryResult]
-  def listAlbum(album: AlbumId): F[PhotoInventoryResult]
-  def readThumbnail(photo: PhotoId, version: ThumbnailVersion): F[ThumbnailReadResult]
-  def changes(album: AlbumId): Stream[F, PhotoEvent]
+  def subscribeToChanges(album: AlbumId): Stream[F, PhotoEvent]
 
-trait PhotoThumbnailGenerator:
-  def generate(source: SourcePhoto): ThumbnailGenerationResult
+trait PhotoThumbnailGenerator[F[_]]:
+  def generate(source: SourcePhoto): F[ThumbnailGenerationResult]
+```
 
+Driven ports supply only the filesystem and metadata operations consumed by reconciliation and chapter inventory reads:
+
+```scala
 trait PhotoFileSystem[F[_]]:
   def scan(folder: SourceFolder): F[SourceScanResult]
   def readSource(folder: SourceFolder, source: RelativeLocation): F[SourceReadResult]
   def storeThumbnail(image: EncodedThumbnail): F[ThumbnailStoreResult]
-  def readThumbnail(key: ThumbnailKey): F[ThumbnailReadResult]
   def listThumbnails(): F[ThumbnailListingResult]
   def deleteThumbnail(key: ThumbnailKey): F[ThumbnailDeleteResult]
 
 trait PhotoRepository[F[_]]:
   def listChapter(chapter: ChapterId): F[PhotoListingResult]
-  def listAlbum(album: AlbumId): F[PhotoListingResult]
-  def findThumbnail(photo: PhotoId, version: ThumbnailVersion): F[ThumbnailLookupResult]
-  def referencedThumbnails(keys: Set[ThumbnailKey]): F[ReferencedThumbnailsResult]
+  def findReferencedThumbnails(keys: Set[ThumbnailKey]): F[ReferencedThumbnailsResult]
   def saveReady(directory: PhotoDirectory, photo: ReadyPhoto): F[PhotoWriteResult]
   def remove(directory: PhotoDirectory, photos: Set[PhotoId]): F[PhotoWriteResult]
 ```
@@ -60,13 +59,14 @@ Reuse plant-journal's **Thumbnailator** library for EXIF-aware resizing/JPEG enc
 | Existing seam | Changed contract |
 | --- | --- |
 | `ChapterRepository.update` | Add typed `photoReferences: PhotoReferencesChange` (`Keep` / `Clear`); one transaction commits chapter metadata/countries/order and, for Clear, deletes its photo/placement references while preserving slots. |
-| `ChapterManager` | Inject PhotoManager; decide Clear only for a changed source folder. While holding the chapter-mutation lock, invalidate old workers and commit the supplied update; release before calling refresh. |
-| `PhotoManager.invalidate` | Called with the chapter-mutation lock already held; invalidates tokens, marks old work canceled and notifies without reacquiring that lock. Failed chapter writes retain the old folder/photos; Refresh can restart canceled work. |
-| `PhotoManager.refresh` | Acquire that same lock to read the current directory and register/coalesce work; release before scanning. Creation calls refresh only after committing and releasing its lock. |
+| `ChapterManager` | Decide Clear only for a changed source folder; commit under the shared chapter lock, then advance its runtime epoch and mark old work superseded. Release before refresh; never await worker termination. |
+| Internal coordination | ChapterManager and PhotoManager share application-lifetime coordination state and the existing chapter lock. Folder epochs/worker tokens reject A-to-B-to-A results; failed writes leave the epoch unchanged. No public invalidation use case. |
+| `PhotoManager.refresh` | Under the same lock, read the current directory/epoch and register/coalesce work; release before scanning. Repositories commit supplied decisions; workers hold the lock through epoch validation and writes. |
+| `AlbumWorkspaceManager.get` | Include `PhotoManager.listChapter` results for every chapter in the existing workspace response; the UI stores one collection per chapter. A failed inventory is explicit, never an empty-success replacement. |
 
 ### Creation / Refresh sequence
 
-Chapter creation and explicit Refresh invoke the same `PhotoManager.refresh`. Folder saves schedule it after invalidating old work; Synopsis/Cover Refresh invokes it for every chapter.
+Chapter creation and explicit Refresh invoke the same `PhotoManager.refresh`. Folder changes schedule it after commit; Synopsis/Cover Refresh invokes it for every chapter.
 
 ```mermaid
 sequenceDiagram
@@ -98,9 +98,9 @@ sequenceDiagram
     U->>B: Save chapter details
     B->>H: Update chapter folder
     H->>C: Update chapter
-    Note over C,R: Hold chapter-mutation lock through invalidation and write
-    C->>M: invalidate(chapter), no nested lock
+    Note over C,R: Hold chapter-mutation lock through write and epoch change
     C->>C: ChapterRepository.update with Clear, atomic save and photo removal
+    C->>C: Advance runtime epoch, logically supersede old work without waiting
     Note over C,M: Release chapter-mutation lock before refresh
     C->>M: refresh(chapter)
     M-->>C: Queued / Coalesced
@@ -118,7 +118,7 @@ sequenceDiagram
     M->>F: Read stable original
     F-->>M: Same read's bytes, hash and parsed metadata
     alt New photo, changed source hash or quality
-      M->>G: Generate from supplied in-memory source
+      M->>G: generate(source), suspended in Async[F].blocking
       G-->>M: Encoded thumbnail or explicit failure
       M->>F: Publish thumbnail via temporary file and atomic rename
       F-->>M: Managed key and content version
@@ -142,52 +142,55 @@ Only successful generation/storage proceeds to row publication. A failed stage r
 
 ### SSE inventory updates / lazy image delivery
 
-http4s natively encodes `fs2.Stream[F, org.http4s.ServerSentEvent]` as `text/event-stream`. The HTTP adapter translates `PhotoEvent.InventoryChanged`; the core carries no SSE wire types.
+http4s natively encodes `fs2.Stream[F, org.http4s.ServerSentEvent]` as `text/event-stream`. The adapter translates domain notifications; the core carries no SSE wire types.
 
 ```mermaid
 sequenceDiagram
   participant B as Browser workspace
   participant H as http4s adapter
   participant M as PhotoManager
+  participant W as Existing workspace use case
   participant R as Photo repository
-  participant F as Filesystem / NAS
+  participant T as Static thumbnail delivery
   B->>H: Open album SSE stream with EventSource
-  H->>M: changes(album)
-  M-->>H: Register subscriber, then initial InventoryChanged
-  H-->>B: inventory-changed
-  loop Initial signal, committed change, processing outcome or reconnect
-    B->>H: Fetch selected chapter or whole-album inventory
-    H->>M: listChapter / listAlbum
-    M->>R: Read complete photos and authoritative placed-photo IDs
-    R-->>M: Photos and placement facts
-    M-->>H: Photos, placement counts and runtime feedback
-    H-->>B: Uncached inventory
-    B->>B: Reconcile by ID and chronological order
+  H->>M: subscribeToChanges(album)
+  M-->>H: Register subscriber, then Subscribed
+  H-->>B: subscribed
+  B->>H: Existing workspace GET, initial load or reconnect catch-up
+  H->>W: get(album)
+  loop Every chapter, once per workspace snapshot
+    W->>M: listChapter(chapter)
+    M->>R: listChapter(chapter)
+    R-->>M: Complete photos and placed-photo IDs
+    M-->>W: Photo locations, counts and runtime feedback
   end
-  Note over B,F: Image requests are independent of SSE and generation
-  B->>H: GET versioned thumbnail near viewport
-  H->>M: readThumbnail(photo, version)
-  M->>R: findThumbnail(photo, version)
-  alt Photo exists and version matches
-    R-->>M: Found managed thumbnail key
-    M->>F: Read managed thumbnail
-    F-->>M: JPEG bytes
-    M-->>H: JPEG bytes
-    H-->>B: Immutable cacheable image
-  else Photo missing or version differs
-    R-->>M: NotFound
-    M-->>H: NotFound, no filesystem read
-    H-->>B: 404, refresh stale inventory
+  W-->>H: Workspace with chapter inventories
+  H-->>B: Workspace with URL-mapped chapter inventories
+  B->>B: Replace canonical chapter collections
+  loop Committed photo change or processing-state change
+    M-->>H: InventoryChanged(chapter)
+    H-->>B: inventory-changed with chapter ID
+    B->>H: GET that chapter's photo inventory
+    H->>M: listChapter(chapter)
+    M->>R: listChapter(chapter)
+    R-->>M: Complete photos and placed-photo IDs
+    M-->>H: Current chapter inventory
+    H-->>B: Chapter inventory with URL-mapped thumbnails
+    B->>B: Update only that chapter's collection
+    B->>B: Derive selected chapter or combined Synopsis/Cover view
   end
+  Note over B,T: Image requests use supplied URLs, not another photo lookup
+  B->>T: GET versioned thumbnail URL near viewport
+  T-->>B: Immutable cacheable JPEG from thumbnail root
 ```
 
 | SSE contract | Guarantee |
 | --- | --- |
 | Subscription | One album stream per open workspace, covering chapter and Synopsis/Cover selectors; close on workspace exit/album change. |
-| Signals | `InventoryChanged` invalidates inventory after committed insert/update/removal or runtime processing-state changes, including failures and completion. |
-| Catch-up | Register before emitting the initial invalidation on every connection. Reconnection fetches current inventory; no durable event log or replay is required. |
-| Coalescing | Bounded pending invalidation per subscriber; slow clients never block imports. Completion/failure remains visible in authoritative runtime feedback. |
-| Client requests | Serialize/coalesce inventory fetches; an event during a fetch schedules another fetch. Discard responses from superseded selections; preserve selection, focus and scroll. |
+| Signals | `InventoryChanged(chapter)` follows committed insert/update/removal or processing-state changes, including failures/completion. Subscription scope is album-wide; photo ownership and updates stay chapter-specific. |
+| Catch-up | Register before emitting `Subscribed`; fetch the existing workspace once on initial connection/reconnect, not a second album-photo API. Buffer chapter invalidations arriving during that fetch, then reread affected chapters. |
+| Coalescing | Coalesce pending chapter IDs per subscriber, bounded by the album's chapter set; slow clients never block processing. Outcomes remain visible in authoritative runtime feedback. |
+| Client requests | Serialize/coalesce reads per chapter; an event during a read schedules another. Update chapter collections even when not selected; reject older responses and superseded-album responses, preserving focus/scroll. |
 | Disconnect | Show interrupted live-update feedback; `EventSource` reconnects. A stream interruption never declares processing complete or starts reconciliation. |
 | Transport | HTTP/1.1 or HTTP/2; uncached SSE, heartbeat comments, proxy buffering disabled and long-lived-response timeouts configured. Thumbnail bytes never travel over SSE. |
 
@@ -276,9 +279,11 @@ Production mounts originals read-only and the thumbnail root read/write on the N
 
 Refresh regenerates when source bytes or configured quality differ; ordinary opens retain completed images. Presets never create parallel published variants.
 
-Use content/version-specific thumbnail URLs with `Cache-Control: private, max-age=31536000, immutable`; changed output receives a new URL. Inventory/status responses remain uncached.
+Use immutable content-versioned file keys/URLs with `Cache-Control: private, max-age=31536000, immutable`; changed output receives a new key/URL. Inventory/status responses remain uncached.
 
-The browser fetches thumbnails near the viewport rather than all album images eagerly. Preset ceilings bound transfer size; pixel ceilings bound decoded-image size.
+Inventories include versioned application thumbnail URLs, never NAS/original paths. http4s static-file delivery serves only the thumbnail root, rejects traversal/symlink escapes and needs no photo-ID lookup or generator call.
+
+The browser fetches those URLs near the viewport. Missing files return 404, read failures remain explicit; neither starts processing. Preset byte/pixel ceilings bound transfer and decoded-image size.
 
 ### Domain and result contracts
 
@@ -292,23 +297,22 @@ The browser fetches thumbnails near the viewport rather than all album images ea
 | `PhotoReferencesChange` | Supplied chapter-write decision: Keep / Clear; use case decides whether the source folder changed, persistence atomically applies it. |
 | `UnsupportedCount` | Nonnegative count of unsupported files in a complete scan. |
 | `RefreshResult` | Queued / Coalesced / ChapterNotFound / Failed; acceptance means scheduled, not completed. |
-| `PhotoEvent` | Closed `InventoryChanged` signal; subscribers read current inventory/activity rather than reconstructing state from event payloads. |
-| `PhotoListingResult` | Found: saved directories, complete photos and placed-photo IDs derived from authoritative spread/cover placements in the requested chapter/album; or NotFound / Failed. |
-| `PhotoInventoryResult` | Found: listing, placement-derived counts and transient discovery/processing/error feedback; or NotFound / Failed. |
-| `ThumbnailLookupResult` | Found: managed key for the photo's current version; or NotFound for absent photo/version mismatch / Failed. Lookup failure forbids filesystem access and is not translated to NotFound. |
+| `PhotoEvent` | `Subscribed` / `InventoryChanged(chapter: ChapterId)`; notifications trigger authoritative reads, not reconstruction from event history. |
+| `PhotoListingResult` | Found: saved directory, complete photos and placed-photo IDs from authoritative spread/cover placements for that chapter; or NotFound / Failed. |
+| `PhotoInventoryResult` | Found: photos with versioned thumbnail locations, placement-derived counts and transient work/error feedback; or NotFound / Failed. HTTP maps managed locations to application URLs. |
 | `SourceScanResult` | Complete: candidate paths and unsupported count; or Failed. Partial enumeration is never Complete. |
 | `SourceReadResult` | Read: `SourcePhoto`; or Undecodable / Unstable / Failed. Invalid EXIF dates produce a Read with absent capture time. |
 | `ThumbnailGenerationResult` | Generated: `EncodedThumbnail`; or Failed. Encoding failure is not an undecodable-source skip. |
-| `ThumbnailStoreResult` / `ThumbnailReadResult` | Stored: key/version / Read: JPEG bytes; or Failed. Reads also distinguish NotFound. |
+| `ThumbnailStoreResult` | Stored: managed key/version; or Failed. |
 | `ThumbnailListingResult` / `ThumbnailDeleteResult` | Listed keys / Deleted or AlreadyAbsent; both distinguish Failed. |
 | `ReferencedThumbnailsResult` | Found: requested keys referenced anywhere in the database, across all albums; or Failed, which forbids cleanup deletion. |
 | `PhotoWriteResult` | Saved / Superseded / ChapterNotFound / Failed; stale-folder writes never change current references. |
 
 ### Concurrency and failure boundaries
 
-Per-directory runtime worker tokens reject superseded work. Folder saves invalidate tokens under the shared chapter-mutation lock, including an A-to-B-to-A change.
+Folder saves advance runtime epochs under the shared chapter-mutation lock, rejecting A-to-B-to-A results. Supersession only changes runtime state; it never waits for a worker.
 
-Before each persistence mutation, hold that lock through token validation and the atomic write. Scans, hashing and encoding run outside it; callbacks cannot revive canceled work.
+Hold that lock through epoch validation and each atomic write. Scans/encoding run outside it; application-owned supervision handles physical termination/finalization without delaying saves or holding the chapter lock.
 
 Inventory counts derive from returned complete photos and placed-photo IDs; no stored unplaced flag or duplicated placement state. The repository reads placement facts, not placement policy.
 
@@ -318,16 +322,7 @@ SQLite and NAS have no shared transaction: store the file before committing its 
 
 A crash after commit retains a complete photo. Before commit, a new photo has no row and an edited photo keeps its old row; the next Refresh retries and cleans unused files.
 
-| Event | Result |
-| --- | --- |
-| Folder change | Save the folder and clear previous references/placements atomically; invalidate old workers and schedule discovery without blocking on it. |
-| Refresh / Retry | Start current-folder work; running imports publish ready photos progressively. |
-| Complete enumeration | Remove absent references/placements; an empty directory succeeds. |
-| Enumeration failure | Preserve previous references; report retryable failure, never an inferred empty folder. |
-| Decode failure / unstable read | Skip replacement; keep a prior completed version, if any; no per-photo UI, at most a backend warning. |
-| Overlapping requests | Coalesce per chapter; old-folder results cannot publish after a folder change. |
-| Ordinary open / restart | Show completed photos immediately; refresh inventory through SSE, and rerun interrupted processing only on explicit Refresh. |
-| Thumbnail replaced / reference removed | Delete unused thumbnails; protect live references and active imports; warn and retry failed cleanup on the next import. |
+Only complete enumeration permits absence deletion; failed enumeration preserves photos. Undecodable/unstable files skip replacement, retaining any previous version; cleanup failures warn and retry on the next Refresh.
 
 The spike's adapter is disposable evidence. Production scheduling, SSE, concurrency and cleanup are specified contracts, not claimed spike implementations.
 
@@ -336,7 +331,7 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | ID | Observable outcome |
 | --- | --- |
 | I1 | Creation succeeds before a slow 200-file discovery unblocks; later discovery failure preserves the chapter, and work needs no browser request. |
-| I2 | Folder save/clearing commit atomically or roll back together; release the chapter lock before scheduling, and return without waiting for scanning/image work. |
+| I2 | Folder save/clearing commit atomically or roll back together; release the lock before scheduling, without waiting for old/new scanning or image work. |
 | I3 | Import immediate-folder JPEGs; count unsupported files and reject symlinks. |
 | I4 | Skip undecodable JPEGs without per-photo UI; continue remaining files. |
 | I5 | Each new photo appears only after its complete row/thumbnail commit; earlier photos are browsable while others are processing. |
@@ -355,8 +350,9 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | T5 | Environment overrides flow through HOCON/PureConfig; invalid settings fail startup, and unset quality selects Standard. |
 | T6 | Quality changes regenerate on Refresh without changing photo identity/placement or publishing multiple variants. |
 | T7 | Near-viewport loading and immutable version URLs permit cached reuse; changed thumbnails cannot reuse stale content URLs. |
-| T8 | Thumbnail reads resolve photo/version through metadata before NAS access; missing/mismatched versions return NotFound, while lookup/storage failures remain explicit. |
-| S1 | An album SSE subscription signals committed inventory changes and processing outcomes, including failures, without polling. |
+| T8 | Supplied thumbnail URLs serve only managed files without photo lookup or generation; missing files return 404, and traversal/symlink escapes cannot expose originals. |
+| T9 | Thumbnail generation is suspended in F's blocking facility; while a generation call is blocked, unrelated compute-fiber work remains responsive. |
+| S1 | One album SSE subscription identifies changed chapters and processing outcomes; UI updates each chapter collection and derives Synopsis/Cover without a separate album-photo read. |
 | S2 | Initial connection/reconnection and changes during an inventory fetch converge to current inventory without missed updates or stale-selection responses. |
 | S3 | Slow/disconnected subscribers never block processing; bounded notifications, disconnect feedback and stream teardown prevent unbounded work or leaked subscriptions. |
 | P1 | Collapsible left selectors show chapter photos on chapter spreads and all chapters' photos on Synopsis/Cover. |
@@ -389,5 +385,5 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | `specs/design.md` | Album workflow | Chapter-owned photos shown chapter-locally or across all chapters on Synopsis/Cover, accessible controls and grouped spread navigation. |
 | `specs/design.md` | Values | JPEG eligibility, stable chapter/source identity, camera-local ordering and one orientation-correct, uncropped, non-upscaled thumbnail with preset resolution/byte ceilings. |
 | `specs/design.md` | Placements and gear | PhotoManager coordinates creation/Refresh processing through filesystem/metadata ports and Thumbnailator generation; complete-row publication, hash freshness, explicit restart retry and source-authoritative removal. |
-| `specs/design.md` | Architecture constraints | REST commands/inventory/images plus http4s SSE invalidations; reconnect fetches authoritative inventory, independently of lazy thumbnail delivery. |
+| `specs/design.md` | Architecture constraints | Effectful blocking thumbnail generation; initial workspace chapter inventories, chapter-addressed http4s SSE catch-up and derived album views, independently of lazy static thumbnail delivery. |
 | `specs/operational.md` | Production deployment | NAS read-only original/read-write application-thumbnail mounts, quality/root configuration, Refresh after interruption, unused-thumbnail cleanup and unbuffered heartbeat-capable SSE proxy configuration. |

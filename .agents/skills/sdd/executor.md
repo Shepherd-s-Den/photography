@@ -20,13 +20,13 @@ For a feature, wait until the user has run the local spike and confirmed the int
 
 Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec for density; derive current facts from living docs and confirmed findings.
 
-**Technical contract first.** Make the feature's mechanism the core of `Domain / Design Notes`: concrete use cases, orchestration, consumed ports, domain/persistence changes and sequence diagrams.
+**Technical contract first: caller-first APIs.** Start with a concrete trigger-to-UI sequence; derive the smallest application API from real callers' available inputs and consumed results. Distinguish use cases from driven ports.
 
-Show each trigger, the orchestrating use case and its injected collaborators, boundary calls/results, asynchronous acknowledgments, publication order and failure paths. Include UI delivery/reconnection when background work changes visible state.
+Keep coordination inside its owner and derive views from already available data. Before adding a method, try an existing boundary or local derivation; retain it only when a caller needs a distinct responsibility.
 
-Use compact Scala signatures/types, SQLite constraints and sequence diagrams where they settle an actual contract. Verify named library/framework capabilities against source; explain dependencies by the capability they provide.
+Show orchestration, injected collaborators, changed domain/schema contracts, asynchronous acknowledgments, publication/failure order and UI delivery. Use compact signatures and sequence diagrams; source-verify named dependencies and their effect/runtime requirements.
 
-The section is complete when a reader can trace every trigger through effects and committed state to the UI without inventing a missing owner or transition. Add prose only for guarantees the technical contracts leave ambiguous.
+Walk the scenario through the signatures in both directions: every call has its inputs/result, and every public method has a necessary caller. Apply repository naming/effect conventions; add prose only for guarantees the contracts leave ambiguous.
 
 Keep concrete adapter internals, file layouts and slice execution notes in ignored work evidence; the single proposal owns the agreed technical contracts.
 
