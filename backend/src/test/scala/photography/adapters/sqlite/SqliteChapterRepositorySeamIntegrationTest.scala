@@ -33,6 +33,25 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     (SELECT count(*) FROM destination_country) + (SELECT count(*) FROM spread) +
     (SELECT count(*) FROM spread_photo_slot) + (SELECT count(*) FROM spread_text_slot)""".query[Long].unique
 
+  test("should reject unknown countries explicitly without changing the saved chapter or creating partial rows"):
+    buildTransactor.use: xa =>
+      val chapters = SqliteChapterRepository.make[IO](xa)
+      val unknown  = NonEmptyList.one(CountryId(new UUID(9L, 99L)))
+
+      for
+        _       <- seedAlbum(xa)
+        first   <- buildChapter(xa, index = 1)
+        second  <- buildChapter(xa, index = 2)
+        _       <- chapters.create(albumId, first, NonEmptyList.one(first.id))
+        before  <- countRows.transact(xa)
+        created <- chapters.create(albumId, second.copy(countries = unknown), NonEmptyList.of(first.id, second.id))
+        updated <- chapters.update(albumId, first.id, first.name, unknown, period, first.sourceFolder, NonEmptyList.one(first.id))
+        after   <- countRows.transact(xa)
+      yield
+        assertEquals(created, ChapterRepository.CreateResult.UnknownCountries)
+        assertEquals(updated, ChapterRepository.UpdateResult.UnknownCountries)
+        assertEquals(after, before)
+
   test("should persist complete openings and supplied order, isolate shared destinations and preserve description and composition on metadata edits"):
     buildTransactor.use: xa =>
       val albums                   = SqliteAlbumRepository.make[IO](xa)
@@ -111,7 +130,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(counted, rows)
     }
 
-  test("should reject incomplete openings, invalid orders, foreign countries and duplicate identities without partial writes"):
+  test("should reject incomplete openings, invalid orders and duplicate identities without partial writes"):
     buildTransactor.use: xa =>
       val chapters = SqliteChapterRepository.make[IO](xa)
 
@@ -122,7 +141,6 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           second.copy(opening = second.opening.copy(textSlot = mismatchedText))                   -> NonEmptyList.of(first.id, second.id),
           second                                                                                  -> NonEmptyList.one(second.id),
           second                                                                                  -> NonEmptyList.of(first.id, first.id, second.id),
-          second.copy(countries = NonEmptyList.one(CountryId(new UUID(9L, 99L))))                 -> NonEmptyList.of(first.id, second.id),
           first                                                                                   -> NonEmptyList.one(first.id)
         )
 

@@ -1,7 +1,7 @@
 package photography.usecases
 
 import cats.data.NonEmptyList
-import cats.effect.IO
+import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import munit.CatsEffectSuite
@@ -12,7 +12,7 @@ import photography.usecases.AlbumManager.*
 import photography.usecases.AlbumWorkspaceManager.GetResult
 
 import java.nio.file.Path
-import java.time.Instant
+import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
@@ -30,12 +30,52 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
   private val countries = NonEmptyList.one(
     Country(CountryId(new UUID(0L, 5L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
   )
+  private val chapter =
+    val opening = Spread.ChapterStart(
+      SpreadId(new UUID(0L, 7L)),
+      album.opening.template,
+      photoSlots = Vector.empty[SpreadSlot.Photo],
+      album.opening.textSlot,
+      placements = Vector.empty[SpreadPlacement]
+    )
+    Chapter(
+      ChapterId(new UUID(0L, 6L)),
+      Destination(DestinationId(new UUID(0L, 8L)), name = "Coast", countries),
+      VisitPeriod(LocalDate.of(2026, 1, 1), days = 1),
+      description = "",
+      sourceFolder = "/photos/coast",
+      opening,
+      spreads = Vector.empty[Spread.PhotosOnly]
+    )
+  private val emptyInventory = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty)
 
   test("should assemble the complete album and selectable countries with the configured photo root"):
     val manager  = buildManager(GetAlbumResult.Found(album), CountryRepository.ListResult.Listed(countries))
-    val expected = GetResult.Found(album, countries, photoRoot = "/photos")
+    val expected = GetResult.Found(album, countries, photoRoot = "/photos", photoInventories = Map.empty[ChapterId, PhotoInventory.Inventory])
 
     manager.get(album.id).map(result => assertEquals(result, expected))
+
+  test("should load each chapter inventory once and preserve explicit inventory failures"):
+    val other    = chapter.copy(id = ChapterId(new UUID(0L, 9L)), sourceFolder = "/photos/other")
+    val current  = album.copy(chapters = Vector(chapter, other))
+    val expected =
+      GetResult.Found(current, countries, photoRoot = "/photos", photoInventories = Map(chapter.id -> emptyInventory, other.id -> emptyInventory))
+    val failedRead = buildManager(
+      GetAlbumResult.Found(current),
+      CountryRepository.ListResult.Listed(countries),
+      inventory = _ => PhotoInventory.ListResult.Failed.pure[IO]
+    ).get(album.id)
+
+    for
+      reads <- Ref.of[IO, Vector[ChapterId]](Vector.empty)
+      photos = (id: ChapterId) => reads.update(_ :+ id).as(PhotoInventory.ListResult.Listed(emptyInventory))
+      result <- buildManager(GetAlbumResult.Found(current), CountryRepository.ListResult.Listed(countries), photos).get(album.id)
+      actual <- reads.get
+      failed <- failedRead
+    yield
+      assertEquals(result, expected)
+      assertEquals(actual, Vector(chapter.id, other.id))
+      assertEquals(failed, GetResult.Failed)
 
   test("should preserve missing albums and propagate album or catalog failures"):
     val scenarios = Vector(
@@ -48,7 +88,13 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       buildManager(albumResult, countryResult).get(album.id).map(result => assertEquals(result, expected))
     }
 
-  private def buildManager(albumResult: GetAlbumResult, countryResult: CountryRepository.ListResult) =
+  // scalafix:off DisableSyntax.defaultArgs
+  private def buildManager(
+      albumResult: GetAlbumResult,
+      countryResult: CountryRepository.ListResult,
+      inventory: ChapterId => IO[PhotoInventory.ListResult] =
+        _ => IO.raiseError[PhotoInventory.ListResult](new AssertionError("Unexpected inventory read"))
+  ) =
     val albums = new AlbumManager[IO]:
       override def get(id: AlbumId): IO[GetAlbumResult]                              = albumResult.pure[IO]
       override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
@@ -57,4 +103,7 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
     val catalog = new CountryRepository[IO]:
       override def list: IO[CountryRepository.ListResult] = countryResult.pure[IO]
-    AlbumWorkspaceManager.make(albums, catalog, photoRoot = "/photos")
+    val photos = new PhotoInventory[IO]:
+      override def listChapter(id: ChapterId): IO[PhotoInventory.ListResult] = inventory(id)
+    AlbumWorkspaceManager.make(albums, catalog, photos, photoRoot = "/photos")
+  // scalafix:on DisableSyntax.defaultArgs

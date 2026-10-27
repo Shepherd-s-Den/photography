@@ -32,8 +32,8 @@ object ChapterRepository:
 
   enum CreateResult:
     case Saved
-    case AlbumNotFound, Failed
+    case AlbumNotFound, UnknownCountries, Failed
 
   enum UpdateResult:
     case Saved
-    case ChapterNotFound, AlbumNotFound, Failed
+    case ChapterNotFound, AlbumNotFound, UnknownCountries, Failed

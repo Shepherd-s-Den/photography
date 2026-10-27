@@ -16,19 +16,22 @@ import photography.usecases.{AlbumManager, AlbumWorkspaceManager, ChapterManager
 import photography.usecases.AlbumManager.*
 import photography.usecases.AlbumWorkspaceManager.GetResult
 import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.ChapterPhotoImport.Scheduling
+import photography.usecases.PhotoInventory
 
 import java.nio.file.Path
 import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
-  private val country      = Country(CountryId(new UUID(0L, 8L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
-  private val otherCountry = country.copy(id = CountryId(new UUID(0L, 9L)), code = "JP", name = "Japan")
-  private val box          = SlotBox(x = 10.0, y = 20.0, width = 30.0, height = 40.0)
-  private val text         = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 6L)), box)
-  private val photo        = SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(0L, 7L)), box, bleed = Set.empty)
-  private val template     = SpreadTemplateId(new UUID(0L, 4L))
-  private val chapter      =
+  private val emptyInventories = Map.empty[ChapterId, PhotoInventory.Inventory]
+  private val country          = Country(CountryId(new UUID(0L, 8L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
+  private val otherCountry     = country.copy(id = CountryId(new UUID(0L, 9L)), code = "JP", name = "Japan")
+  private val box              = SlotBox(x = 10.0, y = 20.0, width = 30.0, height = 40.0)
+  private val text             = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 6L)), box)
+  private val photo            = SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(0L, 7L)), box, bleed = Set.empty)
+  private val template         = SpreadTemplateId(new UUID(0L, 4L))
+  private val chapter          =
     val destination = Destination(DestinationId(new UUID(0L, 10L)), name = "Coast", NonEmptyList.one(country))
     val opening     = Spread.ChapterStart(SpreadId(new UUID(0L, 3L)), template, Vector(photo), text, placements = Vector.empty[SpreadPlacement])
     val photos      = Spread.PhotosOnly(SpreadId(new UUID(0L, 5L)), template, NonEmptyList.one(photo), placements = Vector.empty[SpreadPlacement])
@@ -77,8 +80,16 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     )
     val emptyAlbum  = album.copy(chapters = Vector.empty[Chapter])
     val homeAlbum   = album.copy(chapters = Vector(homeChapter))
-    val emptyServer = buildApi(Refs(), workspaceResult = GetResult.Found(emptyAlbum, NonEmptyList.one(country), photoRoot = "/custom"))
-    val homeServer  = buildApi(Refs(), workspaceResult = GetResult.Found(homeAlbum, NonEmptyList.one(country), photoRoot = "/photos"))
+    val emptyServer =
+      buildApi(
+        Refs(),
+        workspaceResult = GetResult.Found(emptyAlbum, NonEmptyList.one(country), photoRoot = "/custom", photoInventories = emptyInventories)
+      )
+    val homeServer =
+      buildApi(
+        Refs(),
+        workspaceResult = GetResult.Found(homeAlbum, NonEmptyList.one(country), photoRoot = "/photos", photoInventories = emptyInventories)
+      )
 
     for
       empty     <- send(emptyServer, Method.GET, s"$albumPath/workspace")
@@ -243,10 +254,11 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
   // scalafix:off DisableSyntax.defaultArgs
   private def buildApi(
       refs: Refs,
-      workspaceResult: GetResult = GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos"),
+      workspaceResult: GetResult =
+        GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos", photoInventories = emptyInventories),
       albumResult: GetAlbumResult = GetAlbumResult.Found(album),
-      createResult: CreateResult = CreateResult.Created(chapter.id),
-      updateResult: UpdateResult = UpdateResult.Updated
+      createResult: CreateResult = CreateResult.Created(chapter.id, Scheduling.Queued),
+      updateResult: UpdateResult = UpdateResult.Updated(Scheduling.NotRequested)
   ) =
     val workspaces = new AlbumWorkspaceManager[IO]:
       override def get(id: AlbumId): IO[GetResult] = workspaceResult.pure[IO]
@@ -257,6 +269,8 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
     val chapters = new ChapterManager[IO]:
+      override def refresh(album: AlbumId, chapter: ChapterId): IO[ChapterManager.RefreshResult] =
+        IO.raiseError[ChapterManager.RefreshResult](new AssertionError("Unexpected photo Refresh"))
       override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: PhotoSource) =
         refs.calls.update(_ :+ s"create:${id.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}").as(createResult)
       override def update(
