@@ -18,14 +18,11 @@ exploration was needed — never a bare assertion like "already understood." -->
 
 ## What & Why
 
-<!-- Current behavior → new behavior and why, at behavior/intent/domain-contract altitude.
-Avoid code structure and diff walkthroughs; name a tool only when it is part of the agreed
-behavior. -->
+<!-- Current behavior → new behavior and why, in one concise statement. -->
 
 ## Domain / Design Notes
 
-<!-- Include when domain, persisted-data, or boundary contracts change. State the guarantees
-and who enforces them; name constraint mechanisms when that makes the contract testable. -->
+<!-- Follow executor.md's Technical contract first rule and completion criterion. -->
 
 ## Alternatives Considered
 

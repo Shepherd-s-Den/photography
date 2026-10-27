@@ -18,12 +18,22 @@ Follow the Spike workflow in [`SKILL.md`](SKILL.md). This file adds no separate 
 
 For a feature, wait until the user has run the local spike and confirmed the intended behavior before preparing or finalizing the proposal. Carry that confirmed behavior into the spec; a review pass over an unconfirmed draft does not satisfy the Spec PR gate.
 
-Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec when one exists; otherwise use the template and `spec-quality.md` for altitude and density. When a spike preceded this phase, ground `Domain / Design Notes` and `Alternatives Considered` in its findings.
+Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent spec for density; derive current facts from living docs and confirmed findings.
+
+**Technical contract first: caller-first APIs.** Start with a concrete trigger-to-UI sequence; derive the smallest application API from real callers' available inputs and consumed results. Distinguish use cases from driven ports.
+
+Keep coordination inside its owner and derive views from already available data. Before adding a method, try an existing boundary or local derivation; retain it only when a caller needs a distinct responsibility.
+
+Show orchestration, injected collaborators, changed domain/schema contracts, asynchronous acknowledgments, publication/failure order and UI delivery. Use compact signatures and sequence diagrams; source-verify named dependencies and their effect/runtime requirements.
+
+Walk scenarios through every signature and parameter using reviewer.md's seam-definition evidence: prove necessity, not just a possible caller. Apply stack-specific API/type/effect conventions to spec sketches too; add prose only for guarantees contracts leave ambiguous.
+
+Keep concrete adapter internals, file layouts and slice execution notes in ignored work evidence; the single proposal owns the agreed technical contracts.
 
 - **Feature:** current → new behavior, acceptance criteria, invariants, tradeoffs, Doc Sync.
 - **Investigation:** hypotheses and evidence for/against each, narrowing to a proven root cause — the spec's `What & Why` ends up stating that root cause and the hypotheses it ruled out.
 
-Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then satisfy `SKILL.md`'s PR-opening gate before opening the Spec PR — the proposal and planning artifacts only, no production code. Do not start implementation until it is reviewed and merged.
+Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then satisfy `SKILL.md`'s PR-opening gate before publishing the proposal. Execution notes remain ignored; implementation starts only after the Spec PR is reviewed and merged.
 
 ## Tests
 

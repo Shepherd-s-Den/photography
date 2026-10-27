@@ -5,11 +5,11 @@ Gate for the Spec PR. First verify against `CONTRIBUTING.md` §Documentation sty
 - [ ] Classification (`feature`/`investigation`) is recorded and the branch name matches it.
 - [ ] Sections have distinct purposes. Avoid restating facts, but keep useful context where readers need it.
 - [ ] `What & Why` and `Acceptance Criteria` are non-empty. `Doc Sync` is present and lists necessary changes or says `None`.
-- [ ] Stays at behavior/contract altitude: avoid code structure and diff walkthroughs. Name a tool, path, or storage mechanism when it is part of the agreed behavior or points to an authoritative artifact.
-- [ ] `Domain / Design Notes` covers changed domain, persisted-data, or boundary contracts.
+- [ ] `Domain / Design Notes` satisfies executor.md's **Technical contract first** completion criterion: trace every trigger through its orchestrator, consumed ports, committed state and UI delivery.
+- [ ] Every signature/parameter passes reviewer.md's seam-definition check and applicable stack conventions; diagrams/results close normal and failed flows. Verify database guarantees and named dependencies against actual sources; keep adapter internals and execution notes local.
 - [ ] The active model and living docs are authoritative. Treat archived proposals as history unless a living source designates them as current.
 - [ ] `Grounded in` names concrete spike findings or a specific reason exploration was unnecessary.
-- [ ] Draft structure first (diagrams/tables for relevant flows and contracts); add only prose that clarifies it.
+- [ ] Draft the mechanism first; each diagram/table resolves a flow or contract question, and prose clarifies remaining guarantees.
 - [ ] Run `python3 .agents/skills/sdd/scripts/check_markdown_wrapping.py` on the proposal and every changed Markdown file; any source-wrapping failure blocks review.
 - [ ] Prose paragraphs and list items are at most two rendered lines; inspect the rendered proposal and block longer items.
 - [ ] Acceptance criteria are short, observable, and testable. Keep each item to one behavior and include relevant failure and boundary cases.
