@@ -24,24 +24,42 @@ flowchart LR
   AlbumSelector --> Photo
 ```
 
-### Persisted contracts
+### Single photo table
 
-| Record | SQLite enforcement | Application contract |
-| --- | --- | --- |
-| Photo | Primary key; chapter foreign key; unique chapter/source | Discover references independently of thumbnail completion; preserve identity across same-path edits. |
-| Thumbnail metadata | Positive dimensions and bytes in `1..300000` via `CHECK`; ready fields all present or all absent via explicit null checks | Publish only after the thumbnail exists; never store copies of originals. |
-| Placement | Photo foreign key with cascading deletion | Remove references on confirmed source deletion; preserve empty slots and their geometry. |
+Each row describes a fully parsed photo and its successfully stored thumbnail. Discovery/encoding alone inserts nothing; processing failures create no partial rows or broken-image placeholders.
 
-| Photo metadata | Persisted fields |
-| --- | --- |
-| Original reference | `chapter_id`, relative `source`, latest observed `source_hash`, local capture time, source dimensions. |
-| Completed thumbnail | Optional key/version, `thumbnail_source_hash`, dimensions, bytes and quality; all thumbnail fields present together or absent together. |
+```sql
+CREATE TABLE photo (
+  id TEXT PRIMARY KEY NOT NULL,
+  chapter_id TEXT NOT NULL REFERENCES chapter (id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  source_hash TEXT NOT NULL,
+  captured_local TEXT,
+  captured_at_ms INTEGER,
+  width INTEGER NOT NULL CHECK (width > 0),
+  height INTEGER NOT NULL CHECK (height > 0),
+  thumbnail TEXT NOT NULL,
+  thumbnail_version TEXT NOT NULL,
+  thumbnail_width INTEGER NOT NULL CHECK (thumbnail_width > 0),
+  thumbnail_height INTEGER NOT NULL CHECK (thumbnail_height > 0),
+  thumbnail_quality TEXT NOT NULL
+    CHECK (thumbnail_quality IN ('low', 'standard', 'high')),
+  thumbnail_bytes INTEGER NOT NULL CHECK (thumbnail_bytes BETWEEN 1 AND
+    CASE thumbnail_quality
+      WHEN 'low' THEN 75000 WHEN 'standard' THEN 150000 WHEN 'high' THEN 300000
+    END),
+  caption TEXT,
+  UNIQUE (chapter_id, source)
+) STRICT;
+```
 
-SQLite stores references/metadata; NAS files store image bytes. Chapters have no imported flag or persisted processing lifecycle; progress/errors/unsupported counts describe current runtime work.
+`source` is relative to the chapter's directory; `thumbnail` is the managed NAS file key. `source_hash` identifies the original bytes used for this row and thumbnail.
 
-A missing thumbnail needs generation; a differing source hash or selected quality needs replacement. Keep the last completed thumbnail usable until its replacement commits.
+`thumbnail_version` identifies encoded JPEG content for immutable URLs. Image bytes live on the NAS, never in SQLite; no separate thumbnail table or chapter-import lifecycle exists.
 
-Refresh hashes every JPEG's stable content, including unchanged filenames/timestamps/sizes. Regenerate on a different hash, preserving photo ID and placement.
+Refresh compares each stable read's hash/selected quality with the completed row. For replacements, keep the old row/image unchanged until one atomic update publishes all new metadata.
+
+New photos insert only after the thumbnail file exists. Same-path replacements retain photo ID/caption/placement; existing photo foreign keys cascade placement deletion without deleting slots.
 
 Capture time uses nullable fixed-width ISO local date/time text with nine fractional digits; source/SQLite adapters validate representations and preserve chronological ordering.
 
@@ -61,7 +79,7 @@ enum ThumbnailQuality:
 | Source | Immediate regular JPEG files (`.jpg`/`.jpeg`, case-insensitive); no recursion or symlink imports. |
 | Thumbnail | One orientation-correct, uncropped JPEG; no upscale; selected quality sets resolution/byte ceilings, not target file size. |
 | Ownership | Every photo belongs to exactly one chapter. Synopsis/Cover list all chapters' photos without changing ownership; chapter spreads list their chapter. |
-| Counts / Refresh | Counts describe discovered references; ready images appear progressively. Synopsis/Cover Refresh reconciles every chapter's directory. |
+| Counts / Refresh | Counts describe completed photo rows; images appear progressively. Synopsis/Cover Refresh reconciles every chapter's directory. |
 
 ### Thumbnail configuration and delivery
 
@@ -121,8 +139,7 @@ trait PhotoRepository[F[_]]:
   def listChapter(chapter: ChapterId): F[PhotoListingResult]
   def listAlbum(album: AlbumId): F[PhotoListingResult]
   def referencedThumbnails(keys: Set[ThumbnailKey]): F[ReferencedThumbnailsResult]
-  def saveSource(directory: PhotoDirectory, photo: DiscoveredPhoto): F[PhotoWriteResult]
-  def saveThumbnail(directory: PhotoDirectory, source: PhotoSourceVersion, thumbnail: StoredThumbnail): F[PhotoWriteResult]
+  def saveReady(directory: PhotoDirectory, photo: ReadyPhoto): F[PhotoWriteResult]
   def remove(directory: PhotoDirectory, photos: Set[PhotoId]): F[PhotoWriteResult]
 ```
 
@@ -130,13 +147,12 @@ trait PhotoRepository[F[_]]:
 | --- | --- |
 | `PhotoDirectory` | Chapter ID and saved source folder; persistence mutations check that the chapter still references that folder. |
 | `SourcePhoto` | One stable read's content, hash, dimensions and optional local capture time; the encoder consumes that content, never rereads the path. |
-| `DiscoveredPhoto` / `PhotoSourceVersion` | Chapter-owned identity, relative path, hash, capture time and dimensions / photo ID and expected source hash. |
-| `StoredThumbnail` | Successfully stored key/version, source hash, dimensions, bytes and quality; publication checks the photo's current source hash. |
+| `ReadyPhoto` | Chapter-owned identity, relative source, source hash, capture time, source dimensions and successfully stored thumbnail metadata; one complete row. |
 | `EncodedThumbnail` | JPEG bytes and validated positive dimensions/selected-preset byte limit. |
 | `ThumbnailKey` / `ThumbnailVersion` | Managed relative file key / immutable output identifier, never original-source browser URLs. |
 | `UnsupportedCount` | Nonnegative count of unsupported files in a complete scan. |
 | `RefreshResult` / `RecoveryResult` | Queued or Coalesced / Resumed or Unchanged; both also distinguish ChapterNotFound and Failed. |
-| `PhotoListingResult` | Found: saved directories, including empty chapters, and discovered photos with optional completed thumbnails; or NotFound / Failed. |
+| `PhotoListingResult` | Found: saved directories, including empty chapters, and completed photos with required thumbnail metadata; or NotFound / Failed. |
 | `PhotoInventoryResult` | Found: listing, placement-derived counts and transient discovery/processing/error feedback; or NotFound / Failed. |
 | `SourceScanResult` | Complete: candidate paths and unsupported count; or Failed. Partial enumeration is never Complete. |
 | `SourceReadResult` | Read: `SourcePhoto`; or Undecodable / Unstable / Failed. Invalid EXIF dates produce a Read with absent capture time. |
@@ -144,7 +160,7 @@ trait PhotoRepository[F[_]]:
 | `ThumbnailStoreResult` / `ThumbnailReadResult` | Stored: key/version / Read: JPEG bytes; or Failed. Reads also distinguish NotFound. |
 | `ThumbnailListingResult` / `ThumbnailDeleteResult` | Listed keys / Deleted or AlreadyAbsent; both distinguish Failed. |
 | `ReferencedThumbnailsResult` | Found: requested keys referenced anywhere in the database, across all albums; or Failed, which forbids cleanup deletion. |
-| `PhotoWriteResult` | Saved / Superseded / ChapterNotFound / Failed; stale folder/source writes never change current references. |
+| `PhotoWriteResult` | Saved / Superseded / ChapterNotFound / Failed; stale-folder writes never change current references. |
 
 Chapter creation saves metadata/composition and schedules photo work without waiting for enumeration, hashing, decoding or encoding, including API-only callers. The workspace opens immediately.
 
@@ -152,7 +168,7 @@ The importer owns runtime scheduling, coalescing, comparison and deletion decisi
 
 First access to each directory after backend restart schedules background reconciliation, recovering even an interrupted discovery with no photo rows. Retained thumbnails display immediately.
 
-Later opens reuse discovered references and schedule missing-thumbnail work; complete rescans require Refresh. Runtime feedback is rebuilt from current work, not a stored chapter status.
+Later opens reuse completed rows while active background work continues; failed work offers Retry and complete rescans require Refresh. Runtime feedback is not a stored chapter status.
 
 `PhotoBrowser` requests `PhotoImporter.recover` while listing, without waiting for scans; it reads repositories/thumbnail storage. HTTP consumes these use cases, never another adapter.
 
@@ -175,13 +191,12 @@ sequenceDiagram
   I->>D: Guard saved folder, remove absent references/placements
   loop Every JPEG candidate
     I->>S: Read stable content + metadata + hash
-    alt New photo or missing/stale thumbnail
-      I->>D: Guard saved folder, upsert photo reference/hash
+    alt New photo, changed source hash or quality
       I->>G: Encode same content within preset limits
       G-->>I: JPEG + dimensions + byte count
       I->>N: Write temporary file, atomically publish immutable key
       N-->>I: Stored key/version
-      I->>D: Guard folder/source hash, replace thumbnail reference
+      I->>D: Guard saved folder, atomically insert/update complete photo
     else Unchanged
       I->>I: Keep existing reference and thumbnail
     end
@@ -197,7 +212,7 @@ Cleanup lists managed keys and queries their references across all albums before
 
 SQLite and NAS have no shared transaction: store the file before committing its reference. A failed/superseded commit leaves an unused file for cleanup, never a dangling ready reference.
 
-A crash after commit retains the ready image; before commit it leaves an orphan or a reference lacking a thumbnail. Next-open reconciliation recovers missing work without a chapter lifecycle.
+A crash after commit retains a complete photo. Before commit, a new photo has no row and an edited photo keeps its old row; an unused file is cleaned up and restart reconciliation retries.
 
 | Event | Result |
 | --- | --- |
@@ -207,7 +222,7 @@ A crash after commit retains the ready image; before commit it leaves an orphan 
 | Enumeration failure | Preserve previous references; report retryable failure, never an inferred empty folder. |
 | Decode failure / unstable read | Skip replacement; keep a prior completed version, if any; no per-photo UI, at most a backend warning. |
 | Overlapping requests | Coalesce per chapter; old-folder results cannot publish after a folder change. |
-| Ordinary open | Show retained images immediately; schedule missing thumbnails, with background discovery on first access after restart. |
+| Ordinary open | Show completed photos immediately while active work continues; reconcile in the background on first access after restart. |
 | Thumbnail replaced / reference removed | Delete unused thumbnails; protect live references and active imports; warn and retry failed cleanup on the next import. |
 
 The spike's adapter is disposable evidence. Nonblocking discovery, progressive publication and recovery are production contracts, not claimed spike implementations.
@@ -220,15 +235,15 @@ The spike's adapter is disposable evidence. Nonblocking discovery, progressive p
 | I2 | Folder save clears old references/placements and starts background discovery; neither creation nor save waits for scanning/image work. |
 | I3 | Import immediate-folder JPEGs; count unsupported files and reject symlinks. |
 | I4 | Skip undecodable JPEGs without per-photo UI; continue remaining files. |
-| I5 | Ready thumbnails appear before a multi-photo import finishes. |
+| I5 | Each new photo appears only after its complete row/thumbnail commit; earlier photos are browsable while others are processing. |
 | I6 | Refresh detects additions and same-name edits by content hash, regenerating their thumbnails even when timestamps/file sizes are unchanged. |
 | I7 | Confirmed deletion removes the photo and spread/cover placement, leaving its slot empty. |
 | I8 | Empty folders succeed; failed enumeration preserves references and offers Retry. |
-| I9 | Read/storage failures retain completed work and expose retryable failure. |
+| I9 | Read/encoding/storage/database failures create no partial rows, retain completed photos and expose retryable failure. |
 | I10 | Overlapping chapter requests share current work; superseded-folder results cannot publish. |
 | I11 | Unstable reads warn without publishing mixed metadata/image; Refresh imports settled files. |
 | I12 | Reopen displays retained thumbnails immediately; background recovery after restart includes discovery interrupted before any photo row existed. |
-| I13 | Same-path edits preserve identity/placement; unchanged Refresh is idempotent. |
+| I13 | Same-path edits retain the old complete row until atomic replacement, preserving ID/caption/placement; unchanged Refresh is idempotent. |
 | T1 | Each preset accepts its exact byte ceiling and rejects ceiling + 1; no output exceeds 300,000 bytes. |
 | T2 | Preserve orientation/proportions without upscaling at the stated resolution policy. |
 | T3 | Browser delivery uses one thumbnail per photo; managed storage contains no copied originals or alternate variants. |
@@ -240,7 +255,7 @@ The spike's adapter is disposable evidence. Nonblocking discovery, progressive p
 | P2 | Every row, including the last, fills its width with whole uncropped images, small gutters and no padded cards. |
 | P3 | Order displayed photos by capture time/filename with missing/invalid dates last; never reorder photos to fill gaps. |
 | P4 | Mixed rows give portraits modest emphasis without cropping or nesting. |
-| P5 | Show discovered photos' `unplaced / total`, derived from placements, with transient discovery/processing feedback rather than a chapter import state. |
+| P5 | Show completed photos' `unplaced / total`, derived from placements, with transient discovery/processing feedback and no broken-photo placeholders. |
 | P6 | Compact icon button `Refresh photos` reconciles the chapter, or every chapter on Synopsis/Cover, and exposes pending status. |
 | P7 | No photo preview, inspection, enlargement, click action or placement interaction. |
 | P8 | One grip resizes by pointer/keyboard and collapses/restores the chosen width during workspace use. |
