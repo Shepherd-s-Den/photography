@@ -79,15 +79,16 @@ class VerificationSeamIntegrationTest(unittest.TestCase):
         self.assertEqual(commands[-1], f"dagger call verify --base={base}")
 
     def test_should_use_the_target_remotes_main_for_a_feature_branch(self):
-        repository, environment, base = self.build_repository()
-        self.git(repository, "update-ref", "refs/remotes/personal/main", base)
+        repository, environment, _ = self.build_repository()
+        personal_base = self.commit(repository)
+        self.git(repository, "update-ref", "refs/remotes/personal/main", personal_base)
         head = self.commit(repository)
 
         result = self.push(repository, environment, head, ZERO, "feature/test", remote="personal")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = (repository / "commands").read_text().splitlines()
-        self.assertEqual(commands[-1], f"dagger call verify --base={base}")
+        self.assertEqual(commands[-1], f"dagger call verify --base={personal_base}")
 
     def test_should_reject_a_revision_other_than_the_checked_out_head(self):
         repository, environment, base = self.build_repository()
