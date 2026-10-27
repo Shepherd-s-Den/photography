@@ -217,7 +217,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       results <- Vector.fill(2)(()).parTraverse(_ => createChapter)
       saved   <- state.get
     yield
-      assertEquals(results.collect { case CreateResult.Created(_, _) => () }.size, 1)
+      assertEquals(results.collect { case _: CreateResult.Created => () }.size, 1)
       assertEquals(results.collect { case CreateResult.Rejected(ChapterConflict.AtCapacity) => () }.size, 1)
       assertEquals(saved.spreads.length, 65)
 

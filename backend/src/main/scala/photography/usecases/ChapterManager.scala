@@ -101,10 +101,10 @@ object ChapterManager:
         program.value
       MonadCancelThrow[F].uncancelable: _ =>
         refresh.flatMap:
-          case Right(request)                                  => launchImport(request).map(RefreshResult.Scheduled(_))
-          case Left(Failure.AlbumNotFound)                     => RefreshResult.AlbumNotFound.pure[F]
-          case Left(MissingChapter)                            => RefreshResult.ChapterNotFound.pure[F]
-          case Left(Failure.Unavailable | Failure.Conflict(_)) => RefreshResult.Failed.pure[F]
+          case Right(request)                                        => launchImport(request).map(RefreshResult.Scheduled(_))
+          case Left(Failure.AlbumNotFound)                           => RefreshResult.AlbumNotFound.pure[F]
+          case Left(MissingChapter)                                  => RefreshResult.ChapterNotFound.pure[F]
+          case Left(Failure.Unavailable) | Left(_: Failure.Conflict) => RefreshResult.Failed.pure[F]
 
     private def launchImport(request: Either[Throwable, Request]) =
       request.traverse(photos.launch).flatMap:
@@ -116,7 +116,7 @@ object ChapterManager:
       albums.get(id).map:
         case AlbumRepository.GetResult.Found(album) => album.asRight[Failure]
         case AlbumRepository.GetResult.NotFound     => Failure.AlbumNotFound.asLeft[Album]
-        case AlbumRepository.GetResult.Failed(_)    => Failure.Unavailable.asLeft[Album]
+        case _: AlbumRepository.GetResult.Failed    => Failure.Unavailable.asLeft[Album]
 
     private def checkCreation(current: Album, name: DestinationName, period: Period, folder: PhotoSource) =
       val resolved      = resolvePeriod(current.year, period)

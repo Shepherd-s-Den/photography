@@ -61,10 +61,10 @@ object AlbumWorkspaceApi:
         case Left(message)                            => BadRequest(Map("message" -> message))
         case Right((name, countries, period, folder)) =>
           chapters.create(id, name, countries, period, folder).flatMap:
-            case CreateResult.Created(chapter, _) => Created(Map("id" -> chapter.value.toString))
-            case CreateResult.Rejected(reason)    => BadRequest(Map("message" -> explain(reason)))
-            case CreateResult.AlbumNotFound       => albumNotFound
-            case CreateResult.Failed              => serviceFailure
+            case created: CreateResult.Created => Created(Map("id" -> created.id.value.toString))
+            case CreateResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
+            case CreateResult.AlbumNotFound    => albumNotFound
+            case CreateResult.Failed           => serviceFailure
       }
 
     private def update(id: AlbumId, target: ChapterId, request: Request[F]) =
@@ -81,7 +81,7 @@ object AlbumWorkspaceApi:
         case Left(message)                            => BadRequest(Map("message" -> message))
         case Right((name, countries, period, folder)) =>
           chapters.update(id, target, name, countries, period, folder).flatMap:
-            case UpdateResult.Updated(_)       => Ok(Map("id" -> target.value.toString))
+            case _: UpdateResult.Updated       => Ok(Map("id" -> target.value.toString))
             case UpdateResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
             case UpdateResult.ChapterNotFound  => chapterNotFound
             case UpdateResult.AlbumNotFound    => albumNotFound

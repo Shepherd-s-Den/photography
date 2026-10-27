@@ -1,8 +1,10 @@
 package photography.usecases
 
 import cats.data.Kleisli
-import cats.effect.{Deferred, IO, Ref}
+import cats.Id
+import cats.effect.{Deferred, IO, Outcome, Ref}
 import cats.effect.std.Mutex
+import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import io.github.iltotore.iron.*
@@ -88,36 +90,46 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
 
   test("should authorize current writes and compensate an old stored thumbnail after A to B to A"):
     Vector(false, true).traverse_ { supersede =>
-      val refs = Refs()
+      val refs                 = Refs()
+      val completed            = Status.Finished(PhotoManager.RefreshResult(unsupportedCount = 0, issues = Vector.empty[PhotoManager.Issue]))
+      val expectedBeforeLaunch = if supersede then Status.Queued else completed
+      val synchronization      = (Mutex[IO], Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit]).tupled
 
-      for
-        mutex   <- Mutex[IO]
-        stored  <- Deferred[IO, Unit]
-        release <- Deferred[IO, Unit]
-        cleaned <- Deferred[IO, Unit]
-        storage = buildPublicationStorage(refs, stored = stored, release = release, cleaned = cleaned)
-        _ <- buildImport(refs, storage)(using mutex).use: imports =>
+      synchronization.flatMap { case (mutex, stored, release, launchLatest) =>
+        val storage = buildPublicationStorage(refs, stored = stored, release = release)
+        val program = buildImport(refs, storage)(using mutex).use: imports =>
           val changeSource = mutex.lock.surround(imports.prepare(chapter, source = "/photos/b") >> imports.prepare(chapter, source))
 
           for
-            idle    <- imports.status(chapter)
-            request <- mutex.lock.surround(imports.prepare(chapter, source))
-            _       <- imports.launch(request)
-            _       <- stored.get
-            latest  <- if supersede then changeSource else request.pure[IO]
-            _       <- release.complete(())
-            _       <- if supersede then cleaned.get >> imports.launch(latest).void else IO.unit
-            _       <- awaitFinished(imports)
-            status  <- imports.status(chapter)
-            written <- refs.saves.get
-            deleted <- refs.removed.get
+            idle         <- imports.status(chapter)
+            request      <- mutex.lock.surround(imports.prepare(chapter, source))
+            _            <- imports.launch(request)
+            _            <- stored.get
+            latest       <- if supersede then changeSource else request.pure[IO]
+            _            <- launchLatest.get
+            beforeLaunch <- imports.status(chapter)
+            _            <- if supersede then imports.launch(latest).void else IO.unit
+            _            <- awaitFinished(imports)
+            status       <- imports.status(chapter)
+            written      <- refs.saves.get
+            deleted      <- refs.removed.get
           yield
-            val expectedStatus = Status.Finished(PhotoManager.RefreshResult(unsupportedCount = 0, issues = Vector.empty[PhotoManager.Issue]))
             assertEquals(idle, Status.Idle)
+            assertEquals(beforeLaunch, expectedBeforeLaunch)
             assertEquals(written.map(_.original.source), Vector(source))
             assertEquals(deleted.size, if supersede then 1 else 0)
-            assertEquals(status, expectedStatus)
-      yield ()
+            assertEquals(status, completed)
+
+        for
+          control <- TestControl.execute(program)
+          _       <- control.tick
+          _       <- release.complete(())
+          _       <- control.tick
+          _       <- launchLatest.complete(())
+          _       <- control.tick
+          result  <- control.results
+        yield assertEquals(result, Outcome.succeeded[Id, Throwable, Unit](()).some)
+      }
     }
 
   test("should report launch failure after its application resource is closed"):
@@ -136,7 +148,7 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
 
   private def awaitFinished(imports: ChapterPhotoImport[IO]) =
     val finished = (IO.cede >> imports.status(chapter)).map:
-      case Status.Finished(_) => true
+      case _: Status.Finished => true
       case _                  => false
     finished.iterateUntil(identity).void
 
@@ -172,7 +184,7 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       override def removeThumbnail(location: ThumbnailLocation): IO[PhotoStorage.RemoveResult] =
         IO.raiseError[PhotoStorage.RemoveResult](new AssertionError("Unexpected removal"))
 
-  private def buildPublicationStorage(refs: Refs, stored: Deferred[IO, Unit], release: Deferred[IO, Unit], cleaned: Deferred[IO, Unit]) =
+  private def buildPublicationStorage(refs: Refs, stored: Deferred[IO, Unit], release: Deferred[IO, Unit]) =
     new PhotoStorage[IO]:
       override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult] =
         val originals = Vector(OriginalPhotoLocation(value, filename = "one.jpg"))
@@ -183,4 +195,4 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
         val thumbnail = Thumbnail(location, version = "version", value.dimensions, value.quality, bytes = 1)
         stored.complete(()).void >> release.get.as(PhotoStorage.StoreResult.Stored(thumbnail))
       override def removeThumbnail(location: ThumbnailLocation): IO[PhotoStorage.RemoveResult] =
-        refs.removed.update(_ :+ location) >> cleaned.complete(()).as(PhotoStorage.RemoveResult.Removed)
+        refs.removed.update(_ :+ location).as(PhotoStorage.RemoveResult.Removed)
