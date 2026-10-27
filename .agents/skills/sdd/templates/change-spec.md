@@ -18,11 +18,14 @@ exploration was needed — never a bare assertion like "already understood." -->
 
 ## What & Why
 
-<!-- Current behavior → new behavior and why, in one concise statement. -->
+<!-- Current behavior → new behavior and why, at behavior/intent/domain-contract altitude.
+Keep signatures, code structure, file layouts and diff walkthroughs in implementation evidence. -->
 
 ## Domain / Design Notes
 
-<!-- Follow executor.md's Technical contract first rule and completion criterion. -->
+<!-- Optional. Include when domain, persisted-data or boundary contracts change. State
+observable guarantees and who enforces them; name constraint mechanisms when needed to
+make the contract testable. Follow executor.md's Behavior/contract first criterion. -->
 
 ## Alternatives Considered
 

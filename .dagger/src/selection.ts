@@ -14,8 +14,11 @@ export function findComponentsForPath(path: string): readonly Component[] {
   if (path.startsWith("frontend/")) return ["backend", "frontend"];
   if (
     path === "dagger.json" ||
+    path === ".mise.toml" ||
     path.startsWith(".dagger/") ||
     path.startsWith("scripts/") ||
+    path.startsWith(".githooks/") ||
+    path.startsWith(".agents/skills/sdd/scripts/") ||
     path.startsWith(".github/")
   )
     return ["pipeline"];

@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Runs the affected component checks before a push; use `dagger call verify --all` for full verification.
-# Requires Docker (the Dagger engine) and the pinned toolchain (`mise install`).
-
-echo "pre-push: running affected checks — dagger call verify"
+# Runs the same verification entrypoint as the pull-request workflow.
 
 run() {
   if command -v mise >/dev/null 2>&1; then
@@ -14,4 +11,29 @@ run() {
   fi
 }
 
-run dagger call verify
+ZERO=0000000000000000000000000000000000000000
+TOP=$(git rev-parse --show-toplevel)
+cd "$TOP"
+
+while read -r _local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue
+
+  if [ "$local_sha" != "$(git rev-parse HEAD)" ]; then
+    echo "pre-push: only the checked-out HEAD can be verified; check out the revision being pushed" >&2
+    exit 1
+  fi
+
+  if ! git diff --quiet HEAD -- || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+    echo "pre-push: uncommitted changes would make verification differ from the pushed commit" >&2
+    exit 1
+  fi
+
+  if [ "$remote_ref" = refs/heads/main ] && [ "$remote_sha" != "$ZERO" ]; then
+    base=$remote_sha
+  else
+    base=$(git rev-parse --verify "refs/remotes/${1:-origin}/main^{commit}")
+  fi
+
+  echo "pre-push: verify $local_sha against $base"
+  run bash scripts/verify "$base" </dev/null
+done

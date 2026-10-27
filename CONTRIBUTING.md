@@ -25,7 +25,7 @@ Use Dagger for remote checks; its backend gate installs and builds the frontend 
 | Affected checks | `dagger call verify` |
 | All checks | `dagger call verify --all` |
 
-Enable the local pre-push hook with `git config core.hooksPath .githooks`; it runs affected checks before each push.
+Enable the local pre-push hook with `git config core.hooksPath .githooks`; it runs the same verification entrypoint as pull-request CI. See [pipeline operations](ci/specs/operational.md#local-push-verification) for base selection and checkout requirements.
 
 | Path | What |
 | --- | --- |
@@ -46,7 +46,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 - Name functions and methods with action verbs that describe their result: `findCreationConflict` for an optional conflict, `hasCreationConflict` for a Boolean.
 - Optional fields, values, and parameters use names that make optionality apparent, such as `maybeDescription`.
-- Where named arguments are supported, name literal and placeholder arguments, including years, titles, descriptions, timestamps, coordinates and empty collections, at the call site; self-describing domain values remain positional.
+- Where named arguments are supported, name values whose types do not reveal their role, including literals, collections, booleans and optional values, in public/private calls and constructors; self-describing domain values remain positional.
 - In TypeScript, use named imports when they keep the import readable. Keep framework imports named when compiler, lint, or reactivity semantics depend on those bindings.
 
 ## Composition and abstraction
