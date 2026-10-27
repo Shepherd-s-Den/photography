@@ -15,14 +15,14 @@ import io.github.iltotore.iron.autoRefine
 import java.time.{LocalDate, Year}
 
 trait ChapterManager[F[_]]:
-  def create(album: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, sourceFolder: SourceFolder): F[CreateResult]
+  def create(album: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, sourceFolder: PhotoSource): F[CreateResult]
   def update(
       album: AlbumId,
       chapter: ChapterId,
       name: DestinationName,
       countries: NonEmptyList[CountryId],
       period: Period,
-      sourceFolder: SourceFolder
+      sourceFolder: PhotoSource
   ): F[UpdateResult]
 
 object ChapterManager:
@@ -45,7 +45,7 @@ object ChapterManager:
         name: DestinationName,
         countries: NonEmptyList[CountryId],
         period: Period,
-        sourceFolder: SourceFolder
+        sourceFolder: PhotoSource
     ): F[CreateResult] =
       summon[Mutex[F]].lock.surround:
         val creation =
@@ -65,7 +65,7 @@ object ChapterManager:
         name: DestinationName,
         countries: NonEmptyList[CountryId],
         period: Period,
-        sourceFolder: SourceFolder
+        sourceFolder: PhotoSource
     ): F[UpdateResult] =
       summon[Mutex[F]].lock.surround:
         val update =
@@ -83,14 +83,14 @@ object ChapterManager:
         case AlbumRepository.GetResult.NotFound     => Failure.AlbumNotFound.asLeft[Album]
         case AlbumRepository.GetResult.Failed(_)    => Failure.Unavailable.asLeft[Album]
 
-    private def checkCreation(current: Album, name: DestinationName, period: Period, folder: SourceFolder) =
+    private def checkCreation(current: Album, name: DestinationName, period: Period, folder: PhotoSource) =
       val resolved      = resolvePeriod(current.year, period)
       val maybeConflict =
         if current.spreads.length >= 65 then ChapterConflict.AtCapacity.some
         else findMetadataConflict(current.year, current.chapters, name, resolved, folder)
       maybeConflict.toLeft(resolved).leftMap(Failure.Conflict(_))
 
-    private def checkUpdate(current: Album, id: ChapterId, name: DestinationName, period: Period, folder: SourceFolder) =
+    private def checkUpdate(current: Album, id: ChapterId, name: DestinationName, period: Period, folder: PhotoSource) =
       current.chapters.find(_.id.value === id.value).toRight(MissingChapter: UpdateFailure).flatMap: existing =>
         val resolved      = resolvePeriod(current.year, period)
         val others        = current.chapters.filterNot(_.id.value === id.value)
@@ -99,7 +99,7 @@ object ChapterManager:
           else findMetadataConflict(current.year, others, name, resolved, folder)
         maybeConflict.toLeft(resolved).leftMap(Failure.Conflict(_))
 
-    private def findMetadataConflict(year: AlbumYear, chapters: Vector[Chapter], name: DestinationName, period: VisitPeriod, folder: SourceFolder) =
+    private def findMetadataConflict(year: AlbumYear, chapters: Vector[Chapter], name: DestinationName, period: VisitPeriod, folder: PhotoSource) =
       val maybeHomeConflict = if (name: String) === "Home" then findHomeConflict(year, period, chapters.exists(_.destination.isHome)) else None
       maybeHomeConflict.orElse(Option.when(chapters.exists(value => (value.sourceFolder: String) === folder))(ChapterConflict.FolderAssigned))
 
@@ -133,7 +133,7 @@ object ChapterManager:
         name: DestinationName,
         countries: NonEmptyList[CountryId],
         period: VisitPeriod,
-        folder: SourceFolder
+        folder: PhotoSource
     ) =
       val others = currentChapters.filterNot(_.id.value === id.value)
       val order  = buildChapterOrder(others, id, (name: String) === "Home", period)
@@ -172,7 +172,7 @@ object ChapterManager:
         name: DestinationName,
         countries: NonEmptyList[CountryId],
         period: VisitPeriod,
-        sourceFolder: SourceFolder,
+        sourceFolder: PhotoSource,
         template: SpreadTemplateId,
         photoSlots: Vector[SlotBox],
         textSlot: SlotBox

@@ -257,7 +257,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
     val chapters = new ChapterManager[IO]:
-      override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: SourceFolder) =
+      override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: PhotoSource) =
         refs.calls.update(_ :+ s"create:${id.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}").as(createResult)
       override def update(
           id: AlbumId,
@@ -265,7 +265,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
           name: DestinationName,
           countries: NonEmptyList[CountryId],
           period: Period,
-          folder: SourceFolder
+          folder: PhotoSource
       ) =
         val call = s"update:${id.value}:${target.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}"
         refs.calls.update(_ :+ call).as(updateResult)

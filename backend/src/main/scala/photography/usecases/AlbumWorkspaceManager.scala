@@ -3,7 +3,7 @@ package photography.usecases
 import cats.Monad
 import cats.data.NonEmptyList
 import cats.syntax.all.*
-import photography.domain.album.{Album, AlbumId, Country, SourceFolder}
+import photography.domain.album.{Album, AlbumId, Country, PhotoSource}
 import photography.ports.CountryRepository
 import photography.usecases.AlbumManager.GetAlbumResult
 import photography.usecases.AlbumWorkspaceManager.*
@@ -12,13 +12,13 @@ trait AlbumWorkspaceManager[F[_]]:
   def get(id: AlbumId): F[GetResult]
 
 object AlbumWorkspaceManager:
-  def make[F[_]: Monad](albums: AlbumManager[F], countries: CountryRepository[F], photoRoot: SourceFolder): AlbumWorkspaceManager[F] =
+  def make[F[_]: Monad](albums: AlbumManager[F], countries: CountryRepository[F], photoRoot: PhotoSource): AlbumWorkspaceManager[F] =
     new LiveAlbumWorkspaceManager(albums, countries, photoRoot)
 
   final private class LiveAlbumWorkspaceManager[F[_]: Monad](
       albums: AlbumManager[F],
       countries: CountryRepository[F],
-      photoRoot: SourceFolder
+      photoRoot: PhotoSource
   ) extends AlbumWorkspaceManager[F]:
     override def get(id: AlbumId): F[GetResult] =
       albums.get(id).flatMap:
@@ -30,5 +30,5 @@ object AlbumWorkspaceManager:
         case GetAlbumResult.Failed   => GetResult.Failed.pure[F]
 
   enum GetResult:
-    case Found(album: Album, countries: NonEmptyList[Country], photoRoot: SourceFolder)
+    case Found(album: Album, countries: NonEmptyList[Country], photoRoot: PhotoSource)
     case AlbumNotFound, Failed

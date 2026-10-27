@@ -14,11 +14,19 @@ trait ChapterRepository[F[_]]:
       name: DestinationName,
       countries: NonEmptyList[CountryId],
       period: VisitPeriod,
-      sourceFolder: SourceFolder,
+      sourceFolder: PhotoSource,
       order: NonEmptyList[ChapterId]
   ): F[ChapterRepository.UpdateResult]
 
 object ChapterRepository:
+  trait PhotoReader[F[_]]:
+    def findPhotoContext(chapter: ChapterId): F[PhotoReader.FindResult]
+
+  object PhotoReader:
+    enum FindResult:
+      case Found(album: AlbumId, source: PhotoSource)
+      case NotFound, Failed
+
   final case class NewChapter(
       id: ChapterId,
       destinationId: DestinationId,
@@ -26,7 +34,7 @@ object ChapterRepository:
       countries: NonEmptyList[CountryId],
       period: VisitPeriod,
       description: String,
-      sourceFolder: SourceFolder,
+      sourceFolder: PhotoSource,
       opening: Spread.ChapterStart
   )
 

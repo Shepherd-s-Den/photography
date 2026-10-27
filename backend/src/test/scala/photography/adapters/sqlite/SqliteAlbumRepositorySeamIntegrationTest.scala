@@ -378,18 +378,18 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         val period            = VisitPeriod(firstDay = LocalDate.of(1970, 1, 1), days = 1)
         val expectedSpreads   = Vector(expectedPhotos)
         val expectedChapterId = ChapterId(buildUuid(index = 402))
-        val sourceFolder: SourceFolder = "/photos/coast"
+        val sourceFolder: PhotoSource = "/photos/coast"
         val chapter         = Chapter(expectedChapterId, destination, period, description = "", sourceFolder, expectedChapter, expectedSpreads)
         val secondPhotoSlot = expectedSlot.copy(id = PhotoSpreadSlotId(buildUuid(index = 422)))
         val secondTextSlot  = expectedChapter.textSlot.copy(id = TextSpreadSlotId(buildUuid(index = 423)))
         val secondSpreadId  = SpreadId(buildUuid(index = 421))
         val secondOpening   =
           expectedChapter.copy(id = secondSpreadId, photoSlots = Vector(secondPhotoSlot), textSlot = secondTextSlot, placements = emptyPlacements)
-        val expectedSecondChapterId    = ChapterId(buildUuid(index = 420))
-        val secondPeriod               = VisitPeriod(firstDay = LocalDate.of(1970, 1, 2), days = 1)
-        val emptySpreads               = Vector.empty[Spread.PhotosOnly]
-        val secondFolder: SourceFolder = "/photos/second"
-        val secondChapter              =
+        val expectedSecondChapterId   = ChapterId(buildUuid(index = 420))
+        val secondPeriod              = VisitPeriod(firstDay = LocalDate.of(1970, 1, 2), days = 1)
+        val emptySpreads              = Vector.empty[Spread.PhotosOnly]
+        val secondFolder: PhotoSource = "/photos/second"
+        val secondChapter             =
           chapter.copy(
             id = expectedSecondChapterId,
             period = secondPeriod,
