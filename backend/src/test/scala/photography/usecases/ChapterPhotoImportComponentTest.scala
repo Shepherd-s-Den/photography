@@ -22,7 +22,8 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
   private type Db[A] = Kleisli[IO, Unit, A]
   private given Logger[IO] = Slf4jLogger.getLogger[IO]
   private given Transaction[Db, IO] with
-    override def run[A](program: Db[A]): IO[A] = program.run(())
+    override def run[A](program: Db[A]): IO[A]     = program.run(())
+    override def resolve[A](program: Db[A]): IO[A] = program.run(())
   private val chapter             = ChapterId(new UUID(0L, 1L))
   private val source: PhotoSource = "/photos/a"
   private val encoded             = Vector(1.toByte).refineEither[ThumbnailBytesConstraint].fold(message => fail(message), identity)
@@ -163,15 +164,15 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       override def generateId: IO[UUID] = next.getAndUpdate(_ + 1L).map(index => new UUID(0L, index))
     val photos = new PhotoRepository[Db]:
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](PhotoRepository.ListResult.Listed(photos = Vector.empty[Photo]).pure[IO])
+        Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](refs.saves.get.map(photos => PhotoRepository.ListResult.Listed(photos = photos)))
       override def save(photo: Photo): Db[PhotoRepository.WriteResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](refs.saves.update(_ :+ photo).as(PhotoRepository.WriteResult.Applied))
       override def remove(id: PhotoId): Db[PhotoRepository.WriteResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.WriteResult](PhotoRepository.WriteResult.Applied.pure[IO])
       override def recordWrite(intent: PhotoWriteIntent): Db[PhotoRepository.RecordWriteResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](PhotoRepository.RecordWriteResult.Failed.pure[IO])
+        Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](PhotoRepository.RecordWriteResult.Recorded.pure[IO])
       override def completeWrite(id: PhotoWriteIntentId): Db[PhotoRepository.CompleteWriteResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](PhotoRepository.CompleteWriteResult.Failed.pure[IO])
+        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](PhotoRepository.CompleteWriteResult.Completed.pure[IO])
       override def listUnfinishedWrites: Db[PhotoRepository.ListUnfinishedWritesResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.ListUnfinishedWritesResult](PhotoRepository.ListUnfinishedWritesResult.Failed.pure[IO])
     val generator = new PhotoThumbnailGenerator[IO]:

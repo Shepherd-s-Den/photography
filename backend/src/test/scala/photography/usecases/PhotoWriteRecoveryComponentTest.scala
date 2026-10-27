@@ -16,7 +16,8 @@ import java.util.UUID
 final class PhotoWriteRecoveryComponentTest extends CatsEffectSuite:
   private given Logger[IO] = Slf4jLogger.getLogger[IO]
   private given Transaction[IO, IO] with
-    override def run[A](program: IO[A]): IO[A] = program
+    override def run[A](program: IO[A]): IO[A]     = program
+    override def resolve[A](program: IO[A]): IO[A] = program
   private val chapter                                   = ChapterId(new UUID(0L, 1L))
   private val photoId                                   = PhotoId(new UUID(0L, 2L))
   private val writeId                                   = PhotoWriteIntentId(new UUID(0L, 3L))

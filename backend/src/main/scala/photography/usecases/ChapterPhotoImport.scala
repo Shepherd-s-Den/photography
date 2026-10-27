@@ -1,6 +1,6 @@
 package photography.usecases
 
-import cats.Eq
+import cats.{Eq, MonadThrow}
 import cats.effect.{Async, Fiber, Ref, Resource}
 import cats.effect.std.{Mutex, Supervisor}
 import cats.syntax.all.*
@@ -16,7 +16,7 @@ trait ChapterPhotoImport[F[_]]:
   def status(chapter: ChapterId): F[Status]
 
 object ChapterPhotoImport:
-  def make[F[_]: Async: IdGenerator: Logger: Mutex, Db[_]](
+  def make[F[_]: Async: IdGenerator: Logger: Mutex, Db[_]: MonadThrow](
       storage: PhotoStorage[F],
       photos: PhotoRepository[Db],
       generator: PhotoThumbnailGenerator[F]
@@ -26,7 +26,7 @@ object ChapterPhotoImport:
       supervisor <- Supervisor[F](await = false)
     yield new LiveChapterPhotoImport(storage, photos, generator, state, supervisor)
 
-  final private class LiveChapterPhotoImport[F[_]: Async: IdGenerator: Logger: Mutex, Db[_]](
+  final private class LiveChapterPhotoImport[F[_]: Async: IdGenerator: Logger: Mutex, Db[_]: MonadThrow](
       storage: PhotoStorage[F],
       photos: PhotoRepository[Db],
       generator: PhotoThumbnailGenerator[F],
@@ -74,6 +74,7 @@ object ChapterPhotoImport:
               val isCurrent = current.get(request.chapter).exists(_.request === request)
               if isCurrent then transaction.run(program)
               else Async[F].raiseError(new IllegalStateException("Photo import source was superseded"))
+        override def resolve[A](program: Db[A]): F[A] = transaction.resolve(program)
       val manager = PhotoManager.make(storage, photos, generator)
       val started = summon[Mutex[F]].lock.surround(recordStatus(request, Status.Running))
       started >> manager.refresh(request.chapter, request.source).flatMap(result => recordStatus(request, Status.Finished(result)))
