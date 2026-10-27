@@ -117,4 +117,4 @@ Missing records, lock/session outcomes, infrastructure failures, and changed/unc
 - The backend is Scala 3 and follows Typelevel and Tagless Final principles.
 - The application maintains the SQLite schema with Flyway on startup.
 - All backend APIs use REST over HTTP.
-- Readiness is available only after SQLite migration and recorded-photo-write recovery succeed and the HTTP listener starts. Recovery precedes worker creation, preserves exact live thumbnail references and only removes journaled unused locations.
+- Readiness is available only after SQLite migration succeeds and the HTTP listener starts.

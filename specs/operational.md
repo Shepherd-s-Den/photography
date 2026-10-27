@@ -10,10 +10,4 @@ The launcher installs locked frontend dependencies and builds assets before star
 
 Workspace folder suggestions use `/photos` as the default root, configurable through `PHOTOGRAPHY_PHOTO_ROOT` as an absolute path. Suggestions take the form `/photos/<year>/selection/<destination>`; editors can override them with a full backend-visible path. Saved chapter folders need not exist yet.
 
-`GET /health` returns HTTP 200 with `{"status":"ok"}` after database migration, successful recovery of recorded photo writes and HTTP listener startup. Recovery failure aborts startup before import workers or HTTP are constructed. It reads recorded intents and current photo references, deletes only known unused thumbnail locations, and retains evidence when cleanup fails; it never discovers originals or enumerates thumbnail storage.
-
-`PHOTOGRAPHY_THUMBNAIL_ROOT` overrides the absolute thumbnail root, default `/thumbnails`. Recovery preserves currently referenced thumbnails and removes each unused publication's known `.jpg` and `.tmp` artifacts idempotently. Concrete original discovery, image generation and live import journaling remain inactive; this backend slice provides persistence and startup recovery, not an enabled import journey or atomic source-change clearing.
-
-The thumbnail root must be normalized and its path ancestors must be nonsymlinks. Keep this application-owned path and its ancestors stable while the backend runs; operations reject existing symlink redirection rather than following it.
-
-The launcher checks its tools and ports before starting, then polls readiness for up to 180 seconds. It prints each local URL after readiness and stops its child processes and releases its lock when it exits.
+`GET /health` returns HTTP 200 with `{"status":"ok"}` after the service has migrated the database and started the HTTP listener. The launcher checks its tools and ports before starting, then polls readiness for up to 180 seconds. It prints each local URL after readiness and stops its child processes and releases its lock when it exits.

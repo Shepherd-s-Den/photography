@@ -18,24 +18,79 @@ object SqlitePhotoRepository:
 
   final private class LiveSqlitePhotoRepository extends PhotoRepository[ConnectionIO]:
     override def listChapter(chapter: ChapterId): ConnectionIO[ListResult] =
-      sql"""SELECT p.id, p.chapter_id, c.source_folder, p.source, p.source_hash, p.captured_local, p.width, p.height,
-        p.thumbnail, p.thumbnail_version, p.thumbnail_width, p.thumbnail_height, p.thumbnail_quality, p.thumbnail_bytes, p.caption
-        FROM photo p JOIN chapter c ON c.id = p.chapter_id WHERE p.chapter_id = ${chapter.value} ORDER BY p.id"""
+      sql"""
+        SELECT
+          p.id,
+          p.chapter_id,
+          c.source_folder,
+          p.source,
+          p.source_hash,
+          p.captured_local,
+          p.width,
+          p.height,
+          p.thumbnail,
+          p.thumbnail_version,
+          p.thumbnail_width,
+          p.thumbnail_height,
+          p.thumbnail_quality,
+          p.thumbnail_bytes,
+          p.caption
+        FROM photo p
+        JOIN chapter c ON c.id = p.chapter_id
+        WHERE p.chapter_id = ${chapter.value}
+        ORDER BY p.id
+      """
         .query[Photo].to[Vector].map(photos => ListResult.Listed(photos = photos))
 
     override def save(photo: Photo): ConnectionIO[WriteResult] =
-      sql"""INSERT INTO photo (id, chapter_id, source, source_hash, captured_local, width, height, thumbnail,
-        thumbnail_version, thumbnail_width, thumbnail_height, thumbnail_quality, thumbnail_bytes, caption)
-        VALUES (${photo.id.value}, ${photo.chapter.value}, ${photo.original.filename}, ${photo.metadata.hash},
-          ${photo.metadata.maybeCapturedLocal}, ${photo.metadata.dimensions.width}, ${photo.metadata.dimensions.height},
-          ${photo.thumbnail.location.value}, ${photo.thumbnail.version}, ${photo.thumbnail.dimensions.width},
-          ${photo.thumbnail.dimensions.height}, ${photo.thumbnail.quality}, ${photo.thumbnail.bytes}, ${photo.maybeCaption})
-        ON CONFLICT(id) DO UPDATE SET source = excluded.source, source_hash = excluded.source_hash,
-          captured_local = excluded.captured_local, width = excluded.width, height = excluded.height,
-          thumbnail = excluded.thumbnail, thumbnail_version = excluded.thumbnail_version,
-          thumbnail_width = excluded.thumbnail_width, thumbnail_height = excluded.thumbnail_height,
-          thumbnail_quality = excluded.thumbnail_quality, thumbnail_bytes = excluded.thumbnail_bytes, caption = excluded.caption
-        WHERE photo.chapter_id = excluded.chapter_id""".update.run.map:
+      sql"""
+        INSERT INTO photo (
+          id,
+          chapter_id,
+          source,
+          source_hash,
+          captured_local,
+          width,
+          height,
+          thumbnail,
+          thumbnail_version,
+          thumbnail_width,
+          thumbnail_height,
+          thumbnail_quality,
+          thumbnail_bytes,
+          caption
+        )
+        VALUES (
+          ${photo.id.value},
+          ${photo.chapter.value},
+          ${photo.original.filename},
+          ${photo.metadata.hash},
+          ${photo.metadata.maybeCapturedLocal},
+          ${photo.metadata.dimensions.width},
+          ${photo.metadata.dimensions.height},
+          ${photo.thumbnail.location.value},
+          ${photo.thumbnail.version},
+          ${photo.thumbnail.dimensions.width},
+          ${photo.thumbnail.dimensions.height},
+          ${photo.thumbnail.quality},
+          ${photo.thumbnail.bytes},
+          ${photo.maybeCaption}
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          source = excluded.source,
+          source_hash = excluded.source_hash,
+          captured_local = excluded.captured_local,
+          width = excluded.width,
+          height = excluded.height,
+          thumbnail = excluded.thumbnail,
+          thumbnail_version = excluded.thumbnail_version,
+          thumbnail_width = excluded.thumbnail_width,
+          thumbnail_height = excluded.thumbnail_height,
+          thumbnail_quality = excluded.thumbnail_quality,
+          thumbnail_bytes = excluded.thumbnail_bytes,
+          caption = excluded.caption
+        WHERE photo.chapter_id = excluded.chapter_id
+      """.update.run.map:
         case 1 => WriteResult.Applied
         case _ => WriteResult.Failed
 
