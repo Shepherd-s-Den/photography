@@ -14,14 +14,15 @@ Save a chapter and open its workspace without waiting for directory discovery or
 
 ### Orchestration and boundaries
 
-`PhotoManager` coordinates chapter reconciliation and inventory updates. Inject the filesystem port, metadata repository and effectful thumbnail-generator use case once at construction.
+`PhotoManager` coordinates chapter reconciliation and inventory updates. Inject chapter/filesystem/photo/placement ports and the effectful thumbnail generator once; request transaction coordination through an `F` capability.
 
 | Boundary | Owns |
 | --- | --- |
 | `PhotoManager[F]` use case | Schedule/coalesce work; compare hashes/quality; decide removals/replacements; publish complete rows; coordinate cleanup and notify subscribers. |
 | `PhotoThumbnailGenerator[F]` use case | Generate from supplied in-memory content with injected quality settings; suspend Thumbnailator in `Async[F].blocking` (`IO.blocking` for IO), never on a compute thread. |
-| `PhotoFileSystem[F]` port / NAS adapter | Enumerate/read originals in place; publish/list/delete thumbnails in the separate application-owned root. Suspend filesystem IO; original locations are read-only. |
-| `PhotoRepository[F]` port / SQLite adapter | Read photo metadata; atomically insert/replace complete rows and remove references/placements; query live thumbnail references across all albums. |
+| `PhotoFileSystem[F]` port / NAS adapter | Discover/read originals in place; store/delete individual thumbnails in application-owned storage. Translate photo locations to filesystem paths and suspend filesystem IO; originals are read-only. |
+| `PhotoRepository[F]` port / SQLite adapter | Read, persist and remove complete photo metadata only; placement and filesystem operations are outside this port. |
+| `PhotoPlacementRepository[F]` port / SQLite adapter | Read placed-photo identities and remove placements for supplied photos, preserving slots; the use case selects the photos and orders these operations. |
 | Existing workspace read / browser store | Load each chapter's inventory once; chapter selectors consume their collection, Synopsis/Cover combine/sort those same collections without another album-photo read. |
 | http4s delivery | Adapt commands/inventory/SSE; serve versioned thumbnail URLs from the application thumbnail root through bounded static-file delivery, independently of PhotoManager. |
 
@@ -41,27 +42,47 @@ Driven ports supply only the filesystem and metadata operations consumed by reco
 
 ```scala
 trait PhotoFileSystem[F[_]]:
-  def scan(folder: SourceFolder): F[SourceScanResult]
-  def readSource(folder: SourceFolder, source: RelativeLocation): F[SourceReadResult]
+  def discoverOriginals(source: ChapterPhotoSource): F[OriginalDiscoveryResult]
+  def readOriginal(location: OriginalPhotoLocation): F[OriginalPhotoReadResult]
   def storeThumbnail(image: EncodedThumbnail): F[ThumbnailStoreResult]
-  def listThumbnails(): F[ThumbnailListingResult]
-  def deleteThumbnail(key: ThumbnailKey): F[ThumbnailDeleteResult]
+  def deleteThumbnail(location: ThumbnailLocation): F[ThumbnailDeleteResult]
 
 trait PhotoRepository[F[_]]:
   def listChapter(chapter: ChapterId): F[PhotoListingResult]
-  def findReferencedThumbnails(keys: Set[ThumbnailKey]): F[ReferencedThumbnailsResult]
-  def saveReady(directory: PhotoDirectory, photo: ReadyPhoto): F[PhotoWriteResult]
-  def remove(directory: PhotoDirectory, photos: Set[PhotoId]): F[PhotoWriteResult]
+  def persist(photo: Photo): F[PhotoWriteResult]
+  def remove(chapter: ChapterId, photos: Set[PhotoId]): F[PhotoWriteResult]
+
+trait PhotoPlacementRepository[F[_]]:
+  def findPlacedPhotos(chapter: ChapterId): F[PlacedPhotosResult]
+  def removeForPhotos(photos: Set[PhotoId]): F[PlacementRemovalResult]
 ```
+
+The existing chapter repository gains `findPhotoSource(chapter: ChapterId): F[ChapterPhotoSourceResult]`, returning Found(source) / NotFound / Failed. Refresh reads this under the chapter lock, including for an empty chapter after restart.
+
+```scala
+trait Transaction[F[_]]:
+  def atomically[A](
+    operation: F[Either[PersistenceFailure, A]]
+  ): F[Either[PersistenceFailure, A]]
+```
+
+Use cases request `Transaction` through an `F` context bound/accessor. Its scope binds chapter/photo/placement repositories to one session; Right commits, Left/error/cancellation rolls back, and inventory reads share that session's snapshot.
+
+Participating adapters join the active session rather than independently committing. Use cases translate repository failure results into Left inside the scope; a missing session fails explicitly for transaction-required writes.
+
+`ChapterPhotoSource` identifies the chapter's configured originals; `OriginalPhotoLocation` identifies one original within that source. Both are validated inputs, not discovery/read results; adapters resolve paths and enforce containment.
+
+`ThumbnailLocation` identifies one application-owned thumbnail. Each stored publication has an exclusive location, even for identical content; targeted deletion therefore needs no cross-album reference scan.
 
 Reuse plant-journal's **Thumbnailator** library for EXIF-aware resizing/JPEG encoding. Its smallest-output fallback is unsuitable here: exceeding the selected byte ceiling fails generation explicitly.
 
 | Existing seam | Changed contract |
 | --- | --- |
-| `ChapterRepository.update` | Add typed `photoReferences: PhotoReferencesChange` (`Keep` / `Clear`); one transaction commits chapter metadata/countries/order and, for Clear, deletes its photo/placement references while preserving slots. |
-| `ChapterManager` | Decide Clear only for a changed source folder; commit under the shared chapter lock, then advance its runtime epoch and mark old work superseded. Release before refresh; never await worker termination. |
+| `ChapterRepository.update` | Persist supplied chapter metadata/countries/order only; never invoke photo or placement operations. |
+| `ChapterManager` | For a changed photo source, read old photos and coordinate placement removal, photo removal and chapter update in one transaction under the chapter lock. Advance the epoch after commit; schedule Refresh after releasing the lock. |
+| `Transaction.atomically` | Enlist chapter/photo/placement operations in one session, including the existing independently committing chapter writes; commit all or roll back all. Adapters neither call each other nor decide which records to remove. |
 | Internal coordination | ChapterManager and PhotoManager share application-lifetime coordination state and the existing chapter lock. Folder epochs/worker tokens reject A-to-B-to-A results; failed writes leave the epoch unchanged. No public invalidation use case. |
-| `PhotoManager.refresh` | Under the same lock, read the current directory/epoch and register/coalesce work; release before scanning. Repositories commit supplied decisions; workers hold the lock through epoch validation and writes. |
+| `PhotoManager.refresh` | Under the same lock, read the current photo source/epoch and register/coalesce work; release before discovery. Workers hold the lock through epoch validation and writes; repositories persist supplied decisions. |
 | `AlbumWorkspaceManager.get` | Include `PhotoManager.listChapter` results for every chapter in the existing workspace response; the UI stores one collection per chapter. A failed inventory is explicit, never an empty-success replacement. |
 
 ### Creation / Refresh sequence
@@ -78,6 +99,8 @@ sequenceDiagram
   participant F as Filesystem / NAS
   participant G as Thumbnail generator
   participant R as Photo repository
+  participant P as Placement repository
+  participant CRead as Chapter repository
   alt Create chapter
     U->>B: Save chapter
     B->>H: Create chapter
@@ -85,6 +108,8 @@ sequenceDiagram
     C->>C: Commit chapter composition
     Note over C,M: Release chapter-mutation lock before refresh
     C->>M: refresh(chapter)
+    M->>CRead: findPhotoSource(chapter), under chapter lock
+    CRead-->>M: Current source or explicit absence/failure
     M-->>C: Queued / Coalesced
     C-->>H: Created chapter
     H-->>B: Open workspace
@@ -92,6 +117,8 @@ sequenceDiagram
     U->>B: Refresh photos
     B->>H: Refresh chapter
     H->>M: refresh(chapter)
+    M->>CRead: findPhotoSource(chapter), under chapter lock
+    CRead-->>M: Current source or explicit absence/failure
     M-->>H: Queued / Coalesced
     H-->>B: Accepted
   else Save changed source folder
@@ -99,44 +126,55 @@ sequenceDiagram
     B->>H: Update chapter folder
     H->>C: Update chapter
     Note over C,R: Hold chapter-mutation lock through write and epoch change
-    C->>C: ChapterRepository.update with Clear, atomic save and photo removal
+    C->>R: listChapter, retain old thumbnail locations
+    Note over C,P: Transaction.atomically, all writes share one session
+    C->>P: removeForPhotos(old photo IDs), preserve slots
+    C->>R: remove(chapter, old photo IDs)
+    C->>C: ChapterRepository.update, commit all writes
     C->>C: Advance runtime epoch, logically supersede old work without waiting
     Note over C,M: Release chapter-mutation lock before refresh
+    C->>C: Schedule targeted thumbnail retirement, outside save request
     C->>M: refresh(chapter)
+    M->>CRead: findPhotoSource(chapter), under chapter lock
+    CRead-->>M: Current source or explicit absence/failure
     M-->>C: Queued / Coalesced
     C-->>H: Updated chapter
     H-->>B: Saved
   end
   Note over M,R: Background work, no directory IO blocks the command
-  M->>F: Scan immediate source directory completely
-  F-->>M: Candidate paths and unsupported count
+  M->>F: discoverOriginals(chapter photo source)
+  F-->>M: Complete original locations and unsupported count
   M->>R: Load current complete photo metadata
-  R-->>M: Saved directory, photos, hashes and quality
-  M->>R: Guard current worker/folder, remove absent photos and placements
+  R-->>M: Complete photos, hashes and quality
+  Note over M,P: Validate epoch, Transaction.atomically for confirmed absences
+  M->>P: removeForPhotos(absent photo IDs), preserve slots
+  M->>R: remove(chapter, absent photo IDs), commit both writes
+  M->>F: deleteThumbnail for each removed photo's location
   M->>M: Notify inventory change after commit
   loop Every JPEG candidate
-    M->>F: Read stable original
+    M->>F: readOriginal(original location)
     F-->>M: Same read's bytes, hash and parsed metadata
     alt New photo, changed source hash or quality
       M->>G: generate(source), suspended in Async[F].blocking
       G-->>M: Encoded thumbnail or explicit failure
       M->>F: Publish thumbnail via temporary file and atomic rename
-      F-->>M: Managed key and content version
-      M->>R: Guard worker/folder, insert or replace complete row atomically
+      F-->>M: Exclusive thumbnail location and content version
+      M->>R: Validate epoch, atomically persist(complete photo)
       R-->>M: Saved
+      M->>F: deleteThumbnail(previous location), if replaced
       M->>M: Notify inventory change after commit
     else Unchanged
       M->>M: Retain complete row and image
     end
   end
-  M->>F: List managed thumbnail keys
-  M->>R: Find live references across all albums
-  R-->>M: Referenced keys or explicit failure
-  M->>F: Delete only unreferenced, inactive keys under publication coordination
   M->>M: Record finished/failed runtime feedback and notify
 ```
 
 Only successful generation/storage proceeds to row publication. A failed stage retains existing complete photos, records retryable failure and emits a notification; no partial row is inserted.
+
+After failed/superseded persistence, delete only that attempt's newly stored thumbnail; after successful replacement/removal, delete only the retired locations. Cleanup failure preserves the primary outcome and reports the failed location.
+
+Source-change retirement runs under application supervision after commit, never delaying the save response or holding the chapter lock. A failed transaction retires no old thumbnails.
 
 `refresh` returns after scheduling, including API-only callers. Scheduling failure is explicit; a committed chapter remains saved and the UI offers Refresh rather than repeating chapter creation.
 
@@ -151,6 +189,7 @@ sequenceDiagram
   participant M as PhotoManager
   participant W as Existing workspace use case
   participant R as Photo repository
+  participant P as Placement repository
   participant T as Static thumbnail delivery
   B->>H: Open album SSE stream with EventSource
   H->>M: subscribeToChanges(album)
@@ -160,8 +199,11 @@ sequenceDiagram
   H->>W: get(album)
   loop Every chapter, once per workspace snapshot
     W->>M: listChapter(chapter)
+    Note over M,P: Transaction.atomically, consistent read snapshot
     M->>R: listChapter(chapter)
-    R-->>M: Complete photos and placed-photo IDs
+    R-->>M: Complete photos
+    M->>P: findPlacedPhotos(chapter)
+    P-->>M: Placed-photo IDs
     M-->>W: Photo locations, counts and runtime feedback
   end
   W-->>H: Workspace with chapter inventories
@@ -172,8 +214,11 @@ sequenceDiagram
     H-->>B: inventory-changed with chapter ID
     B->>H: GET that chapter's photo inventory
     H->>M: listChapter(chapter)
+    Note over M,P: Transaction.atomically, consistent read snapshot
     M->>R: listChapter(chapter)
-    R-->>M: Complete photos and placed-photo IDs
+    R-->>M: Complete photos
+    M->>P: findPlacedPhotos(chapter)
+    P-->>M: Placed-photo IDs
     M-->>H: Current chapter inventory
     H-->>B: Chapter inventory with URL-mapped thumbnails
     B->>B: Update only that chapter's collection
@@ -231,7 +276,7 @@ CREATE TABLE photo (
 
 Refresh compares each stable read's hash/selected quality with the completed row. For replacements, keep the old row/image unchanged until one atomic update publishes all new metadata.
 
-New photos insert only after the thumbnail file exists. Same-path replacements retain photo ID/caption/placement; existing photo foreign keys cascade placement deletion without deleting slots.
+New photos insert only after the thumbnail file exists. Same-path replacements retain photo ID/caption/placement; use cases explicitly remove placements before photo deletion in the same transaction, preserving slot geometry.
 
 Capture time uses nullable fixed-width ISO local date/time text with nine fractional digits; source/SQLite adapters validate representations and preserve chronological ordering.
 
@@ -243,8 +288,6 @@ Migrations preserve existing databases and legacy capture metadata. Populate loc
 enum ThumbnailQuality:
   case Low, Standard, High
 
-enum PhotoReferencesChange:
-  case Keep, Clear
 ```
 
 | Value | Contract |
@@ -289,24 +332,24 @@ The browser fetches those URLs near the viewport. Missing files return 404, read
 
 | Contract value / result | Meaning / alternatives |
 | --- | --- |
-| `PhotoDirectory` | Chapter ID and saved source folder; persistence mutations check that the chapter still references that folder. |
+| `ChapterPhotoSource` / `OriginalPhotoLocation` | Configured original-photo source / one original identified within that source; the location carries its source, so reading needs no separate root argument. |
 | `SourcePhoto` | One stable read's content, hash, dimensions and optional local capture time; the encoder consumes that content, never rereads the path. |
-| `ReadyPhoto` | Chapter-owned identity, relative source, source hash, capture time, source dimensions and successfully stored thumbnail metadata; one complete row. |
+| `Photo` | Chapter-owned identity, original location/hash, capture time/dimensions and successfully stored thumbnail metadata; a complete value, never a partial processing result. |
 | `EncodedThumbnail` | JPEG bytes and validated positive dimensions/selected-preset byte limit. |
-| `ThumbnailKey` / `ThumbnailVersion` | Managed relative file key / immutable output identifier, never original-source browser URLs. |
-| `PhotoReferencesChange` | Supplied chapter-write decision: Keep / Clear; use case decides whether the source folder changed, persistence atomically applies it. |
+| `ThumbnailLocation` / `ThumbnailVersion` | Exclusive application-owned publication location / immutable output identifier; adapters translate locations to stored keys or browser URLs. |
 | `UnsupportedCount` | Nonnegative count of unsupported files in a complete scan. |
 | `RefreshResult` | Queued / Coalesced / ChapterNotFound / Failed; acceptance means scheduled, not completed. |
 | `PhotoEvent` | `Subscribed` / `InventoryChanged(chapter: ChapterId)`; notifications trigger authoritative reads, not reconstruction from event history. |
-| `PhotoListingResult` | Found: saved directory, complete photos and placed-photo IDs from authoritative spread/cover placements for that chapter; or NotFound / Failed. |
+| `PhotoListingResult` | Found: complete chapter photos; or NotFound / Failed. |
+| `PlacedPhotosResult` / `PlacementRemovalResult` | Found: chapter photo IDs referenced by spread/cover placements; or Failed. Removal returns Removed / Failed, including already-empty selections as Removed. |
 | `PhotoInventoryResult` | Found: photos with versioned thumbnail locations, placement-derived counts and transient work/error feedback; or NotFound / Failed. HTTP maps managed locations to application URLs. |
-| `SourceScanResult` | Complete: candidate paths and unsupported count; or Failed. Partial enumeration is never Complete. |
-| `SourceReadResult` | Read: `SourcePhoto`; or Undecodable / Unstable / Failed. Invalid EXIF dates produce a Read with absent capture time. |
+| `OriginalDiscoveryResult` | Complete: validated original locations and unsupported count; or Failed. Partial enumeration is never Complete. |
+| `OriginalPhotoReadResult` | Read: `SourcePhoto`; or Undecodable / Unstable / Failed. Invalid EXIF dates produce a Read with absent capture time. |
 | `ThumbnailGenerationResult` | Generated: `EncodedThumbnail`; or Failed. Encoding failure is not an undecodable-source skip. |
-| `ThumbnailStoreResult` | Stored: managed key/version; or Failed. |
-| `ThumbnailListingResult` / `ThumbnailDeleteResult` | Listed keys / Deleted or AlreadyAbsent; both distinguish Failed. |
-| `ReferencedThumbnailsResult` | Found: requested keys referenced anywhere in the database, across all albums; or Failed, which forbids cleanup deletion. |
-| `PhotoWriteResult` | Saved / Superseded / ChapterNotFound / Failed; stale-folder writes never change current references. |
+| `ThumbnailStoreResult` | Stored: exclusive thumbnail location/version; or Failed. |
+| `ThumbnailDeleteResult` | Deleted / AlreadyAbsent / Failed. |
+| `PhotoWriteResult` | Saved / ChapterNotFound / Failed; use-case epoch checks reject superseded work before persistence. |
+| `PersistenceFailure` | ChapterNotFound / Failed; transaction failure channel populated from repository outcomes by the use case. |
 
 ### Concurrency and failure boundaries
 
@@ -314,15 +357,19 @@ Folder saves advance runtime epochs under the shared chapter-mutation lock, reje
 
 Hold that lock through epoch validation and each atomic write. Scans/encoding run outside it; application-owned supervision handles physical termination/finalization without delaying saves or holding the chapter lock.
 
-Inventory counts derive from returned complete photos and placed-photo IDs; no stored unplaced flag or duplicated placement state. The repository reads placement facts, not placement policy.
+Inventory counts derive from complete photos and the placement repository's authoritative IDs, read in one consistent snapshot; no stored unplaced flag or duplicated placement state.
 
-Cleanup lists managed keys and queries their references across all albums before excluding in-flight keys. Publication coordinates with reference-check/deletion so cleanup cannot race a new reference.
+Cleanup is per-photo compensation or retirement, using locations already known to the use case. Exclusive publication locations prevent one photo's cleanup from deleting another photo's thumbnail.
 
-SQLite and NAS have no shared transaction: store the file before committing its reference. A failed/superseded commit leaves an unused file for cleanup, never a dangling ready reference.
+Stored-file ownership and commit/retirement handoffs are cancellation-safe. Before a proven commit, cancellation finalizes the attempt's file; after commit, that file is live and only previous locations pass to supervised retirement.
 
-A crash after commit retains a complete photo. Before commit, a new photo has no row and an edited photo keeps its old row; the next Refresh retries and cleans unused files.
+Register retirement before exposing a committed result to cancellation; cleanup outlives the originating request/worker. Resolve commit outcome before compensation, never treating cancellation alone as proof of rollback.
 
-Only complete enumeration permits absence deletion; failed enumeration preserves photos. Undecodable/unstable files skip replacement, retaining any previous version; cleanup failures warn and retry on the next Refresh.
+SQLite and NAS have no shared transaction: store the file before committing its reference. Failed/superseded persistence triggers deletion of that attempt's file, never the existing photo's thumbnail.
+
+A crash after commit retains a complete photo. Before commit, a new photo has no row and an edited photo keeps its old row; the next Refresh retries import, without a global storage sweep.
+
+Only complete enumeration permits absence deletion; failed enumeration preserves photos. Undecodable/unstable files skip replacement, retaining any previous version; thumbnail deletion failures explicitly report retained files.
 
 The spike's adapter is disposable evidence. Production scheduling, SSE, concurrency and cleanup are specified contracts, not claimed spike implementations.
 
@@ -346,7 +393,7 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | T1 | Each preset accepts its exact byte ceiling and rejects ceiling + 1; no output exceeds 300,000 bytes. |
 | T2 | Preserve orientation/proportions without upscaling at the stated resolution policy. |
 | T3 | Browser delivery uses one thumbnail per photo; managed storage contains no copied originals or alternate variants. |
-| T4 | Cleanup removes retired/crash-orphan files, preserves live/in-flight files across albums, and retries failures. |
+| T4 | Cancellation at storage/commit/retirement handoffs preserves live files and completes targeted cleanup; rollback deletes only the new file, commit retires only previous files, and deletion failures remain explicit. |
 | T5 | Environment overrides flow through HOCON/PureConfig; invalid settings fail startup, and unset quality selects Standard. |
 | T6 | Quality changes regenerate on Refresh without changing photo identity/placement or publishing multiple variants. |
 | T7 | Near-viewport loading and immutable version URLs permit cached reuse; changed thumbnails cannot reuse stale content URLs. |
@@ -377,6 +424,10 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 ## Invariants
 
 - Preserve atomic chapter/opening-spread creation, album order/capacity, Cover and Reader behavior.
+
+## Tradeoffs Accepted
+
+A crash between file publication and metadata persistence or retirement can leave an unused thumbnail. Operators retain that storage cost; this feature performs targeted deletion, not global orphan collection.
 
 ## Doc Sync
 
