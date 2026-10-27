@@ -26,7 +26,7 @@ Keep coordination inside its owner and derive views from already available data.
 
 Show orchestration, injected collaborators, changed domain/schema contracts, asynchronous acknowledgments, publication/failure order and UI delivery. Use compact signatures and sequence diagrams; source-verify named dependencies and their effect/runtime requirements.
 
-Walk the scenario through the signatures in both directions: every call has its inputs/result, and every public method has a necessary caller. Apply repository naming/effect conventions; add prose only for guarantees the contracts leave ambiguous.
+Walk scenarios through every signature and parameter using reviewer.md's seam-definition evidence: prove necessity, not just a possible caller. Apply stack-specific API/type/effect conventions to spec sketches too; add prose only for guarantees contracts leave ambiguous.
 
 Keep concrete adapter internals, file layouts and slice execution notes in ignored work evidence; the single proposal owns the agreed technical contracts.
 
