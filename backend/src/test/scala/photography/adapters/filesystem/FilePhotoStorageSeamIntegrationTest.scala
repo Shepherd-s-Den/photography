@@ -9,6 +9,7 @@ import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
+import photography.ImageIOTestResources
 import photography.domain.album.*
 import photography.ports.ThumbnailStorage
 import photography.ports.PhotoStorage.*
@@ -29,8 +30,11 @@ import javax.imageio.stream.ImageInputStream
 import scala.jdk.CollectionConverters.*
 
 final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
-  private given Logger[IO] = Slf4jLogger.getLogger[IO]
-  private val undatedJpeg  = buildJpeg(maybeDate = None, orientation = 1, maybeFraction = None)
+  private given Logger[IO]     = Slf4jLogger.getLogger[IO]
+  private lazy val undatedJpeg = buildJpeg(maybeDate = None, orientation = 1, maybeFraction = None)
+  private val imageIO          = ResourceSuiteLocalFixture("image-io", ImageIOTestResources.acquire)
+
+  override def munitFixtures = List(imageIO)
 
   test("should enumerate only immediate regular JPEGs and count unsupported regular files"):
     buildDirectory.use: root =>

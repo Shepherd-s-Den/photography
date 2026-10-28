@@ -58,6 +58,7 @@ lazy val root = (project in file("."))
       "org.flywaydb"           % "flyway-core"               % "13.11.1",
       "org.xerial"             % "sqlite-jdbc"               % "3.53.4.0",
       "com.drewnoakes"         % "metadata-extractor"        % "2.22.0",
+      "net.coobird"            % "thumbnailator"             % "0.4.21",
       "org.http4s"            %% "http4s-dsl"                % "0.23.38",
       "org.http4s"            %% "http4s-circe"              % "0.23.38",
       "org.http4s"            %% "http4s-ember-server"       % "0.23.38",
