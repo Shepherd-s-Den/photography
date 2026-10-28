@@ -6,8 +6,7 @@ import cats.syntax.all.*
 import com.drew.imaging.jpeg.{JpegMetadataReader, JpegProcessingException}
 import com.drew.metadata.exif.{ExifDirectoryBase, ExifIFD0Directory}
 import io.github.iltotore.iron.*
-import net.coobird.thumbnailator.Thumbnails
-import net.coobird.thumbnailator.util.exif.{ExifFilterUtils, Orientation}
+import com.twelvemonkeys.image.{ImageUtil, ResampleOp}
 import org.typelevel.log4cats.Logger
 import photography.domain.album.*
 import photography.syntax.SyncSyntax.*
@@ -48,7 +47,7 @@ object PhotoThumbnailGenerator:
       val metadata = JpegMetadataReader.readMetadata(new ByteArrayInputStream(bytes))
       Option(metadata.getFirstDirectoryOfType(classOf[ExifIFD0Directory]))
         .flatMap(directory => Option(directory.getInteger(ExifDirectoryBase.TAG_ORIENTATION)))
-        .flatMap(value => Option(Orientation.typeOf(value.intValue))).getOrElse(Orientation.TOP_LEFT)
+        .fold(1)(_.intValue)
 
     private def decodeImage(bytes: Array[Byte]) =
       val input = Resource.makeCase(new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes)).blocking[F]):
@@ -64,10 +63,26 @@ object PhotoThumbnailGenerator:
             Option(reader.read(0)).filter(_ => !warnings.get()).toRight(new IIOException("Invalid JPEG image"))
           }.blocking[F].flatMap(_.liftTo[F])
 
-    private def transformImage(image: BufferedImage, orientation: Orientation) =
+    private def transformImage(image: BufferedImage, orientation: Int) =
+      orientImage(resizeImage(image), orientation = orientation)
+
+    private def resizeImage(image: BufferedImage) =
       val scale  = math.min(1.0, quality.longestEdge.toDouble / math.max(image.getWidth, image.getHeight))
-      val filter = ExifFilterUtils.getFilterForOrientation(orientation)
-      Thumbnails.of(image).scale(scale).imageType(BufferedImage.TYPE_INT_RGB).addFilter(filter).asBufferedImage()
+      val width  = math.max(1, math.round(image.getWidth * scale).toInt)
+      val height = math.max(1, math.round(image.getHeight * scale).toInt)
+      val output = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+      new ResampleOp(width, height, ResampleOp.FILTER_LANCZOS).filter(image, output)
+
+    private def orientImage(image: BufferedImage, orientation: Int) =
+      orientation match
+        case 2 => ImageUtil.createFlipped(image, ImageUtil.FLIP_VERTICAL)
+        case 3 => ImageUtil.createRotated(image, ImageUtil.ROTATE_180)
+        case 4 => ImageUtil.createFlipped(image, ImageUtil.FLIP_HORIZONTAL)
+        case 5 => ImageUtil.createFlipped(ImageUtil.createRotated(image, ImageUtil.ROTATE_90_CW), ImageUtil.FLIP_VERTICAL)
+        case 6 => ImageUtil.createRotated(image, ImageUtil.ROTATE_90_CW)
+        case 7 => ImageUtil.createFlipped(ImageUtil.createRotated(image, ImageUtil.ROTATE_90_CCW), ImageUtil.FLIP_VERTICAL)
+        case 8 => ImageUtil.createRotated(image, ImageUtil.ROTATE_90_CCW)
+        case _ => image
 
     private def encodeImage(image: BufferedImage) =
       new ByteArrayOutputStream().blocking[F].flatMap: bytes =>

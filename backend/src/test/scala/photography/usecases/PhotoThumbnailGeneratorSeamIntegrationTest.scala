@@ -60,7 +60,7 @@ final class PhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
     }
 
   test("should bake every EXIF rotation and mirror into the JPEG pixels before discarding orientation metadata"):
-    val sizes        = Vector((96, 64, 96, 64), (2400, 1600, 1536, 1024))
+    val sizes        = Vector((96, 64, 96, 64), (97, 65, 97, 65), (2400, 1600, 1536, 1024))
     val orientations = Vector(
       (1, Vector(0, 1, 2, 3)),
       (2, Vector(1, 0, 3, 2)),
