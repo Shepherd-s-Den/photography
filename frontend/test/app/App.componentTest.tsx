@@ -386,7 +386,7 @@ describe("album dashboard and open", () => {
       expect(screen.queryByRole("button", { name: "Retry album" })).not.toBeInTheDocument();
     }
   });
-  it("should report a stream interrupted before initial subscription and recover by reading existing workspace state", async () => {
+  it.each(["interrupted", "invalid"] as const)("should report an initial %s stream and recover by reading existing workspace state", async (kind) => {
     window.history.replaceState(null, "", `/albums/${firstAlbum.id}`);
     let receive: (event: PhotoEvent) => void = () => {
       throw new Error("Not subscribed");
@@ -400,8 +400,14 @@ describe("album dashboard and open", () => {
     const client = buildClient();
     render(() => <App client={client} events={liveEvents} />);
 
-    receive({ kind: "interrupted" });
-    expect(screen.getByRole("alert")).toHaveTextContent("Live photo updates interrupted");
+    receive({ kind });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      kind === "invalid" ? "Live photo update could not be decoded" : "Live photo updates interrupted",
+    );
+    if (kind === "invalid") {
+      expect(screen.getByRole("link", { name: "Reopen album" })).toHaveAttribute("href", window.location.href);
+      expect(screen.queryByRole("status", { name: "Loading album" })).not.toBeInTheDocument();
+    }
     expect(client.workspace).not.toHaveBeenCalled();
     receive({ kind: "subscribed" });
     await screen.findByRole("heading", { name: "A year in photographs / 2026" });

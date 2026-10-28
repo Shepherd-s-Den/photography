@@ -19,8 +19,13 @@ export function AlbumOpen(props: {
       <a class="back-link" href="/">
         Back to albums
       </a>
-      <Show when={live.loading() && live.workspace() === undefined}>
+      <Show when={live.loading() && live.workspace() === undefined && live.liveStatus() !== "invalid"}>
         <div role="status" aria-label="Loading album" class="loading-placeholder" />
+      </Show>
+      <Show when={live.workspace() === undefined && live.liveStatus() === "invalid" && live.error() === undefined}>
+        <p role="alert">
+          Live photo update could not be decoded. <a href={window.location.href}>Reopen album</a> to reconnect.
+        </p>
       </Show>
       <Show when={live.workspace() === undefined && live.liveStatus() === "interrupted" && live.error() === undefined}>
         <p role="alert">Live photo updates interrupted. Reconnecting…</p>

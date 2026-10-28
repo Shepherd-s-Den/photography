@@ -39,19 +39,19 @@ object PhotoThumbnailGenerator:
         bytes       <- content.bytes.toArray.blocking[F]
         orientation <- readOrientation(bytes = bytes).blocking[F]
         decoded     <- decodeImage(bytes = bytes)
-        encoded     <- fitThumbnail(decoded, orientation, longestEdge = quality.longestEdge)
+        encoded     <- fitThumbnail(decoded, orientation = orientation, longestEdge = quality.longestEdge)
       yield encoded
 
     private def fitThumbnail(original: BufferedImage, orientation: Int, longestEdge: Int) =
       Async[F].tailRecM(longestEdge): edge =>
-        transformImage(original, orientation, longestEdge = edge).blocking[F].flatMap: image =>
+        transformImage(original, orientation = orientation, longestEdge = edge).blocking[F].flatMap: image =>
           encodeAtQuality(image).map:
             case None if edge > 1 => math.max(1, edge * 4 / 5).asLeft[Option[EncodedThumbnail]]
             case result           => result.asRight[Int]
 
     private def encodeAtQuality(image: BufferedImage) =
       Async[F].tailRecM(85): compression =>
-        encodeImage(image, compression).map:
+        encodeImage(image, compression = compression).map:
           case None if compression > 65 => (compression - 5).asLeft[Option[EncodedThumbnail]]
           case result                   => result.asRight[Int]
 
@@ -76,7 +76,7 @@ object PhotoThumbnailGenerator:
           }.blocking[F].flatMap(_.liftTo[F])
 
     private def transformImage(image: BufferedImage, orientation: Int, longestEdge: Int) =
-      orientImage(resizeImage(image, longestEdge), orientation = orientation)
+      orientImage(resizeImage(image, longestEdge = longestEdge), orientation = orientation)
 
     private def resizeImage(image: BufferedImage, longestEdge: Int) =
       val scale  = math.min(1.0, longestEdge.toDouble / math.max(image.getWidth, image.getHeight))
@@ -100,7 +100,7 @@ object PhotoThumbnailGenerator:
       new ByteArrayOutputStream().blocking[F].flatMap: bytes =>
         val output = Resource.makeCase(new MemoryCacheImageOutputStream(bytes).blocking[F]):
           case (stream, exit) => releaseAfterProcessing(stream.close().blocking[F], exit)
-        output.use(stream => writeJpeg(image, stream, compression)) >>
+        output.use(stream => writeJpeg(image, stream, compression = compression)) >>
           {
             val dimensions = ThumbnailDimensions(
               width = image.getWidth.refineUnsafe[ThumbnailPixelCountConstraint],
