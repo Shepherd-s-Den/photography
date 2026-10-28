@@ -7,8 +7,9 @@ import io.circe.Json
 import io.circe.jawn.parse
 import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
-import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
+import org.http4s.{CacheDirective, HttpApp, MediaType, Method, Request, Status, Uri}
 import org.http4s.headers.`Content-Type`
+import org.http4s.headers.`Cache-Control`
 import org.http4s.circe.jsonDecoder
 import photography.domain.album.*
 import photography.domain.layout.*
@@ -16,11 +17,11 @@ import photography.usecases.{AlbumManager, AlbumWorkspaceManager, ChapterManager
 import photography.usecases.AlbumManager.*
 import photography.usecases.AlbumWorkspaceManager.GetResult
 import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
-import photography.usecases.ChapterPhotoImport.Scheduling
-import photography.usecases.PhotoInventory
+import photography.usecases.ChapterPhotoImport.{ExecutionOutcome, Scheduling, Status as ImportStatus}
+import photography.usecases.{PhotoInventory, PhotoManager, PhotoWriteRecovery}
 
 import java.nio.file.Path
-import java.time.{Instant, LocalDate}
+import java.time.{Instant, LocalDate, LocalDateTime}
 import java.util.UUID
 
 final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
@@ -51,7 +52,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     val opening         = Spread.AlbumStart(SpreadId(new UUID(0L, 11L)), template, photoSlots = emptyPhotos, text, placements = emptyPlacements)
     Album(AlbumId(new UUID(0L, 1L)), year = 2024, title = "Our year", synopsis = "", Instant.EPOCH, opening, chapters = Vector(chapter))
 
-  private val emptyInventories           = Map.empty[ChapterId, PhotoInventory.Inventory]
+  private val emptyInventories           = Map.empty[ChapterId, AlbumWorkspaceManager.ChapterPhotos]
   private val workspace: GetResult.Found =
     GetResult.Found(album, NonEmptyList.of(country, otherCountry), photoRoot = "/photos", photoInventories = emptyInventories)
 
@@ -75,7 +76,8 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
           {"id":"${text.id.value}","kind":"text","x":10.0,"y":20.0,"width":30.0,"height":40.0}]},
         {"id":"${new UUID(0L, 5L)}","chapter":"${chapter.id.value}","kind":"photos_only","slots":[
           {"id":"${photo.id.value}","kind":"photo","x":10.0,"y":20.0,"width":30.0,"height":40.0}]}],
-      "countries":[{"id":"${country.id.value}","name":"Romania","code":"RO"},{"id":"${otherCountry.id.value}","name":"Japan","code":"JP"}]}""")
+      "countries":[{"id":"${country.id.value}","name":"Romania","code":"RO"},{"id":"${otherCountry.id.value}","name":"Japan","code":"JP"}],
+      "photoInventories":{}}""")
 
     send(server, Method.GET, s"$albumPath/workspace").map(response => assertEquals(response, ApiResponse(Status.Ok, expected)))
 
@@ -106,7 +108,8 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     val server           = buildApi(refs)
     val homeAlbum        = album.copy(chapters = Vector(chapter.copy(destination = chapter.destination.copy(name = "Home"))))
     val homeServer       = buildApi(refs, albumResult = GetAlbumResult.Found(homeAlbum))
-    val expectedId       = json(s"""{"id":"${chapter.id.value}"}""")
+    val createdId        = json(s"""{"id":"${chapter.id.value}","scheduling":"queued"}""")
+    val updatedId        = json(s"""{"id":"${chapter.id.value}","scheduling":"not-requested"}""")
     val expectedVacation = s"Coast|Dates(${chapter.period})|/photos/coast|${country.id.value}"
     val expectedHome     = s"Home|AlbumYear|/photos/Home|${country.id.value}"
     val createPrefix     = s"create:${album.id.value}:"
@@ -125,10 +128,10 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       updatedHome     <- send(homeServer, Method.PUT, chapterPath, home.replace("\"kind\":\"home\",", ""))
       calls           <- refs.calls.get
     yield
-      assertEquals(createdVacation, ApiResponse(Status.Created, expectedId))
-      assertEquals(createdHome, ApiResponse(Status.Created, expectedId))
-      assertEquals(updatedVacation, ApiResponse(Status.Ok, expectedId))
-      assertEquals(updatedHome, ApiResponse(Status.Ok, expectedId))
+      assertEquals(createdVacation, ApiResponse(Status.Created, createdId))
+      assertEquals(createdHome, ApiResponse(Status.Created, createdId))
+      assertEquals(updatedVacation, ApiResponse(Status.Ok, updatedId))
+      assertEquals(updatedHome, ApiResponse(Status.Ok, updatedId))
       assertEquals(calls, expectedCalls)
 
   test("should preserve inclusive same-day and cross-year vacation periods"):
@@ -247,6 +250,156 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(update, serviceError)
       assertEquals(missing, ApiResponse(Status.NotFound, json("""{"code":"chapter_not_found"}""")))
 
+  test("should adapt chapter-addressed inventory and Refresh with explicit missing and failure outcomes"):
+    val empty     = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty[PhotoId])
+    val execution = ExecutionOutcome(ImportStatus.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
+    val found     = AlbumWorkspaceManager.ChapterResult.Found(AlbumWorkspaceManager.ChapterPhotos(empty, execution))
+    val scenarios = Vector(
+      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.Queued), Status.Ok, Status.Accepted),
+      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.Coalesced), Status.Ok, Status.Accepted),
+      (AlbumWorkspaceManager.ChapterResult.ChapterNotFound, ChapterManager.RefreshResult.ChapterNotFound, Status.NotFound, Status.NotFound),
+      (AlbumWorkspaceManager.ChapterResult.Failed, ChapterManager.RefreshResult.Failed, Status.InternalServerError, Status.InternalServerError),
+      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.Failed), Status.Ok, Status.InternalServerError),
+      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.NotRequested), Status.Ok, Status.InternalServerError)
+    )
+
+    scenarios.traverse_ { case (inventory, refresh, getStatus, postStatus) =>
+      val server = buildApi(Refs(), chapterResult = inventory, refreshResult = refresh)
+      val path   = s"/api/chapters/${chapter.id.value}/photos"
+
+      for
+        read      <- send(server, Method.GET, path)
+        scheduled <- send(server, Method.POST, s"$path/refresh")
+        malformed <- send(server, Method.POST, "/api/chapters/bad/photos/refresh")
+        missing   <- send(server, Method.GET, "/api/chapters/bad/photos")
+      yield
+        assertEquals((read.status, scheduled.status), (getStatus, postStatus))
+        assertEquals(malformed, ApiResponse(Status.NotFound, json("""{"code":"chapter_not_found"}""")))
+        assertEquals(missing, malformed)
+    }
+
+  test("should expose safe processing feedback and preserve saved scheduling outcomes"):
+    val empty          = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty[PhotoId])
+    val completed      = PhotoManager.RefreshResult(unsupportedCount = 2, issues = Vector(PhotoManager.Issue.Undecodable(filename = "bad.jpg")))
+    val idleProcessing = json("""{"state":"idle","unsupportedCount":0,"skippedCount":0,"issues":[]}""")
+    val launchFailed   = json("""{"state":"failed","unsupportedCount":0,"skippedCount":0,
+      "issues":[{"stage":"scheduling","code":"scheduling_failed","filename":null}]}""")
+    val uncertain = json("""{"state":"failed","unsupportedCount":0,"skippedCount":0,
+      "issues":[{"stage":"persistence","code":"persistence_failed","filename":null}]}""")
+    val skipped = json("""{"state":"completed","unsupportedCount":2,"skippedCount":1,
+      "issues":[{"stage":"read","code":"undecodable","filename":"bad.jpg"}]}""")
+    val statuses = Vector(
+      (ImportStatus.Idle, idleProcessing),
+      (ImportStatus.Queued, idleProcessing.deepMerge(json("""{"state":"queued"}"""))),
+      (ImportStatus.Running, idleProcessing.deepMerge(json("""{"state":"running"}"""))),
+      (ImportStatus.LaunchFailed, launchFailed),
+      (ImportStatus.Uncertain, uncertain),
+      (ImportStatus.Finished(completed), skipped)
+    )
+
+    statuses.traverse_ { case (status, expected) =>
+      val execution = ExecutionOutcome(status, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
+      val found     = AlbumWorkspaceManager.ChapterResult.Found(AlbumWorkspaceManager.ChapterPhotos(empty, execution))
+      val server    = buildApi(Refs(), chapterResult = found)
+
+      send(server, Method.GET, s"/api/chapters/${chapter.id.value}/photos").map: response =>
+        assertEquals(response.body.hcursor.get[Json]("processing"), expected.asRight)
+        assertEquals(response.body.hcursor.downField("counts").get[Int]("total"), 0.asRight)
+    } >> Scheduling.values.toVector.traverse_ { scheduling =>
+      val server   = buildApi(Refs(), createResult = CreateResult.Created(chapter.id, scheduling), updateResult = UpdateResult.Updated(scheduling))
+      val expected = scheduling match
+        case Scheduling.Queued       => "queued"
+        case Scheduling.Coalesced    => "coalesced"
+        case Scheduling.NotRequested => "not-requested"
+        case Scheduling.Failed       => "failed"
+
+      for
+        created <- send(server, Method.POST, s"$albumPath/chapters", vacation)
+        updated <- send(server, Method.PUT, chapterPath, vacation)
+      yield
+        assertEquals((created.status, updated.status), (Status.Created, Status.Ok))
+        assertEquals(created.body.hcursor.get[String]("scheduling"), expected.asRight)
+        assertEquals(updated.body.hcursor.get[String]("scheduling"), expected.asRight)
+    }
+
+  test("should encode completed photos and every failure without exposing source paths or write identities"):
+    val location = ThumbnailLocation(new UUID(0L, 80L))
+    val intent   = PhotoWriteIntentId(new UUID(0L, 81L))
+    val issues   = Vector(
+      PhotoManager.Issue.Discovery,
+      PhotoManager.Issue.Read(filename = "one.jpg"),
+      PhotoManager.Issue.Generation(filename = "one.jpg"),
+      PhotoManager.Issue.Undecodable(filename = "one.jpg"),
+      PhotoManager.Issue.Unstable(filename = "one.jpg"),
+      PhotoManager.Issue.Storage,
+      PhotoManager.Issue.Cleanup(location),
+      PhotoManager.Issue.Persistence,
+      PhotoManager.Issue.Unexpected,
+      PhotoManager.Issue.WriteReferences(intent),
+      PhotoManager.Issue.WriteCompletion(intent)
+    )
+    val cleanup = Vector(
+      PhotoWriteRecovery.Issue.Listing,
+      PhotoWriteRecovery.Issue.References(intent),
+      PhotoWriteRecovery.Issue.Cleanup(intent, location),
+      PhotoWriteRecovery.Issue.Completion(intent)
+    )
+    val expectedIssues = Vector(
+      ("discovery", "unreadable_source", Json.Null),
+      ("read", "unreadable_source", Json.fromString("one.jpg")),
+      ("generation", "encoding_failed", Json.fromString("one.jpg")),
+      ("read", "undecodable", Json.fromString("one.jpg")),
+      ("read", "unstable", Json.fromString("one.jpg")),
+      ("storage", "storage_failed", Json.Null),
+      ("cleanup", "cleanup_failed", Json.Null)
+    ) ++ Vector.fill(6)(("persistence", "persistence_failed", Json.Null)) ++
+      Vector(("cleanup", "cleanup_failed", Json.Null), ("persistence", "persistence_failed", Json.Null))
+    val expectedFeedback = expectedIssues.map { case (stage, code, filename) =>
+      Json.obj("stage" -> Json.fromString(stage), "code" -> Json.fromString(code), "filename" -> filename)
+    }
+    val expectedProcessing = Json.obj(
+      "state"            -> Json.fromString("failed"),
+      "unsupportedCount" -> Json.fromInt(3),
+      "skippedCount"     -> Json.fromInt(2),
+      "issues"           -> Json.arr(expectedFeedback*)
+    )
+
+    Vector(false, true).traverse_ { annotated =>
+      val maybeDate    = Option.when(annotated)(LocalDateTime.of(2026, 1, 2, 3, 4))
+      val maybeCaption = Option.when(annotated)("Caption")
+      val metadata     = PhotoMetadata(hash = "source-hash", maybeCapturedLocal = maybeDate, PhotoDimensions(width = 20, height = 30))
+      val thumbnail    = Thumbnail(location, version = "version", ThumbnailDimensions(width = 10, height = 15), ThumbnailQuality.Standard, bytes = 1)
+      val photo        = Photo(
+        PhotoId(new UUID(0L, 82L)),
+        chapter.id,
+        OriginalPhotoLocation(source = "/private/originals", filename = "one.jpg"),
+        metadata,
+        thumbnail,
+        maybeCaption = maybeCaption
+      )
+      val inventory = PhotoInventory.Inventory(photos = Vector(photo), placed = Set(photo.id))
+      val execution =
+        ExecutionOutcome(ImportStatus.Finished(PhotoManager.RefreshResult(unsupportedCount = 3, issues = issues)), retirementIssues = cleanup)
+      val snapshot = AlbumWorkspaceManager.ChapterPhotos(inventory, execution)
+      val server   = buildApi(
+        Refs(),
+        chapterResult = AlbumWorkspaceManager.ChapterResult.Found(snapshot),
+        workspaceResult = workspace.copy(photoInventories = Map(chapter.id -> snapshot))
+      )
+      val expectedPhoto = json(s"""{"id":"${photo.id.value}","filename":"one.jpg","capturedLocal":${maybeDate.fold("null")(date => s"\"$date\"")},
+        "width":20,"height":30,"caption":${maybeCaption.fold("null")(caption => s"\"$caption\"")},
+        "thumbnail":{"url":"/thumbnails/${location.value}/version.jpg","width":10,"height":15}}""")
+
+      for
+        read      <- send(server, Method.GET, s"/api/chapters/${chapter.id.value}/photos")
+        workspace <- send(server, Method.GET, s"$albumPath/workspace")
+      yield
+        assertEquals(read.body.hcursor.get[Vector[Json]]("photos"), Vector(expectedPhoto).asRight)
+        assertEquals(read.body.hcursor.get[Json]("processing"), expectedProcessing.asRight)
+        assertEquals(workspace.body.hcursor.downField("photoInventories").get[Json](chapter.id.value.toString), read.body.asRight)
+        assert(!read.body.noSpaces.contains("/private") && !read.body.noSpaces.contains(intent.value.toString))
+    }
+
   final private case class Refs():
     val calls: Ref[IO, Vector[String]] = Ref.unsafe(Vector.empty)
 
@@ -258,10 +411,13 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       workspaceResult: GetResult = workspace,
       albumResult: GetAlbumResult = GetAlbumResult.Found(album),
       createResult: CreateResult = CreateResult.Created(chapter.id, Scheduling.Queued),
-      updateResult: UpdateResult = UpdateResult.Updated(Scheduling.NotRequested)
+      updateResult: UpdateResult = UpdateResult.Updated(Scheduling.NotRequested),
+      chapterResult: AlbumWorkspaceManager.ChapterResult = AlbumWorkspaceManager.ChapterResult.Failed,
+      refreshResult: ChapterManager.RefreshResult = ChapterManager.RefreshResult.Failed
   ) =
     val workspaces = new AlbumWorkspaceManager[IO]:
-      override def get(id: AlbumId): IO[GetResult] = workspaceResult.pure[IO]
+      override def get(id: AlbumId): IO[GetResult]                                     = workspaceResult.pure[IO]
+      override def listChapter(id: ChapterId): IO[AlbumWorkspaceManager.ChapterResult] = chapterResult.pure[IO]
     val albums = new AlbumManager[IO]:
       override def get(id: AlbumId): IO[GetAlbumResult]                              = albumResult.pure[IO]
       override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
@@ -269,8 +425,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
     val chapters = new ChapterManager[IO]:
-      override def refresh(album: AlbumId, chapter: ChapterId): IO[ChapterManager.RefreshResult] =
-        IO.raiseError[ChapterManager.RefreshResult](new AssertionError("Unexpected photo Refresh"))
+      override def refresh(chapter: ChapterId): IO[ChapterManager.RefreshResult] = refreshResult.pure[IO]
       override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: PhotoSource) =
         refs.calls.update(_ :+ s"create:${id.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}").as(createResult)
       override def update(
@@ -295,6 +450,8 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       content  <- response.as[Json]
     yield
       assertEquals(response.contentType.map(_.mediaType), MediaType.application.json.some)
+      if method === Method.GET && response.status === Status.Ok && (path.endsWith("/workspace") || path.endsWith("/photos")) then
+        assertEquals(response.headers.get[`Cache-Control`], `Cache-Control`(CacheDirective.`no-store`).some)
       ApiResponse(response.status, content)
   // scalafix:on DisableSyntax.defaultArgs
 

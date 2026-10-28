@@ -24,7 +24,7 @@ trait ChapterManager[F[_]]:
       period: Period,
       sourceFolder: PhotoSource
   ): F[UpdateResult]
-  def refresh(album: AlbumId, chapter: ChapterId): F[RefreshResult]
+  def refresh(chapter: ChapterId): F[RefreshResult]
 
 object ChapterManager:
   def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
@@ -91,21 +91,18 @@ object ChapterManager:
           case Right(Some(launch)) => launchImport(launch.request, retirements = launch.retirements).map(UpdateResult.Updated(_))
       .handleErrorWith(error => Logger[F].error(error)("Chapter update failed").as(UpdateResult.Failed))
 
-    override def refresh(album: AlbumId, chapter: ChapterId): F[RefreshResult] =
+    override def refresh(chapter: ChapterId): F[RefreshResult] =
       val refresh = summon[Mutex[F]].lock.surround:
-        val program =
-          for
-            current <- readAlbum(album).eitherT.leftWiden[UpdateFailure]
-            saved   <- current.chapters.find(_.id.value === chapter.value).toRight(MissingChapter: UpdateFailure).eitherT[F]
-            request <- photos.prepare(chapter, saved.sourceFolder).attempt.lift[UpdateFailure]
-          yield request
-        program.value
+        Transaction[Db, F].run(chapters.findSource(chapter)).flatMap:
+          case ChapterRepository.SourceResult.Found(source) =>
+            photos.prepare(chapter, source).attempt.map(_.asRight[RefreshResult])
+          case ChapterRepository.SourceResult.ChapterNotFound => RefreshResult.ChapterNotFound.asLeft[Either[Throwable, Request]].pure[F]
+          case ChapterRepository.SourceResult.Failed          => RefreshResult.Failed.asLeft[Either[Throwable, Request]].pure[F]
       MonadCancelThrow[F].uncancelable: _ =>
         refresh.flatMap:
           case Right(request) => launchImport(request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(RefreshResult.Scheduled(_))
-          case Left(Failure.AlbumNotFound)                           => RefreshResult.AlbumNotFound.pure[F]
-          case Left(MissingChapter)                                  => RefreshResult.ChapterNotFound.pure[F]
-          case Left(Failure.Unavailable) | Left(_: Failure.Conflict) => RefreshResult.Failed.pure[F]
+          case Left(failure)  => failure.pure[F]
+      .handleErrorWith(error => Logger[F].error(error)("Chapter photo Refresh failed").as(RefreshResult.Failed))
 
     private def launchImport(request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement]) =
       val launch = photos.retire(retirements = retirements) >> request.traverse(photos.launch).flatMap:
@@ -245,7 +242,7 @@ object ChapterManager:
 
   enum RefreshResult:
     case Scheduled(scheduling: Scheduling)
-    case ChapterNotFound, AlbumNotFound, Failed
+    case ChapterNotFound, Failed
 
   enum Period:
     case AlbumYear

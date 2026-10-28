@@ -2,6 +2,7 @@ package photography.adapters.sqlite
 
 import cats.data.NonEmptyList
 import cats.syntax.all.*
+import io.github.iltotore.iron.*
 import org.typelevel.doobie.ConnectionIO
 import org.typelevel.doobie.implicits.*
 import photography.adapters.sqlite.SqliteCodecs.given
@@ -17,6 +18,12 @@ object SqliteChapterRepository:
   def make: ChapterRepository[ConnectionIO] = new LiveChapterRepository
 
   final private class LiveChapterRepository extends ChapterRepository[ConnectionIO]:
+    override def findSource(chapter: ChapterId): ConnectionIO[SourceResult] =
+      sql"SELECT source_folder FROM chapter WHERE id = ${chapter.value}".query[String].option.flatMap:
+        case Some(source) =>
+          source.refineEither[PhotoSourceConstraint].leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO].map(SourceResult.Found(_))
+        case None => SourceResult.ChapterNotFound.pure[ConnectionIO]
+
     override def create(album: AlbumId, chapter: NewChapter, order: NonEmptyList[ChapterId]): ConnectionIO[CreateResult] =
       val opening         = chapter.opening
       val distinctSlotIds = opening.photoSlots.forall(_.id.value =!= opening.textSlot.id.value)

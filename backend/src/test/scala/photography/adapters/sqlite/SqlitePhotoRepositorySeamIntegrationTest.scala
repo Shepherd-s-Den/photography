@@ -46,10 +46,13 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should retain complete photos and write evidence across database reopening"):
     buildDatabase.use: path =>
       val repository  = SqlitePhotoRepository.make
-      val replacement = photo.copy(metadata = metadata.copy(hash = "edited", maybeCapturedLocal = none[LocalDateTime]))
+      val replacement = photo.copy(
+        metadata = metadata.copy(hash = "edited", maybeCapturedLocal = none[LocalDateTime]),
+        thumbnail = thumbnail.copy(location = ThumbnailLocation(new UUID(0L, 10L)), quality = ThumbnailQuality.Low)
+      )
 
       val persist = buildTransactor(path).use: xa =>
-        (seed >> repository.recordWrite(publication) >> repository.save(photo)).transact(xa)
+        (seed >> repository.recordWrite(publication) >> repository.save(photo) >> insertCoverPlacement).transact(xa)
 
       persist >> buildTransactor(path).use: xa =>
         for
@@ -57,6 +60,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           listed  <- repository.listChapter(chapter).transact(xa)
           _       <- repository.save(replacement).transact(xa)
           changed <- repository.listChapter(chapter).transact(xa)
+          placed  <- sql"SELECT photo_id FROM placement".query[UUID].to[Vector].transact(xa)
           _       <- repository.completeWrite(writeId).transact(xa)
           _       <- repository.completeWrite(writeId).transact(xa)
           cleared <- repository.listUnfinishedWrites.transact(xa)
@@ -64,6 +68,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(pending, ListUnfinishedWritesResult.Listed(intents = Vector(publication)))
           assertEquals(listed, ListResult.Listed(photos = Vector(photo)))
           assertEquals(changed, ListResult.Listed(photos = Vector(replacement)))
+          assertEquals(placed, Vector(photoId.value))
           assertEquals(cleared, ListUnfinishedWritesResult.Listed(intents = Vector.empty[PhotoWriteIntent]))
 
   test("should roll back retirement evidence with removal and retain committed evidence after chapter deletion"):
@@ -74,12 +79,14 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
         val rejected   = removal >> new IllegalStateException("Reject transaction").raiseError[ConnectionIO, Unit]
 
         for
-          _          <- (seed >> repository.save(photo)).transact(xa)
+          _          <- (seed >> repository.save(photo) >> insertCoverPlacement).transact(xa)
           failed     <- rejected.transact(xa).attempt
           retained   <- repository.listChapter(chapter).transact(xa)
           rolledBack <- repository.listUnfinishedWrites.transact(xa)
           _          <- removal.transact(xa)
           empty      <- repository.listChapter(chapter).transact(xa)
+          placements <- sql"SELECT count(*) FROM placement".query[Int].unique.transact(xa)
+          slots      <- sql"SELECT count(*) FROM cover_slot".query[Int].unique.transact(xa)
           _          <- sql"DELETE FROM chapter WHERE id = ${chapter.value}".update.run.transact(xa)
           pending    <- repository.listUnfinishedWrites.transact(xa)
           absent     <- repository.remove(photoId).transact(xa)
@@ -88,6 +95,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(retained, ListResult.Listed(photos = Vector(photo)))
           assertEquals(rolledBack, ListUnfinishedWritesResult.Listed(intents = Vector.empty[PhotoWriteIntent]))
           assertEquals(empty, ListResult.Listed(photos = Vector.empty[Photo]))
+          assertEquals((placements, slots), (0, 1))
           assertEquals(pending, ListUnfinishedWritesResult.Listed(intents = Vector(retirement)))
           assertEquals(absent, WriteResult.Applied)
 
@@ -314,6 +322,11 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
       Vector(s"${location.value}.jpg", s"${new UUID(0L, 8L)}.jpg", s"${new UUID(0L, 8L)}.tmp", "unrelated.jpg").traverse_ { name =>
         Files.deleteIfExists(root.resolve(name)).blocking[IO].void
       } >> Files.deleteIfExists(root).blocking[IO].void
+
+  private def insertCoverPlacement =
+    sql"INSERT INTO cover VALUES ('a', 'front')".update.run >>
+      sql"INSERT INTO cover_slot VALUES ('slot', 'a', 'front')".update.run >>
+      sql"INSERT INTO placement VALUES ('placed', ${photoId.value}, 'cover', NULL, 'slot', 0, 0, 0, 1, NULL)".update.run.void
 
   private def seed =
     sql"INSERT INTO album VALUES ('a', 2026, 'Album', '', 0)".update.run >>

@@ -351,6 +351,24 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       }
     }
 
+  test("should resolve saved chapter sources without photo rows and reject malformed stored sources"):
+    buildTransactor.use: xa =>
+      val repository = SqliteChapterRepository.make
+      val missing    = ChapterId(new UUID(99L, 99L))
+
+      for
+        _       <- seedAlbum(xa)
+        chapter <- buildChapter(xa, index = 1)
+        _       <- repository.create(albumId, chapter, order = NonEmptyList.one(chapter.id)).transact(xa)
+        found   <- repository.findSource(chapter.id).transact(xa)
+        absent  <- repository.findSource(missing).transact(xa)
+        _       <- sql"UPDATE chapter SET source_folder = '../invalid'".update.run.transact(xa)
+        invalid <- repository.findSource(chapter.id).transact(xa).attempt
+      yield
+        assertEquals(found, ChapterRepository.SourceResult.Found(chapter.sourceFolder))
+        assertEquals(absent, ChapterRepository.SourceResult.ChapterNotFound)
+        assert(invalid.isLeft)
+
   private def insertCoverPhoto(chapter: ChapterId) =
     val photo       = new UUID(7L, 6L).toString
     val placement   = new UUID(7L, 7L).toString

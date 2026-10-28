@@ -6,11 +6,17 @@ import photography.domain.album.*
 import photography.domain.layout.Spread
 
 trait ChapterRepository[F[_]]:
+  def findSource(chapter: ChapterId): F[ChapterRepository.SourceResult]
+
   def create(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId]): F[ChapterRepository.CreateResult]
 
   def update(command: ChapterRepository.Update): F[ChapterRepository.UpdateResult]
 
 object ChapterRepository:
+  enum SourceResult:
+    case Found(source: PhotoSource)
+    case ChapterNotFound, Failed
+
   final case class Update(
       album: AlbumId,
       chapter: ChapterId,

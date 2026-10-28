@@ -6,7 +6,8 @@ import cats.syntax.all.*
 import io.circe.{Decoder, DecodingFailure, Encoder, HCursor, Json}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import org.http4s.{HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.{CacheDirective, HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.headers.`Cache-Control`
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.*
@@ -15,6 +16,9 @@ import photography.usecases.{AlbumManager, AlbumWorkspaceManager, ChapterManager
 import photography.usecases.AlbumManager.GetAlbumResult
 import photography.usecases.AlbumWorkspaceManager.GetResult
 import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.{ChapterPhotoImport, PhotoManager, PhotoWriteRecovery}
+import photography.usecases.AlbumWorkspaceManager.{ChapterPhotos, ChapterResult}
+import photography.usecases.ChapterPhotoImport.Scheduling
 
 import java.time.{DateTimeException, LocalDate}
 import java.time.temporal.ChronoUnit
@@ -44,6 +48,12 @@ object AlbumWorkspaceApi:
           create(AlbumId(id), request)
         case request @ PUT -> Root / "api" / "albums" / CanonicalId(id) / "chapters" / CanonicalId(chapter) =>
           update(AlbumId(id), ChapterId(chapter), request)
+        case GET -> Root / "api" / "chapters" / CanonicalId(chapter) / "photos" =>
+          listChapter(ChapterId(chapter))
+        case POST -> Root / "api" / "chapters" / CanonicalId(chapter) / "photos" / "refresh" =>
+          refresh(ChapterId(chapter))
+        case GET -> Root / "api" / "chapters" / _ / "photos"                  => chapterNotFound
+        case POST -> Root / "api" / "chapters" / _ / "photos" / "refresh"     => chapterNotFound
         case GET -> Root / "api" / "albums" / _ / "workspace"                 => albumNotFound
         case POST -> Root / "api" / "albums" / _ / "chapters"                 => albumNotFound
         case PUT -> Root / "api" / "albums" / CanonicalId(_) / "chapters" / _ => chapterNotFound
@@ -52,7 +62,7 @@ object AlbumWorkspaceApi:
 
     private def get(id: AlbumId) =
       workspaces.get(id).flatMap:
-        case found: GetResult.Found  => Ok(found)
+        case found: GetResult.Found  => Ok(found).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
         case GetResult.AlbumNotFound => albumNotFound
         case GetResult.Failed        => serviceFailure
 
@@ -61,7 +71,8 @@ object AlbumWorkspaceApi:
         case Left(message)                            => BadRequest(Map("message" -> message))
         case Right((name, countries, period, folder)) =>
           chapters.create(id, name, countries, period, folder).flatMap:
-            case created: CreateResult.Created => Created(Map("id" -> created.id.value.toString))
+            case created: CreateResult.Created =>
+              Created(Map("id" -> created.id.value.toString, "scheduling" -> encodeScheduling(created.scheduling)))
             case CreateResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
             case CreateResult.AlbumNotFound    => albumNotFound
             case CreateResult.Failed           => serviceFailure
@@ -81,12 +92,25 @@ object AlbumWorkspaceApi:
         case Left(message)                            => BadRequest(Map("message" -> message))
         case Right((name, countries, period, folder)) =>
           chapters.update(id, target, name, countries, period, folder).flatMap:
-            case _: UpdateResult.Updated       => Ok(Map("id" -> target.value.toString))
+            case updated: UpdateResult.Updated => Ok(Map("id" -> target.value.toString, "scheduling" -> encodeScheduling(updated.scheduling)))
             case UpdateResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
             case UpdateResult.ChapterNotFound  => chapterNotFound
             case UpdateResult.AlbumNotFound    => albumNotFound
             case UpdateResult.Failed           => serviceFailure
       }
+
+    private def listChapter(chapter: ChapterId) =
+      workspaces.listChapter(chapter).flatMap:
+        case ChapterResult.Found(snapshot) => Ok(encodePhotos(snapshot)).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
+        case ChapterResult.ChapterNotFound => chapterNotFound
+        case ChapterResult.Failed          => serviceFailure
+
+    private def refresh(chapter: ChapterId) =
+      chapters.refresh(chapter).flatMap:
+        case ChapterManager.RefreshResult.Scheduled(scheduling @ (Scheduling.Queued | Scheduling.Coalesced)) =>
+          Accepted(Map("scheduling" -> encodeScheduling(scheduling)))
+        case ChapterManager.RefreshResult.ChapterNotFound => chapterNotFound
+        case _                                            => serviceFailure
 
     private def decode[A](request: Request[F], decoder: Decoder[A]) =
       request.as[Json].map(value => decoder.decodeJson(value).leftMap(_.getMessage))
@@ -95,6 +119,80 @@ object AlbumWorkspaceApi:
     private def albumNotFound   = NotFound(Map("code" -> "album_not_found"))
     private def chapterNotFound = NotFound(Map("code" -> "chapter_not_found"))
     private def serviceFailure  = InternalServerError(Map("code" -> "service_failure"))
+
+    private def encodeScheduling(scheduling: Scheduling) = scheduling match
+      case Scheduling.Queued       => "queued"
+      case Scheduling.Coalesced    => "coalesced"
+      case Scheduling.NotRequested => "not-requested"
+      case Scheduling.Failed       => "failed"
+
+    private def encodePhotos(snapshot: ChapterPhotos) =
+      val inventory = snapshot.inventory
+      Json.obj(
+        "photos"     -> Json.arr(inventory.photos.map(encodePhoto)*),
+        "counts"     -> Json.obj("unplaced" -> Json.fromInt(inventory.countUnplaced), "total" -> Json.fromInt(inventory.total)),
+        "processing" -> encodeProcessing(snapshot.execution)
+      )
+
+    private def encodePhoto(photo: Photo) =
+      val thumbnail = photo.thumbnail
+      val url       = s"/thumbnails/${thumbnail.location.value}/${thumbnail.version}.jpg"
+      Json.obj(
+        "id"            -> Json.fromString(photo.id.value.toString),
+        "filename"      -> Json.fromString(photo.original.filename),
+        "capturedLocal" -> photo.metadata.maybeCapturedLocal.fold(Json.Null)(value => Json.fromString(value.toString)),
+        "width"         -> Json.fromInt(photo.metadata.dimensions.width),
+        "height"        -> Json.fromInt(photo.metadata.dimensions.height),
+        "caption"       -> photo.maybeCaption.fold(Json.Null)(Json.fromString),
+        "thumbnail"     -> Json.obj(
+          "url"    -> Json.fromString(url),
+          "width"  -> Json.fromInt(thumbnail.dimensions.width),
+          "height" -> Json.fromInt(thumbnail.dimensions.height)
+        )
+      )
+
+    private def encodeProcessing(execution: ChapterPhotoImport.ExecutionOutcome) =
+      val (state, unsupported, issues) = execution.status match
+        case ChapterPhotoImport.Status.Idle             => ("idle", 0, Vector.empty[PhotoManager.Issue])
+        case ChapterPhotoImport.Status.Queued           => ("queued", 0, Vector.empty[PhotoManager.Issue])
+        case ChapterPhotoImport.Status.Running          => ("running", 0, Vector.empty[PhotoManager.Issue])
+        case ChapterPhotoImport.Status.LaunchFailed     => ("failed", 0, Vector.empty[PhotoManager.Issue])
+        case ChapterPhotoImport.Status.Uncertain        => ("failed", 0, Vector.empty[PhotoManager.Issue])
+        case ChapterPhotoImport.Status.Finished(result) =>
+          val failed = result.issues.exists(issue => !isSkipped(issue))
+          (if failed then "failed" else "completed", result.unsupportedCount: Int, result.issues)
+      val scheduling = execution.status match
+        case ChapterPhotoImport.Status.LaunchFailed => Vector(encodeIssue(stage = "scheduling", code = "scheduling_failed", maybeFilename = None))
+        case ChapterPhotoImport.Status.Uncertain    => Vector(encodeIssue(stage = "persistence", code = "persistence_failed", maybeFilename = None))
+        case _                                      => Vector.empty[Json]
+      val failures = issues.map(encodeImportIssue) ++ execution.retirementIssues.map(encodeRetirementIssue) ++ scheduling
+      Json.obj(
+        "state"            -> Json.fromString(if execution.retirementIssues.nonEmpty then "failed" else state),
+        "unsupportedCount" -> Json.fromInt(unsupported),
+        "skippedCount"     -> Json.fromInt(issues.count(isSkipped)),
+        "issues"           -> Json.arr(failures*)
+      )
+
+    private def isSkipped(issue: PhotoManager.Issue) = issue match
+      case _: PhotoManager.Issue.Undecodable | _: PhotoManager.Issue.Unstable => true
+      case _                                                                  => false
+
+    private def encodeImportIssue(issue: PhotoManager.Issue) = issue match
+      case PhotoManager.Issue.Discovery             => encodeIssue(stage = "discovery", code = "unreadable_source", maybeFilename = None)
+      case PhotoManager.Issue.Read(filename)        => encodeIssue(stage = "read", code = "unreadable_source", maybeFilename = filename.some)
+      case PhotoManager.Issue.Generation(filename)  => encodeIssue(stage = "generation", code = "encoding_failed", maybeFilename = filename.some)
+      case PhotoManager.Issue.Undecodable(filename) => encodeIssue(stage = "read", code = "undecodable", maybeFilename = filename.some)
+      case PhotoManager.Issue.Unstable(filename)    => encodeIssue(stage = "read", code = "unstable", maybeFilename = filename.some)
+      case PhotoManager.Issue.Storage               => encodeIssue(stage = "storage", code = "storage_failed", maybeFilename = None)
+      case _: PhotoManager.Issue.Cleanup            => encodeIssue(stage = "cleanup", code = "cleanup_failed", maybeFilename = None)
+      case _                                        => encodeIssue(stage = "persistence", code = "persistence_failed", maybeFilename = None)
+
+    private def encodeRetirementIssue(issue: PhotoWriteRecovery.Issue) = issue match
+      case _: PhotoWriteRecovery.Issue.Cleanup => encodeIssue(stage = "cleanup", code = "cleanup_failed", maybeFilename = None)
+      case _                                   => encodeIssue(stage = "persistence", code = "persistence_failed", maybeFilename = None)
+
+    private def encodeIssue(stage: String, code: String, maybeFilename: Option[PhotoFilename]) =
+      Json.obj("stage" -> Json.fromString(stage), "code" -> Json.fromString(code), "filename" -> maybeFilename.fold(Json.Null)(Json.fromString))
 
     private def explain(conflict: ChapterConflict) = conflict match
       case ChapterConflict.AtCapacity         => "An album can contain at most 65 interior spreads"
@@ -202,9 +300,12 @@ object AlbumWorkspaceApi:
       val chapterSpreads = album.chapters.flatMap: chapter =>
         (Vector(chapter.opening) ++ chapter.spreads).map(spread => encodeSpread(spread, maybeChapter = chapter.id.some))
       Json.obj(
-        "year"      -> Json.fromInt(album.year),
-        "photoRoot" -> Json.fromString(found.photoRoot),
-        "chapters"  -> Encoder.encodeVector[Chapter].apply(album.chapters),
-        "spreads"   -> Json.arr((opening +: chapterSpreads)*),
-        "countries" -> Encoder.encodeList[Country].apply(found.countries.toList)
+        "year"             -> Json.fromInt(album.year),
+        "photoRoot"        -> Json.fromString(found.photoRoot),
+        "chapters"         -> Encoder.encodeVector[Chapter].apply(album.chapters),
+        "spreads"          -> Json.arr((opening +: chapterSpreads)*),
+        "countries"        -> Encoder.encodeList[Country].apply(found.countries.toList),
+        "photoInventories" -> Json.obj(found.photoInventories.toVector.map { case (chapter, snapshot) =>
+          chapter.value.toString -> encodePhotos(snapshot)
+        }*)
       )

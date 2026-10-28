@@ -10,6 +10,8 @@ import photography.domain.layout.*
 import photography.ports.CountryRepository
 import photography.usecases.AlbumManager.*
 import photography.usecases.AlbumWorkspaceManager.GetResult
+import photography.usecases.AlbumWorkspaceManager.{ChapterPhotos, ChapterResult}
+import photography.usecases.ChapterPhotoImport.{ExecutionOutcome, Request, Scheduling, Status}
 
 import java.nio.file.Path
 import java.time.{Instant, LocalDate}
@@ -43,18 +45,26 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     val period          = VisitPeriod(LocalDate.of(2026, 1, 1), days = 1)
     Chapter(id, destination, period, description = "", sourceFolder = "/photos/coast", opening, spreads = emptySpreads)
   private val emptyInventory = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty)
+  private val idle           = ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
 
   test("should assemble the complete album and selectable countries with the configured photo root"):
     val manager  = buildManager(GetAlbumResult.Found(album), CountryRepository.ListResult.Listed(countries))
     val expected =
-      GetResult.Found(album, countries = countries, photoRoot = "/photos", photoInventories = Map.empty[ChapterId, PhotoInventory.Inventory])
+      GetResult.Found(album, countries = countries, photoRoot = "/photos", photoInventories = Map.empty[ChapterId, ChapterPhotos])
 
     manager.get(album.id).map(result => assertEquals(result, expected))
 
   test("should load each chapter inventory once and preserve explicit inventory failures"):
-    val other       = chapter.copy(id = ChapterId(new UUID(0L, 9L)), sourceFolder = "/photos/other")
-    val current     = album.copy(chapters = Vector(chapter, other))
-    val inventories = Map(chapter.id -> emptyInventory, other.id -> emptyInventory)
+    val other         = chapter.copy(id = ChapterId(new UUID(0L, 9L)), sourceFolder = "/photos/other")
+    val current       = album.copy(chapters = Vector(chapter, other))
+    val running       = ExecutionOutcome(Status.Running, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
+    val cleanupFailed = ExecutionOutcome(
+      Status.Finished(PhotoManager.RefreshResult(unsupportedCount = 2, issues = Vector.empty[PhotoManager.Issue])),
+      retirementIssues = Vector(PhotoWriteRecovery.Issue.References(PhotoWriteIntentId(new UUID(0L, 10L))))
+    )
+    val outcomes    = Map(chapter.id -> running, other.id -> cleanupFailed)
+    val inventories = Map(chapter.id -> ChapterPhotos(emptyInventory, running), other.id -> ChapterPhotos(emptyInventory, cleanupFailed))
+    val execution   = (id: ChapterId) => IO.fromOption(outcomes.get(id))(new AssertionError("Unexpected chapter execution read"))
     val expected    = GetResult.Found(current, countries = countries, photoRoot = "/photos", photoInventories = inventories)
     val savedAlbum  = GetAlbumResult.Found(current)
     val catalog     = CountryRepository.ListResult.Listed(countries)
@@ -63,7 +73,7 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     for
       reads <- Ref.of[IO, Vector[ChapterId]](Vector.empty)
       photos = (id: ChapterId) => reads.update(_ :+ id).as(PhotoInventory.ListResult.Listed(emptyInventory))
-      result <- buildManager(savedAlbum, catalog, inventory = photos).get(album.id)
+      result <- buildManager(savedAlbum, catalog, inventory = photos, execution = execution).get(album.id)
       actual <- reads.get
       failed <- failedRead
     yield
@@ -84,12 +94,33 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       manager.get(album.id).map(result => assertEquals(result, expected))
     }
 
+  test("should expose chapter inventory with current execution or explicit missing and failure outcomes"):
+    val running   = ExecutionOutcome(Status.Running, retirementIssues = Vector(PhotoWriteRecovery.Issue.Listing))
+    val snapshot  = ChapterPhotos(emptyInventory, running)
+    val execution = (id: ChapterId) => IO(assertEquals(id, chapter.id)).as(running)
+
+    Vector(
+      (PhotoInventory.ListResult.Listed(emptyInventory), ChapterResult.Found(snapshot)),
+      (PhotoInventory.ListResult.ChapterNotFound, ChapterResult.ChapterNotFound),
+      (PhotoInventory.ListResult.Failed, ChapterResult.Failed)
+    ).traverse_ { case (inventory, expected) =>
+      val manager = buildManager(
+        GetAlbumResult.Found(album),
+        CountryRepository.ListResult.Listed(countries),
+        inventory = _ => inventory.pure[IO],
+        execution = execution
+      )
+
+      manager.listChapter(chapter.id).map(actual => assertEquals(actual, expected))
+    }
+
   // scalafix:off DisableSyntax.defaultArgs
   private def buildManager(
       albumResult: GetAlbumResult,
       countryResult: CountryRepository.ListResult,
       inventory: ChapterId => IO[PhotoInventory.ListResult] =
-        _ => IO.raiseError[PhotoInventory.ListResult](new AssertionError("Unexpected inventory read"))
+        _ => IO.raiseError[PhotoInventory.ListResult](new AssertionError("Unexpected inventory read")),
+      execution: ChapterId => IO[ExecutionOutcome] = _ => idle.pure[IO]
   ) =
     val albums = new AlbumManager[IO]:
       override def get(id: AlbumId): IO[GetAlbumResult]                              = albumResult.pure[IO]
@@ -101,5 +132,13 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       override def list: IO[CountryRepository.ListResult] = countryResult.pure[IO]
     val photos = new PhotoInventory[IO]:
       override def listChapter(id: ChapterId): IO[PhotoInventory.ListResult] = inventory(id)
-    AlbumWorkspaceManager.make(albums, catalog, photos, photoRoot = "/photos")
+    val imports = new ChapterPhotoImport[IO]:
+      override def status(id: ChapterId): IO[ExecutionOutcome]                   = execution(id)
+      override def prepare(chapter: ChapterId, source: PhotoSource): IO[Request] =
+        IO.raiseError[Request](new AssertionError("Unexpected import preparation"))
+      override def launch(request: Request): IO[Scheduling] = IO.raiseError[Scheduling](new AssertionError("Unexpected import launch"))
+      override def retire(retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] =
+        IO.raiseError[Unit](new AssertionError("Unexpected retirement"))
+      override def suspend(chapter: ChapterId): IO[Unit] = IO.raiseError[Unit](new AssertionError("Unexpected suspension"))
+    AlbumWorkspaceManager.make(albums, catalog, photos, imports, photoRoot = "/photos")
   // scalafix:on DisableSyntax.defaultArgs

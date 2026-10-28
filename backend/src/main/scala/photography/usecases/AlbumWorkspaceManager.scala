@@ -10,20 +10,23 @@ import photography.usecases.AlbumWorkspaceManager.*
 
 trait AlbumWorkspaceManager[F[_]]:
   def get(id: AlbumId): F[GetResult]
+  def listChapter(chapter: ChapterId): F[ChapterResult]
 
 object AlbumWorkspaceManager:
   def make[F[_]: Monad](
       albums: AlbumManager[F],
       countries: CountryRepository[F],
       photos: PhotoInventory[F],
+      imports: ChapterPhotoImport[F],
       photoRoot: PhotoSource
   ): AlbumWorkspaceManager[F] =
-    new LiveAlbumWorkspaceManager(albums, countries, photos, photoRoot)
+    new LiveAlbumWorkspaceManager(albums, countries, photos, imports, photoRoot)
 
   final private class LiveAlbumWorkspaceManager[F[_]: Monad](
       albums: AlbumManager[F],
       countries: CountryRepository[F],
       photos: PhotoInventory[F],
+      imports: ChapterPhotoImport[F],
       photoRoot: PhotoSource
   ) extends AlbumWorkspaceManager[F]:
     override def get(id: AlbumId): F[GetResult] =
@@ -38,13 +41,26 @@ object AlbumWorkspaceManager:
         case GetAlbumResult.NotFound => GetResult.AlbumNotFound.pure[F]
         case GetAlbumResult.Failed   => GetResult.Failed.pure[F]
 
+    override def listChapter(chapter: ChapterId): F[ChapterResult] =
+      photos.listChapter(chapter).flatMap:
+        case PhotoInventory.ListResult.Listed(inventory) =>
+          imports.status(chapter).map(execution => ChapterResult.Found(ChapterPhotos(inventory, execution)))
+        case PhotoInventory.ListResult.ChapterNotFound => ChapterResult.ChapterNotFound.pure[F]
+        case PhotoInventory.ListResult.Failed          => ChapterResult.Failed.pure[F]
+
     private def readInventories(chapters: Vector[ChapterId]) =
       chapters.traverse: chapter =>
-        photos.listChapter(chapter).map:
-          case PhotoInventory.ListResult.Listed(inventory) => (chapter, inventory).some
-          case PhotoInventory.ListResult.Failed            => None
+        listChapter(chapter).map:
+          case ChapterResult.Found(snapshot) => (chapter, snapshot).some
+          case _                             => None
       .map(_.sequence.map(_.toMap))
 
   enum GetResult:
-    case Found(album: Album, countries: NonEmptyList[Country], photoRoot: PhotoSource, photoInventories: Map[ChapterId, PhotoInventory.Inventory])
+    case Found(album: Album, countries: NonEmptyList[Country], photoRoot: PhotoSource, photoInventories: Map[ChapterId, ChapterPhotos])
     case AlbumNotFound, Failed
+
+  enum ChapterResult:
+    case Found(photos: ChapterPhotos)
+    case ChapterNotFound, Failed
+
+  final case class ChapterPhotos(inventory: PhotoInventory.Inventory, execution: ChapterPhotoImport.ExecutionOutcome)
