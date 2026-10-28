@@ -37,7 +37,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
   private val thumbnail = Thumbnail(location, version = "version", ThumbnailDimensions(width = 5, height = 10), ThumbnailQuality.Standard, bytes = 1)
   private val photo     =
     Photo(photoId, chapter, OriginalPhotoLocation(source = "/photos", filename = "one.jpg"), metadata, thumbnail, maybeCaption = "caption".some)
-  private val publication = PhotoWriteIntent.Publication(writeId, chapter, photoId, location, maybePrevious = None)
+  private val publication = PhotoWriteIntent.Publication(writeId, chapter, photoId, location, maybePrevious = none[ThumbnailLocation])
   private val retirement  = PhotoWriteIntent.Retirement(writeId, chapter, photoId, location)
   private val content     = PhotoContent(Vector(1.toByte).refineEither[MinLength[1]].fold(message => fail(message), identity))
   private val imageBytes  = Vector(1.toByte).refineEither[ThumbnailBytesConstraint].fold(message => fail(message), identity)
@@ -46,7 +46,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should retain complete photos and write evidence across database reopening"):
     buildDatabase.use: path =>
       val repository  = SqlitePhotoRepository.make
-      val replacement = photo.copy(metadata = metadata.copy(hash = "edited", maybeCapturedLocal = None))
+      val replacement = photo.copy(metadata = metadata.copy(hash = "edited", maybeCapturedLocal = none[LocalDateTime]))
 
       val persist = buildTransactor(path).use: xa =>
         (seed >> repository.recordWrite(publication) >> repository.save(photo)).transact(xa)
@@ -114,7 +114,12 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(empty, ListResult.Listed(photos = Vector.empty[Photo]))
 
   test("should reject malformed persisted photo representations rather than return invalid values"):
-    Vector(sql"UPDATE photo SET source = '../escape.jpg'", sql"UPDATE photo SET captured_local = '2026-02-30T00:00:00.000000000'")
+    Vector(
+      sql"UPDATE photo SET source = '../escape.jpg'",
+      sql"UPDATE photo SET captured_local = '2026-02-30T00:00:00.000000000'",
+      sql"UPDATE photo SET thumbnail_quality = 'low', thumbnail_width = 1025",
+      sql"UPDATE photo SET thumbnail_quality = 'standard', thumbnail_height = 1537"
+    )
       .traverse_ { corrupt =>
         buildDatabase.use: path =>
           buildTransactor(path).use: xa =>
@@ -125,6 +130,25 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
               result <- repository.listChapter(chapter).transact(xa).attempt
             yield assert(result.isLeft)
       }
+
+  test("should reject malformed persisted write evidence"):
+    Vector(
+      sql"UPDATE photo_write_intent SET kind = 'unknown'",
+      sql"UPDATE photo_write_intent SET kind = 'retirement', previous = ${location.value}"
+    ).traverse_ { corruption =>
+      buildDatabase.use: path =>
+        buildTransactor(path).use: xa =>
+          val repository = SqlitePhotoRepository.make
+          val corrupt    = sql"PRAGMA ignore_check_constraints = ON".update.run >> corruption.update.run >>
+            sql"PRAGMA ignore_check_constraints = OFF".update.run
+
+          for
+            _        <- (seed >> repository.recordWrite(publication) >> corrupt).transact(xa)
+            rejected <- repository.listUnfinishedWrites.transact(xa).attempt
+          yield rejected match
+            case Left(error: IllegalArgumentException) => assertEquals(error.getMessage, "Invalid photo write evidence")
+            case result                                => fail(s"Expected invalid write evidence rejection, obtained $result")
+    }
 
   test("should resolve live uncertain commits or recover retained evidence from reopened SQLite and managed files"):
     Vector(false, true).traverse_ { retiring =>
@@ -147,7 +171,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
               val storageBoundary = new PhotoStorage[IO]:
                 override def discoverOriginals(source: PhotoSource): IO[PhotoStorage.DiscoveryResult] =
                   val originals = if retiring then Vector.empty[OriginalPhotoLocation] else Vector(photo.original)
-                  PhotoStorage.DiscoveryResult.Complete(originals, unsupportedCount = 0).pure[IO]
+                  PhotoStorage.DiscoveryResult.Complete(originals = originals, unsupportedCount = 0).pure[IO]
                 override def readOriginal(original: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =
                   PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
                 override def storeThumbnail(target: ThumbnailLocation, value: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
@@ -229,7 +253,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
         val source = new PhotoStorage[IO]:
           override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult] =
-            PhotoStorage.DiscoveryResult.Complete(Vector(photo.original), unsupportedCount = 0).pure[IO]
+            PhotoStorage.DiscoveryResult.Complete(originals = Vector(photo.original), unsupportedCount = 0).pure[IO]
           override def readOriginal(original: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =
             PhotoStorage.ReadResult.Read(content, metadata.copy(hash = "changed")).pure[IO]
           override def storeThumbnail(target: ThumbnailLocation, value: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =

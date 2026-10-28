@@ -23,18 +23,18 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val textSlot        = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0))
     val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
     val emptyPlacements = Vector.empty[SpreadPlacement]
-    Spread.AlbumStart(SpreadId(new UUID(0L, 3L)), templateId, emptyPhotoSlots, textSlot, emptyPlacements)
+    Spread.AlbumStart(SpreadId(new UUID(0L, 3L)), templateId, photoSlots = emptyPhotoSlots, textSlot, placements = emptyPlacements)
   private val album =
     val createdAt     = Instant.parse("2026-10-24T10:00:00.123Z")
     val emptyChapters = Vector.empty[Chapter]
-    Album(id, year = 2026, title = "Journey of the Shepherds 2026", synopsis = "A synopsis", createdAt, start, emptyChapters)
+    Album(id, year = 2026, title = "Journey of the Shepherds 2026", synopsis = "A synopsis", createdAt, start, chapters = emptyChapters)
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
 
   test("should list exact album metadata and forward default and explicit pages"):
     val refs         = Refs()
-    val page         = AlbumPage(Vector(album), page = 2, pageSize = 6, totalAlbums = 7, totalPages = 2)
+    val page         = AlbumPage(albums = Vector(album), page = 2, pageSize = 6, totalAlbums = 7, totalPages = 2)
     val server       = buildAlbumApi(refs, listAlbumsResult = ListAlbumsResult.Listed(page))
     val paths        = Vector("/api/albums", "/api/albums?page=99", "/api/albums?page=0", "/api/albums?page=-1")
     val emptyServer  = buildAlbumApi(Refs())

@@ -26,7 +26,7 @@ object PhotoInventory:
     override def listChapter(chapter: ChapterId): F[ListResult] =
       val snapshot = (photos.listChapter(chapter), placements.findPlacedPhotos(chapter)).mapN:
         case (PhotoRepository.ListResult.Listed(values), PhotoPlacementRepository.FindResult.Found(placed)) =>
-          ListResult.Listed(Inventory(values.sortBy(order), placed))
+          ListResult.Listed(Inventory(photos = values.sortBy(order), placed = placed))
         case _ => ListResult.Failed
       Transaction[Db, F].run(snapshot).handleErrorWith(error => Logger[F].error(error)("Photo inventory read failed").as(ListResult.Failed))
 
@@ -45,5 +45,5 @@ object PhotoInventory:
     case Failed
 
   final case class Inventory(photos: Vector[Photo], placed: Set[PhotoId]):
-    def total: Int    = photos.size
-    def unplaced: Int = photos.count(photo => !placed.contains(photo.id))
+    def total: Int         = photos.size
+    def countUnplaced: Int = photos.count(photo => !placed.contains(photo.id))

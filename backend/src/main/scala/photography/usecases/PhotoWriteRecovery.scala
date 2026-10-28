@@ -29,7 +29,7 @@ object PhotoWriteRecovery:
           intents.traverse(recoverWrite).map: results =>
             val issues = results.flatten
             if issues.isEmpty then RecoveryResult.Recovered else RecoveryResult.Failed(issues = issues)
-      .handleErrorWith(error => failed(error, Issue.Listing).map(issues => RecoveryResult.Failed(issues = issues)))
+      .handleErrorWith(error => Logger[F].error(error)("Photo write listing failed").as(RecoveryResult.Failed(issues = Vector(Issue.Listing))))
 
     override def resolve(intent: PhotoWriteIntent): F[RecoveryResult] =
       recoverWrite(intent).map: issues =>
@@ -45,22 +45,19 @@ object PhotoWriteRecovery:
           val unused = locations.distinct.filterNot(location => current.exists(_.thumbnail.location.value === location.value))
           unused.traverse(location => cleanup(intent.id, location)).map(_.flatten).flatMap: issues =>
             if issues.nonEmpty then issues.pure[F] else complete(intent.id)
-      .handleErrorWith(error => failed(error, Issue.References(intent.id)))
+      .handleErrorWith(error => Logger[F].error(error)("Photo write reference read failed").as(Vector(Issue.References(intent.id))))
 
     private def cleanup(id: PhotoWriteIntentId, location: ThumbnailLocation) =
       storage.removeThumbnail(location).flatMap:
         case ThumbnailStorage.RemoveResult.Removed => Vector.empty[Issue].pure[F]
         case ThumbnailStorage.RemoveResult.Failed  => Vector(Issue.Cleanup(id, location)).pure[F]
-      .handleErrorWith(error => failed(error, Issue.Cleanup(id, location)))
+      .handleErrorWith(error => Logger[F].error(error)("Photo write cleanup failed").as(Vector(Issue.Cleanup(id, location))))
 
     private def complete(id: PhotoWriteIntentId) =
       Transaction[Db, F].run(photos.completeWrite(id)).flatMap:
         case PhotoRepository.CompleteWriteResult.Completed => Vector.empty[Issue].pure[F]
         case PhotoRepository.CompleteWriteResult.Failed    => Vector(Issue.Completion(id)).pure[F]
-      .handleErrorWith(error => failed(error, Issue.Completion(id)))
-
-    private def failed(error: Throwable, issue: Issue) =
-      Logger[F].error(error)(s"Photo write recovery failed: $issue").as(Vector(issue))
+      .handleErrorWith(error => Logger[F].error(error)("Photo write completion failed").as(Vector(Issue.Completion(id))))
 
   enum RecoveryResult:
     case Recovered

@@ -54,10 +54,14 @@ enum ThumbnailQuality(val longestEdge: ThumbnailPixelCount, val maximumBytes: Th
   case Standard extends ThumbnailQuality(longestEdge = 1536, maximumBytes = 150000)
   case High     extends ThumbnailQuality(longestEdge = 2048, maximumBytes = 300000)
 
+  private[album] def accepts(dimensions: ThumbnailDimensions, bytes: Int) =
+    dimensions.width <= longestEdge && dimensions.height <= longestEdge && bytes <= maximumBytes
+
 object ThumbnailQuality:
   given Eq[ThumbnailQuality] = Eq.by(_.ordinal)
 
-final case class EncodedThumbnail(bytes: ThumbnailBytes, dimensions: ThumbnailDimensions, quality: ThumbnailQuality)
+final case class EncodedThumbnail(bytes: ThumbnailBytes, dimensions: ThumbnailDimensions, quality: ThumbnailQuality):
+  require(quality.accepts(dimensions, bytes = bytes.size), "Thumbnail exceeds its quality preset")
 
 final case class Thumbnail(
     location: ThumbnailLocation,
@@ -65,4 +69,5 @@ final case class Thumbnail(
     dimensions: ThumbnailDimensions,
     quality: ThumbnailQuality,
     bytes: ThumbnailByteCount
-)
+):
+  require(quality.accepts(dimensions, bytes = bytes), "Thumbnail exceeds its quality preset")

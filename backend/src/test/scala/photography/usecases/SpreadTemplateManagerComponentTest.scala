@@ -29,12 +29,12 @@ final class SpreadTemplateManagerComponentTest extends CatsEffectSuite:
       SpreadTemplateRepository.ListChapterStartTemplatesResult.Listed(chapterTemplates)
     )
 
-    for
-      albums   <- manager.listAlbumStartTemplates
-      chapters <- manager.listChapterStartTemplates
-    yield
+    val listed = (manager.listAlbumStartTemplates, manager.listChapterStartTemplates).tupled
+
+    listed.map { case (albums, chapters) =>
       assertEquals(albums, ListAlbumStartTemplatesResult.Listed(albumTemplates))
       assertEquals(chapters, ListChapterStartTemplatesResult.Listed(chapterTemplates))
+    }
 
   test("should report unavailable album and chapter template catalogs explicitly"):
     val manager = buildManager(
@@ -42,12 +42,12 @@ final class SpreadTemplateManagerComponentTest extends CatsEffectSuite:
       SpreadTemplateRepository.ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure)
     )
 
-    for
-      albums   <- manager.listAlbumStartTemplates
-      chapters <- manager.listChapterStartTemplates
-    yield
+    val listed = (manager.listAlbumStartTemplates, manager.listChapterStartTemplates).tupled
+
+    listed.map { case (albums, chapters) =>
       assertEquals(albums, ListAlbumStartTemplatesResult.Failed)
       assertEquals(chapters, ListChapterStartTemplatesResult.Failed)
+    }
 
   private def buildManager(
       albums: SpreadTemplateRepository.ListAlbumStartTemplatesResult,

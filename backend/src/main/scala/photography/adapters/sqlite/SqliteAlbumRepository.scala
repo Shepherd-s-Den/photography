@@ -5,7 +5,7 @@ import cats.effect.Async
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.Positive
-import org.typelevel.doobie.{ConnectionIO, Fragment, Meta, Read, Transactor}
+import org.typelevel.doobie.{ConnectionIO, Fragment, Meta, Transactor}
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import org.sqlite.{SQLiteErrorCode, SQLiteException}
@@ -40,7 +40,7 @@ object SqliteAlbumRepository:
         for
           _ <- initial.liftTo[ConnectionIO]
           _ <- insertAlbum(album.id, album.year, album.title, album.synopsis, album.createdAt)
-          _ <- insertInitialSpread(album.id, album.opening.id, album.opening.template, album.opening.photoSlots, album.opening.textSlot)
+          _ <- insertInitialSpread(album.id, album.opening.id, album.opening.template, photos = album.opening.photoSlots, album.opening.textSlot)
           _ <- insertCover(cover)
           _ <- loadRequired(album.id.value)
         yield CreateResult.Created: CreateResult
@@ -126,7 +126,7 @@ object SqliteAlbumRepository:
                         FROM spread s
                         LEFT JOIN spread_template t ON t.id = s.template_id
                         WHERE """ ++ owner ++ sql"ORDER BY s.position"
-      select.query[SpreadRow].to[List].flatMap(_.traverse(loadSpread))
+      select.query[(UUID, UUID, String, Option[UUID], Option[UUID], Int, Option[String])].to[List].flatMap(_.traverse(loadSpread))
 
     private def validateChapters(albumId: UUID) =
       sql"""SELECT count(*) FROM chapter c WHERE c.album_id = $albumId AND
@@ -142,11 +142,11 @@ object SqliteAlbumRepository:
                               UNION ALL SELECT id, 'text', x, y, width, height FROM spread_text_slot WHERE spread_id = $id"""
       for
         expectedSlots <- selectExpected.query[(String, SlotBox)].to[List]
-        storedSlots   <- selectStored.query[SlotRow].to[List]
-        ordered       <- orderSlots(expectedSlots, storedSlots).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
+        storedSlots   <- selectStored.query[(UUID, String, SlotBox)].to[List]
+        ordered       <- orderSlots(expected = expectedSlots, stored = storedSlots).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
         slots         <- ordered.traverse(loadSlot)
         placements    <- loadPlacements(id)
-        spread        <- decodeSpread(row, slots.toVector, placements).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
+        spread        <- decodeSpread(row, slots = slots.toVector, placements = placements).leftMap(IllegalArgumentException(_)).liftTo[ConnectionIO]
       yield spread
 
     private def orderSlots(expected: List[(String, SlotBox)], stored: List[SlotRow]) =
@@ -268,15 +268,6 @@ object SqliteAlbumRepository:
     private given Meta[InDesignPoints] = Meta[Double].tiemap[InDesignPoints](_.refineEither)(value => value: Double)
     private given Meta[Zoom]           = Meta[Double].tiemap[Zoom](_.refineEither)(value => value: Double)
 
-    private given Read[SpreadRow] =
-      Read[(UUID, UUID, String, Option[UUID], Option[UUID], Int, Option[String])]
-        .map { case (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind) =>
-          (id, template, kind, maybeAlbum, maybeChapter, position, maybeTemplateKind)
-        }
-
-    private given Read[SlotRow] =
-      Read[(UUID, String, SlotBox)].map { case (id, kind, box) => (id, kind, box) }
-
     private given Meta[CaptionCorner] = Meta[String].tiemap[CaptionCorner] {
       case "top_left"     => CaptionCorner.TopLeft.asRight[String]
       case "top_right"    => CaptionCorner.TopRight.asRight[String]
@@ -290,6 +281,7 @@ object SqliteAlbumRepository:
       case CaptionCorner.BottomRight => "bottom_right"
     }
 
+  // doobie RC13 reads ordinary tuples; their decoded values widen to these named row views at the consuming calls.
   private type SpreadRow = (
       id: UUID,
       template: UUID,

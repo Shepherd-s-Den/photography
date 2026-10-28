@@ -13,9 +13,10 @@ import photography.domain.album.*
 import photography.ports.{PhotoStorage, ThumbnailStorage}
 import photography.ports.PhotoStorage.*
 import photography.syntax.SyncSyntax.*
+import java.awt.image.BufferedImage
 import java.io.{ByteArrayInputStream, IOException}
 import java.nio.channels.{Channels, FileChannel}
-import java.nio.file.{Files, LinkOption, Path, StandardOpenOption}
+import java.nio.file.{Files, Path, StandardOpenOption}
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.time.LocalDateTime
@@ -43,7 +44,7 @@ object FilePhotoStorage:
           path     <- resolveOriginal(location).blocking[F]
           before   <- inspectOriginal(path).blocking[F]
           bytes    <- bufferOriginal(path)
-          decoded  <- decodeOriginal(bytes = bytes).blocking[F].recover { case _: IOException | _: JpegProcessingException => ReadResult.Undecodable }
+          decoded  <- decodeOriginal(bytes = bytes).recover { case _: IOException | _: JpegProcessingException => ReadResult.Undecodable }
           middle   <- inspectOriginal(path).blocking[F]
           repeated <- bufferOriginal(path)
           after    <- inspectOriginal(path).blocking[F]
@@ -61,7 +62,7 @@ object FilePhotoStorage:
 
     private def enumerate(root: Path, entries: Vector[Path]) =
       val regular = entries.filter: entry =>
-        val attributes = Files.readAttributes(entry, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS)
+        val attributes = Files.readAttributes(entry, classOf[BasicFileAttributes])
         attributes.isRegularFile
       val originals = regular.filter(isJpeg).map: entry =>
         val filename = entry.getFileName.toString.refineUnsafe[PhotoFilenameConstraint]
@@ -70,10 +71,8 @@ object FilePhotoStorage:
       DiscoveryResult.Complete(originals = ordered, unsupportedCount = (regular.size - originals.size).refineUnsafe[GreaterEqual[0]])
 
     private def resolveSource(source: PhotoSource) =
-      val root      = Path.of(source)
-      val ancestors = root.iterator().asScala.scanLeft(root.getRoot)((parent, segment) => parent.resolve(segment))
-      require(!ancestors.exists(Files.isSymbolicLink(_)), "Photo source and ancestors must not be symlinks")
-      require(Files.readAttributes(root, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS).isDirectory, "Expected a photo directory")
+      val root = Path.of(source)
+      require(Files.readAttributes(root, classOf[BasicFileAttributes]).isDirectory, "Expected a photo directory")
       root
 
     private def resolveOriginal(location: OriginalPhotoLocation) =
@@ -83,13 +82,13 @@ object FilePhotoStorage:
       path
 
     private def inspectOriginal(path: Path) =
-      val attributes = Files.readAttributes(path, classOf[BasicFileAttributes], LinkOption.NOFOLLOW_LINKS)
+      val attributes = Files.readAttributes(path, classOf[BasicFileAttributes])
       require(attributes.isRegularFile, "Expected a regular original")
       val maybeFileKey = Option(attributes.fileKey())
       (maybeFileKey, attributes.size(), attributes.lastModifiedTime().toString)
 
     private def bufferOriginal(path: Path) =
-      Resource.fromAutoCloseable(FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS).blocking[F])
+      Resource.fromAutoCloseable(FileChannel.open(path, StandardOpenOption.READ).blocking[F])
         .use(channel => Channels.newInputStream(channel).readAllBytes().toVector.blocking[F])
 
     private def isJpeg(path: Path) =
@@ -97,27 +96,38 @@ object FilePhotoStorage:
       filename.endsWith(".jpg") || filename.endsWith(".jpeg")
 
     private def decodeOriginal(bytes: Vector[Byte]) =
-      if bytes.isEmpty then ReadResult.Undecodable
+      if bytes.isEmpty then (ReadResult.Undecodable: ReadResult).pure[F]
       else
-        val metadata = JpegMetadataReader.readMetadata(new ByteArrayInputStream(bytes.toArray))
-        readImage(bytes = bytes).fold[ReadResult](ReadResult.Undecodable): image =>
-          val content    = PhotoContent(bytes = bytes.refineUnsafe[MinLength[1]])
-          val hash       = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes.toArray)).refineUnsafe[Not[Blank]]
-          val dimensions = readDimensions(metadata, width = image.getWidth, height = image.getHeight)
-          ReadResult.Read(content, PhotoMetadata(hash, maybeCapturedLocal = readCaptureTime(metadata), dimensions))
+        JpegMetadataReader.readMetadata(new ByteArrayInputStream(bytes.toArray)).blocking[F].flatMap: metadata =>
+          readImage(bytes = bytes).flatMap: maybeImage =>
+            maybeImage.fold[ReadResult](ReadResult.Undecodable) { image =>
+              val content    = PhotoContent(bytes = bytes.refineUnsafe[MinLength[1]])
+              val hash       = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes.toArray)).refineUnsafe[Not[Blank]]
+              val dimensions = readDimensions(metadata, width = image.getWidth, height = image.getHeight)
+              ReadResult.Read(content, PhotoMetadata(hash, maybeCapturedLocal = readCaptureTime(metadata), dimensions = dimensions))
+            }.blocking[F]
 
     private def readImage(bytes: Vector[Byte]) =
-      val input = new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes.toArray))
-      try
-        ImageIO.getImageReaders(input).asScala.nextOption().flatMap: reader =>
-          try
-            val hasWarnings = new AtomicBoolean(false)
-            reader.addIIOReadWarningListener((_, _) => hasWarnings.set(true))
-            reader.setInput(input)
-            val image = reader.read(0)
-            Option.when(!hasWarnings.get())(image)
-          finally reader.dispose()
-      finally input.close()
+      val inputResource = Resource.makeCase(new MemoryCacheImageInputStream(new ByteArrayInputStream(bytes.toArray)).blocking[F]):
+        case (input, exit) => releaseAfterRead(input.close().blocking[F], exit)
+      inputResource.use: input =>
+        val readerResource = Resource.makeCase(ImageIO.getImageReaders(input).asScala.nextOption().flatMap(Option(_)).blocking[F]):
+          case (maybeReader, exit) => maybeReader.traverse_(reader => releaseAfterRead(reader.dispose().blocking[F], exit))
+        readerResource.use:
+          case None         => none[BufferedImage].pure[F]
+          case Some(reader) =>
+            Async[F].blocking:
+              val hasWarnings = new AtomicBoolean(false)
+              reader.addIIOReadWarningListener((_, _) => hasWarnings.set(true))
+              reader.setInput(input)
+              val maybeImage = Option(reader.read(0))
+              maybeImage.filter(_ => !hasWarnings.get())
+
+    private def releaseAfterRead(release: F[Unit], exit: Resource.ExitCase) =
+      release.handleErrorWith: error =>
+        exit match
+          case Resource.ExitCase.Errored(primary) => Async[F].delay(if (primary: Object) =!= (error: Object) then primary.addSuppressed(error))
+          case _                                  => Async[F].raiseError(error)
 
     private def readDimensions(metadata: Metadata, width: Int, height: Int) =
       val maybeOrientation = Option(metadata.getFirstDirectoryOfType(classOf[ExifIFD0Directory]))
@@ -125,7 +135,8 @@ object FilePhotoStorage:
       val rotated    = maybeOrientation.exists(orientation => orientation >= 5 && orientation <= 8)
       val dimensions = if rotated then (height, width) else (width, height)
       dimensions match
-        case (displayWidth, displayHeight) => PhotoDimensions(displayWidth.refineUnsafe[Positive], displayHeight.refineUnsafe[Positive])
+        case (displayWidth, displayHeight) =>
+          PhotoDimensions(width = displayWidth.refineUnsafe[Positive], height = displayHeight.refineUnsafe[Positive])
 
     private def readCaptureTime(metadata: Metadata) =
       Option(metadata.getFirstDirectoryOfType(classOf[ExifSubIFDDirectory])).flatMap: directory =>

@@ -27,12 +27,15 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
     val dated     = photo.copy(id = PhotoId(new UUID(0L, 4L)), metadata = metadata.copy(maybeCapturedLocal = LocalDateTime.of(2025, 1, 1, 0, 0).some))
     val alpha     = photo.copy(id = PhotoId(new UUID(0L, 5L)), original = photo.original.copy(filename = "a.jpg"))
     val upper     = photo.copy(id = PhotoId(new UUID(0L, 6L)), original = photo.original.copy(filename = "A.jpg"))
-    val inventory = PhotoInventory.Inventory(Vector(dated, upper, alpha, photo), Set(photo.id))
-    buildInventory(PhotoRepository.ListResult.Listed(Vector(photo, alpha, dated, upper)), PhotoPlacementRepository.FindResult.Found(Set(photo.id)))
-      .listChapter(chapter).map: actual =>
-        assertEquals(actual, PhotoInventory.ListResult.Listed(inventory))
-        assertEquals(inventory.total, 4)
-        assertEquals(inventory.unplaced, 3)
+    val inventory = PhotoInventory.Inventory(photos = Vector(dated, upper, alpha, photo), placed = Set(photo.id))
+    val listed    = PhotoRepository.ListResult.Listed(photos = Vector(photo, alpha, dated, upper))
+    val placed    = PhotoPlacementRepository.FindResult.Found(photos = Set(photo.id))
+    val manager   = buildInventory(listed, placed)
+
+    manager.listChapter(chapter).map: actual =>
+      assertEquals(actual, PhotoInventory.ListResult.Listed(inventory))
+      assertEquals(inventory.total, 4)
+      assertEquals(inventory.countUnplaced, 3)
 
   test("should report either inventory boundary failure"):
     Vector(
@@ -55,7 +58,7 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
       listed: PhotoRepository.ListResult,
       placed: PhotoPlacementRepository.FindResult,
       maybeTransactionError: Option[Throwable] = None
-  ): PhotoInventory[IO] =
+  ) =
     given Transaction[Db, IO] with
       override def run[A](program: Db[A]): IO[A] =
         maybeTransactionError.fold(program.run(0).flatMap { case (steps, result) => IO(assertEquals(steps, 2)).as(result) })(IO.raiseError[A])
@@ -76,5 +79,5 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
     val placements = new PhotoPlacementRepository[Db]:
       override def findPlacedPhotos(id: ChapterId): Db[PhotoPlacementRepository.FindResult] =
         StateT.modify[IO, Int](_ + 1).as(placed)
-    PhotoInventory.make(photos, placements)
+    PhotoInventory.make[IO, Db](photos, placements)
   // scalafix:on DisableSyntax.defaultArgs

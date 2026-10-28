@@ -290,7 +290,7 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       completing: IO[PhotoRepository.CompleteWriteResult] = PhotoRepository.CompleteWriteResult.Completed.pure[IO],
       resolving: IO[Unit] = IO.unit,
       nextId: IO[UUID] = new UUID(0L, 9L).pure[IO]
-  ): PhotoManager[IO] =
+  ) =
     given IdGenerator[IO] with
       override def generateId: IO[UUID] = nextId
     val current = Ref.unsafe[IO, Vector[Photo]](existingPhotos)

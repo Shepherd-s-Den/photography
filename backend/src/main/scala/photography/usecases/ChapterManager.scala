@@ -8,15 +8,11 @@ import cats.syntax.all.*
 import photography.capabilities.{IdGenerator, Transaction}
 import org.typelevel.log4cats.Logger
 import photography.domain.album.*
-import photography.domain.layout.*
 import photography.ports.{AlbumRepository, ChapterRepository, PhotoRepository}
 import photography.syntax.EitherSyntax.*
 import photography.syntax.EitherSyntax.Pure.*
 import photography.usecases.ChapterManager.*
-import photography.usecases.SpreadTemplateManager.ListChapterStartTemplatesResult
 import photography.usecases.ChapterPhotoImport.{Request, Scheduling}
-import io.github.iltotore.iron.autoRefine
-import java.time.{LocalDate, Year}
 
 trait ChapterManager[F[_]]:
   def create(album: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, sourceFolder: PhotoSource): F[CreateResult]
@@ -34,16 +30,16 @@ object ChapterManager:
   def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       albums: AlbumRepository[F],
       chapters: ChapterRepository[Db],
-      templates: SpreadTemplateManager[F],
+      planning: ChapterPlanning[F],
       photos: ChapterPhotoImport[F],
       photoRepository: PhotoRepository[Db]
   )(using Transaction[Db, F]): ChapterManager[F] =
-    new LiveChapterManager(albums, chapters, templates, photos, photoRepository)
+    new LiveChapterManager(albums, chapters, planning, photos, photoRepository)
 
   final private class LiveChapterManager[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       albums: AlbumRepository[F],
       chapters: ChapterRepository[Db],
-      templates: SpreadTemplateManager[F],
+      planning: ChapterPlanning[F],
       photos: ChapterPhotoImport[F],
       photoRepository: PhotoRepository[Db]
   )(using Transaction[Db, F]) extends ChapterManager[F]:
@@ -57,11 +53,10 @@ object ChapterManager:
       val creation = summon[Mutex[F]].lock.surround:
         val program =
           for
-            current                          <- readAlbum(album).eitherT
-            resolved                         <- checkCreation(current, name, period, sourceFolder).eitherT[F]
-            (template, photoSlots, textSlot) <- readChapterStartTemplate.eitherT
-            chapter <- buildChapter(name, countries = countries, resolved, sourceFolder, template, photoSlots = photoSlots, textSlot).lift[Failure]
-            id      <- persistCreation(album, current.chapters, chapter).eitherT
+            saved    <- readAlbum(album).eitherT
+            resolved <- checkCreate(saved.year, existing = saved.chapters, count = saved.collectSpreads.size, name, period, sourceFolder).eitherT[F]
+            chapter  <- prepareChapter(name, countries = countries, resolved, sourceFolder).eitherT
+            id       <- persistCreation(album, currentChapters = saved.chapters, chapter).eitherT
           yield id
         program.value.flatMap: outcome =>
           outcome.traverse(id => photos.prepare(id, sourceFolder).attempt.tupleLeft(id))
@@ -82,12 +77,12 @@ object ChapterManager:
         val program: EitherT[F, UpdateFailure, Option[ImportLaunch]] =
           for
             current     <- readAlbum(album).eitherT.leftWiden[UpdateFailure]
-            plan        <- planUpdate(current, chapter, name, period, sourceFolder).eitherT[F]
+            plan        <- planUpdate(current.year, current = current.chapters, chapter, name, period, sourceFolder).eitherT[F]
             retirements <- prepareRetirements(chapter, sourceChanged = plan.sourceChanged).lift[UpdateFailure]
             command <- allocateUpdate(album, chapter, name, countries = countries, plan.period, sourceFolder, order = plan.order).lift[UpdateFailure]
             _       <- persistUpdate(plan.previousDestination, command, retirements = retirements).eitherT
-            request <- prepareImport(chapter, sourceFolder, sourceChanged = plan.sourceChanged).lift[UpdateFailure]
-          yield request.map(value => ImportLaunch(value, retirements = retirements))
+            maybeRequest <- prepareImport(chapter, sourceFolder, sourceChanged = plan.sourceChanged).lift[UpdateFailure]
+          yield maybeRequest.map(value => ImportLaunch(value, retirements = retirements))
         program.value
       MonadCancelThrow[F].uncancelable: _ =>
         update.flatMap:
@@ -113,10 +108,10 @@ object ChapterManager:
           case Left(Failure.Unavailable) | Left(_: Failure.Conflict) => RefreshResult.Failed.pure[F]
 
     private def launchImport(request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement]) =
-      request.traverse(value => photos.launch(value, retirements = retirements)).flatMap:
+      val launch = photos.retire(retirements = retirements) >> request.traverse(photos.launch).flatMap:
         case Right(scheduling) => scheduling.pure[F]
         case Left(error)       => Logger[F].error(error)("Saved chapter photo import could not be prepared").as(Scheduling.Failed)
-      .handleErrorWith(error => Logger[F].error(error)("Saved chapter photo import could not be launched").as(Scheduling.Failed))
+      launch.handleErrorWith(error => Logger[F].error(error)("Saved chapter photo import could not be launched").as(Scheduling.Failed))
 
     private def readAlbum(id: AlbumId) =
       albums.get(id).map:
@@ -124,39 +119,24 @@ object ChapterManager:
         case AlbumRepository.GetResult.NotFound     => Failure.AlbumNotFound.asLeft[Album]
         case _: AlbumRepository.GetResult.Failed    => Failure.Unavailable.asLeft[Album]
 
-    private def checkCreation(current: Album, name: DestinationName, period: Period, folder: PhotoSource) =
-      val resolved      = resolvePeriod(current.year, period)
-      val maybeConflict =
-        if current.spreads.length >= 65 then ChapterConflict.AtCapacity.some
-        else findMetadataConflict(current.year, current.chapters, name, resolved, folder)
-      maybeConflict.toLeft(resolved).leftMap(Failure.Conflict(_))
+    private def checkCreate(year: AlbumYear, existing: Vector[Chapter], count: Int, name: DestinationName, period: Period, folder: PhotoSource) =
+      planning.planCreation(year, chapters = existing, spreadCount = count, name, period, folder) match
+        case ChapterPlanning.CreationResult.Planned(resolved) => resolved.asRight[Failure]
+        case ChapterPlanning.CreationResult.Rejected(reason)  => Failure.Conflict(reason).asLeft[VisitPeriod]
 
-    private def planUpdate(current: Album, id: ChapterId, name: DestinationName, period: Period, folder: PhotoSource) =
-      current.chapters.find(_.id.value === id.value).toRight(MissingChapter: UpdateFailure).flatMap: existing =>
-        val resolved      = resolvePeriod(current.year, period)
-        val others        = current.chapters.filterNot(_.id.value === id.value)
-        val maybeConflict =
-          if existing.destination.isHome =!= ((name: String) === "Home") then ChapterConflict.TypeChange.some
-          else findMetadataConflict(current.year, others, name, resolved, folder)
-        val sourceChanged = (existing.sourceFolder: String) =!= folder
-        val order         = buildChapterOrder(chapters = current.chapters, id, isHome = (name: String) === "Home", resolved)
-        val plan          = UpdatePlan(existing.destination.id, sourceChanged = sourceChanged, resolved, order = order)
-        maybeConflict.toLeft(plan).leftMap(Failure.Conflict(_))
+    private def planUpdate(year: AlbumYear, current: Vector[Chapter], id: ChapterId, name: DestinationName, period: Period, folder: PhotoSource) =
+      planning.planUpdate(year, chapters = current, id, name, period, folder) match
+        case ChapterPlanning.UpdateResult.Planned(plan)    => plan.asRight[UpdateFailure]
+        case ChapterPlanning.UpdateResult.Rejected(reason) => Failure.Conflict(reason).asLeft[ChapterPlanning.UpdatePlan]
+        case ChapterPlanning.UpdateResult.ChapterNotFound  => MissingChapter.asLeft[ChapterPlanning.UpdatePlan]
 
-    private def findMetadataConflict(year: AlbumYear, chapters: Vector[Chapter], name: DestinationName, period: VisitPeriod, folder: PhotoSource) =
-      val maybeHomeConflict = if (name: String) === "Home" then findHomeConflict(year, period, chapters.exists(_.destination.isHome)) else None
-      maybeHomeConflict.orElse(Option.when(chapters.exists(value => (value.sourceFolder: String) === folder))(ChapterConflict.FolderAssigned))
-
-    private def readChapterStartTemplate =
-      templates.listChapterStartTemplates.map:
-        case ListChapterStartTemplatesResult.Listed(available) =>
-          val template = available.head
-          (template.id, template.photoSlots, template.textSlot).asRight[Failure]
-        case ListChapterStartTemplatesResult.Failed =>
-          Failure.Unavailable.asLeft[(SpreadTemplateId, Vector[SlotBox], SlotBox)]
+    private def prepareChapter(name: DestinationName, countries: NonEmptyList[CountryId], period: VisitPeriod, source: PhotoSource) =
+      planning.buildChapter(name, countries = countries, period, source).map:
+        case ChapterPlanning.BuildResult.Built(chapter) => chapter.asRight[Failure]
+        case ChapterPlanning.BuildResult.Failed         => Failure.Unavailable.asLeft[ChapterRepository.NewChapter]
 
     private def persistCreation(album: AlbumId, currentChapters: Vector[Chapter], chapter: ChapterRepository.NewChapter) =
-      val order = buildChapterOrder(chapters = currentChapters, chapter.id, isHome = (chapter.name: String) === "Home", chapter.period)
+      val order = planning.orderChapters(chapters = currentChapters, chapter.id, isHome = (chapter.name: String) === "Home", chapter.period)
       Transaction[Db, F].run(chapters.create(album, chapter, order = order)).map:
         case ChapterRepository.CreateResult.Saved            => chapter.id.asRight[Failure]
         case ChapterRepository.CreateResult.AlbumNotFound    => Failure.AlbumNotFound.asLeft[ChapterId]
@@ -185,13 +165,14 @@ object ChapterManager:
       if !sourceChanged then Vector.empty[PhotoWriteIntent.Retirement].pure[F]
       else
         Transaction[Db, F].run(photoRepository.listChapter(chapter)).flatMap:
-          case PhotoRepository.ListResult.Listed(current) => current.traverse(allocateRetirement)
-          case PhotoRepository.ListResult.Failed          =>
+          case PhotoRepository.ListResult.Listed(current) =>
+            current.traverse(photo => allocateRetirement(photo.chapter, photo.id, photo.thumbnail.location))
+          case PhotoRepository.ListResult.Failed =>
             new IllegalStateException("Chapter photo listing failed").raiseError[F, Vector[PhotoWriteIntent.Retirement]]
 
-    private def allocateRetirement(photo: Photo) =
+    private def allocateRetirement(chapter: ChapterId, photo: PhotoId, location: ThumbnailLocation) =
       IdGenerator[F].generateId.map: id =>
-        PhotoWriteIntent.Retirement(PhotoWriteIntentId(id), photo.chapter, photo.id, photo.thumbnail.location): PhotoWriteIntent.Retirement
+        PhotoWriteIntent.Retirement(PhotoWriteIntentId(id), chapter, photo, location): PhotoWriteIntent.Retirement
 
     private def allocateUpdate(
         album: AlbumId,
@@ -217,7 +198,7 @@ object ChapterManager:
       if !sourceChanged then none[Either[Throwable, Request]].pure[F]
       else
         photos.prepare(chapter, source).attempt.flatTap:
-          case Left(error)                  => Logger[F].error(error)("Committed source import preparation failed") >> photos.suspend(chapter)
+          case Left(_)                      => photos.suspend(chapter)
           case _: Right[Throwable, Request] => ().pure[F]
         .map(_.some)
 
@@ -232,54 +213,6 @@ object ChapterManager:
       .handleErrorWith: failure =>
         Logger[F].error(failure)("Chapter update commit resolution failed") >> photos.suspend(chapter).as(ChapterRepository.UpdateResult.Failed)
 
-    private def buildChapterOrder(chapters: Vector[Chapter], id: ChapterId, isHome: Boolean, period: VisitPeriod) =
-      val others = chapters.filterNot(_.id.value === id.value).map(value => ChapterOrder(value.id, isHome = value.destination.isHome, value.period))
-      orderChapterIds(chapters = NonEmptyList(ChapterOrder(id, isHome = isHome, period), tail = others.toList))
-
-    private def resolvePeriod(year: AlbumYear, period: Period) = period match
-      case Period.AlbumYear    => buildYearPeriod(year)
-      case Period.Dates(value) => value
-
-    private def findHomeConflict(year: AlbumYear, period: VisitPeriod, homeExists: Boolean) =
-      if homeExists then ChapterConflict.HomeExists.some
-      else if !arePeriodsEqual(period, buildYearPeriod(year)) then ChapterConflict.HomePeriodMismatch.some
-      else None
-
-    private def orderChapterIds(chapters: NonEmptyList[ChapterOrder]) =
-      chapters.sortBy { value =>
-        (value.isHome, value.period.firstDay.toEpochDay, value.period.days: Long, value.id.value.toString)
-      }.map(_.id)
-
-    private def buildYearPeriod(year: AlbumYear) =
-      val days: VisitDays = if Year.isLeap(year.toLong) then 366L else 365L
-      VisitPeriod(firstDay = LocalDate.of(year, 1, 1), days = days)
-
-    private def arePeriodsEqual(left: VisitPeriod, right: VisitPeriod) =
-      left.firstDay.compareTo(right.firstDay) === 0 && left.days.compare(right.days) === 0
-
-    private def buildChapter(
-        name: DestinationName,
-        countries: NonEmptyList[CountryId],
-        period: VisitPeriod,
-        sourceFolder: PhotoSource,
-        template: SpreadTemplateId,
-        photoSlots: Vector[SlotBox],
-        textSlot: SlotBox
-    ) =
-      for
-        id          <- IdGenerator[F].generateId.map(ChapterId(_))
-        opening     <- buildOpening(template, photoSlots, textSlot)
-        destination <- IdGenerator[F].generateId.map(DestinationId(_))
-      yield ChapterRepository.NewChapter(id, destination, name, countries, period, description = "", sourceFolder, opening)
-
-    private def buildOpening(template: SpreadTemplateId, photoSlots: Vector[SlotBox], textSlot: SlotBox) =
-      val newPhotos = photoSlots.traverse(box => IdGenerator[F].generateId.map(id => SpreadSlot.Photo(PhotoSpreadSlotId(id), box, bleed = Set.empty)))
-      for
-        id     <- IdGenerator[F].generateId.map(SpreadId(_))
-        photos <- newPhotos
-        text   <- IdGenerator[F].generateId.map(slot => SpreadSlot.Text(TextSpreadSlotId(slot), textSlot))
-      yield Spread.ChapterStart(id, template, photoSlots = photos, textSlot = text, placements = Vector.empty[SpreadPlacement])
-
     private def translateCreateFailure(failure: Failure) = failure match
       case Failure.AlbumNotFound    => CreateResult.AlbumNotFound
       case Failure.Conflict(reason) => CreateResult.Rejected(reason)
@@ -291,13 +224,6 @@ object ChapterManager:
       case Failure.Conflict(reason) => UpdateResult.Rejected(reason)
       case Failure.Unavailable      => UpdateResult.Failed
 
-  final private case class ChapterOrder(id: ChapterId, isHome: Boolean, period: VisitPeriod)
-  final private case class UpdatePlan(
-      previousDestination: DestinationId,
-      sourceChanged: Boolean,
-      period: VisitPeriod,
-      order: NonEmptyList[ChapterId]
-  )
   final private case class ImportLaunch(request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement])
 
   private enum Failure:
