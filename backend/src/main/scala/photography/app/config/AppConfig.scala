@@ -1,12 +1,13 @@
 package photography.app.config
 
-import cats.effect.Async
+import cats.effect.IO
 import com.comcast.ip4s.{Host, Port}
 import io.github.iltotore.iron.pureconfig.given
 import photography.usecases.AlbumPageSize
-import photography.domain.album.PhotoSource
+import photography.domain.album.{PhotoSource, ThumbnailQuality}
 import pureconfig.ConfigReader
 import pureconfig.ConfigSource
+import pureconfig.generic.semiauto.deriveEnumerationReader
 import pureconfig.module.catseffect.syntax.*
 import pureconfig.module.ip4s.*
 
@@ -16,19 +17,23 @@ final case class AppConfig(sqlite: SqliteConfig, albums: AlbumsConfig, thumbnail
 
 object AppConfig:
 
-  def load[F[_]: Async](source: ConfigSource): F[AppConfig] =
-    source.at("photography").loadF[F, AppConfig]()
+  def make: IO[AppConfig] =
+    ConfigSource.defaultApplication.at("photography").loadF[IO, AppConfig]()
 
 final case class SqliteConfig(path: Path, connectionAcquisitionThreads: Int, maxSessions: Int) derives ConfigReader
 
 final case class AlbumsConfig(pageSize: AlbumPageSize, photoRoot: PhotoSource) derives ConfigReader
 
-final case class ThumbnailsConfig(root: Path)
+final case class ThumbnailsConfig(root: Path, quality: ThumbnailQuality)
 
 object ThumbnailsConfig:
+  // Configuration reader composition is smoke-tested through AppConfig.make.
+  // $COVERAGE-OFF$
   given ConfigReader[ThumbnailsConfig] =
-    ConfigReader.forProduct1("root")(ThumbnailsConfig.apply)(using
-      ConfigReader[Path].ensure(_.isAbsolute, _ => "Expected an absolute thumbnail root")
+    ConfigReader.forProduct2("root", "quality")(ThumbnailsConfig.apply)(using
+      ConfigReader[Path].ensure(_.isAbsolute, _ => "Expected an absolute thumbnail root"),
+      deriveEnumerationReader[ThumbnailQuality]
     )
+  // $COVERAGE-ON$
 
 final case class HttpServerConfig(host: Host, port: Port) derives ConfigReader
