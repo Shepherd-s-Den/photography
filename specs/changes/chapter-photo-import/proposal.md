@@ -79,6 +79,8 @@ Result names in the sketches denote operation-owned companion sum types, not top
 
 Reuse plant-journal's **Thumbnailator** library for EXIF-aware resizing/JPEG encoding. Its smallest-output fallback is unsuitable here: exceeding the selected byte ceiling fails generation explicitly.
 
+Use **metadata-extractor 2.22.0** for EXIF metadata from buffered JPEG bytes, avoiding a bespoke EXIF/TIFF parser. Capture dates retain camera-local semantics independently of thumbnail generation.
+
 | Existing seam | Changed contract |
 | --- | --- |
 | `ChapterRepository.update` | Persist supplied chapter metadata/countries/order only; never invoke photo or placement operations. |
