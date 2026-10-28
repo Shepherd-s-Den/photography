@@ -4,7 +4,7 @@ import { AlbumRequestError } from "../../../src/features/albums/model/Album";
 
 describe("same-origin album HTTP client", () => {
   it("should load persisted workspace geometry and send only type-specific chapter inputs", async () => {
-    const workspace = { year: 2026, photoRoot: "/nas/photos", chapters: [], countries: [], spreads: [] };
+    const workspace = { year: 2026, photoRoot: "/nas/photos", chapters: [], countries: [], spreads: [], photoInventories: {} };
     const vacation = {
       kind: "vacation" as const,
       name: "Kyoto",
@@ -17,10 +17,10 @@ describe("same-origin album HTTP client", () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify(workspace)))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "vacation" }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "vacation" })))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "home" }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "home" })));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "vacation", scheduling: "failed" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "vacation", scheduling: "not-requested" })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "home", scheduling: "queued" }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "home", scheduling: "coalesced" })));
     const client = makeHttpAlbumClient(fetcher);
     const expectedVacation = {
       name: vacation.name,
@@ -40,15 +40,46 @@ describe("same-origin album HTTP client", () => {
     const updatedHome = await client.updateChapter("album/id", "home", home);
 
     expect(loadedWorkspace).toEqual(workspace);
-    expect(createdVacation).toEqual({ id: "vacation" });
-    expect(updatedVacation).toEqual({ id: "vacation" });
-    expect(createdHome).toEqual({ id: "home" });
-    expect(updatedHome).toEqual({ id: "home" });
+    expect(createdVacation).toEqual({ id: "vacation", scheduling: "failed" });
+    expect(updatedVacation).toEqual({ id: "vacation", scheduling: "not-requested" });
+    expect(createdHome).toEqual({ id: "home", scheduling: "queued" });
+    expect(updatedHome).toEqual({ id: "home", scheduling: "coalesced" });
     expect(fetcher.mock.calls[0]?.[0]).toBe("/api/albums/album%2Fid/workspace");
     expect(fetcher.mock.calls[1]).toMatchObject(expectedVacationCreation);
     expect(fetcher.mock.calls[2]).toMatchObject(expectedVacationUpdate);
     expect(fetcher.mock.calls[3]?.[1]).toMatchObject({ method: "POST", body: JSON.stringify(home) });
     expect(fetcher.mock.calls[4]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify(expectedHome) });
+  });
+  it("should read chapter inventories with cancellation and schedule Refresh without a request body", async () => {
+    const inventory = {
+      photos: [],
+      counts: { unplaced: 0, total: 0 },
+      processing: { state: "failed", unsupportedCount: 2, skippedCount: 1, issues: [{ stage: "cleanup", code: "cleanup_failed", filename: null }] },
+    };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify(inventory)))
+      .mockResolvedValueOnce(new Response('{"scheduling":"queued"}', { status: 202 }))
+      .mockResolvedValueOnce(new Response('{"scheduling":"coalesced"}', { status: 202 }))
+      .mockResolvedValueOnce(new Response('{"scheduling":"failed"}', { status: 202 }))
+      .mockResolvedValueOnce(new Response('{"code":"service_failure"}', { status: 500 }));
+    const client = makeHttpAlbumClient(fetcher);
+    const controller = new AbortController();
+    const expectedFailure = new AlbumRequestError(500, "The request could not be completed. Please try again.");
+    const expectedRead = ["/api/chapters/chapter%2Fid/photos", { method: "GET", headers: { Accept: "application/json" }, signal: controller.signal }];
+    const expectedRefresh = ["/api/chapters/chapter%2Fid/photos/refresh", { method: "POST", headers: { Accept: "application/json" } }];
+
+    const loaded = await client.chapterPhotos("chapter/id", controller.signal);
+    const queued = await client.refreshPhotos("chapter/id");
+    const coalesced = await client.refreshPhotos("chapter/id");
+
+    expect(loaded).toEqual(inventory);
+    expect(queued).toBe("queued");
+    expect(coalesced).toBe("coalesced");
+    await expect(client.refreshPhotos("chapter/id")).rejects.toThrow();
+    await expect(client.chapterPhotos("chapter/id", controller.signal)).rejects.toEqual(expectedFailure);
+    expect(fetcher.mock.calls[0]).toEqual(expectedRead);
+    expect(fetcher.mock.calls[1]).toEqual(expectedRefresh);
   });
   it("should send dashboard album operations with immutable year creation and free-form rename", async () => {
     const album = {

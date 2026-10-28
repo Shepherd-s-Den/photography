@@ -35,3 +35,7 @@ export function describePeriod(chapter: { kind: "vacation" | "home"; start: stri
   const displayDate = (value: string) => `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}`;
   return chapter.kind === "home" ? "Throughout the year" : `${displayDate(chapter.start)} - ${displayDate(chapter.end)}`;
 }
+
+export function describeCountryLabel(count: number): string {
+  return count === 1 ? "Country" : "Countries";
+}

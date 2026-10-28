@@ -2,6 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-lib
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/app/App";
 import { AlbumRequestError, type AlbumClient, type AlbumPage, type AlbumSummary } from "../../src/features/albums/model/Album";
+import type { AlbumPhotoEvents, PhotoEvent } from "../../src/features/albums/model/Photo";
+
+const events: AlbumPhotoEvents = {
+  subscribe: (_id, receive) => {
+    queueMicrotask(() => {
+      receive({ kind: "subscribed" });
+    });
+    return vi.fn();
+  },
+};
 
 const firstAlbum: AlbumSummary = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -36,6 +46,13 @@ const browserYear = vi.spyOn(Date.prototype, "getFullYear").mockReturnValue(2026
 
 describe("album dashboard and open", () => {
   beforeAll(() => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe = vi.fn();
+        disconnect = vi.fn();
+      },
+    );
     HTMLDialogElement.prototype.showModal = function () {
       this.setAttribute("open", "");
     };
@@ -48,6 +65,7 @@ describe("album dashboard and open", () => {
     });
   });
   afterAll(() => {
+    vi.unstubAllGlobals();
     browserYear.mockRestore();
     for (const [name, maybeDescriptor] of Object.entries(nativeDialogMethods)) {
       if (maybeDescriptor === undefined) Reflect.deleteProperty(HTMLDialogElement.prototype, name);
@@ -63,7 +81,7 @@ describe("album dashboard and open", () => {
     });
     const client = buildClient({ list: vi.fn().mockResolvedValueOnce(firstPage).mockReturnValueOnce(nextPage) });
 
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
 
     expect(await screen.findByRole("link", { name: firstAlbum.title })).toHaveAttribute("href", `/albums/${firstAlbum.id}`);
     expect(screen.queryByRole("region", { name: "Album start layouts" })).not.toBeInTheDocument();
@@ -86,7 +104,7 @@ describe("album dashboard and open", () => {
         .mockResolvedValueOnce(firstPage)
         .mockResolvedValueOnce({ ...firstPage, albums: [createdAlbum, ...firstPage.albums.slice(0, 5)], totalAlbums: 8 }),
     });
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     const add = screen.getByRole("button", { name: "Add album" });
     add.focus();
 
@@ -110,7 +128,7 @@ describe("album dashboard and open", () => {
 
   it("should retain a duplicate year with readable feedback and delete only after explicit confirmation", async () => {
     const client = buildClient({ create: vi.fn().mockRejectedValue(new AlbumRequestError(400, "An album already exists for that year")) });
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     await screen.findByRole("link", { name: firstAlbum.title });
 
     fireEvent.click(screen.getByRole("button", { name: "Add album" }));
@@ -141,7 +159,7 @@ describe("album dashboard and open", () => {
     window.history.replaceState(null, "", `/albums/${firstAlbum.id}`);
     const client = buildClient();
 
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
 
     expect(await screen.findByRole("heading", { name: "A year in photographs / 2026" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Synopsis composition" })).toBeInTheDocument();
@@ -160,7 +178,7 @@ describe("album dashboard and open", () => {
         .mockResolvedValueOnce({ albums: [], page: 1, pageSize: 6, totalAlbums: 0, totalPages: 0 }),
     });
 
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
 
     expect(screen.getByRole("status", { name: "Loading albums" })).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent("Albums could not be loaded");
@@ -180,7 +198,7 @@ describe("album dashboard and open", () => {
         .mockResolvedValueOnce({ albums: [], page: 1, pageSize: 6, totalAlbums: 0, totalPages: 0 })
         .mockResolvedValueOnce({ albums: [firstAlbum], page: 1, pageSize: 6, totalAlbums: 1, totalPages: 1 }),
     });
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     await waitFor(() => {
       expect(screen.queryByRole("status", { name: "Loading albums" })).not.toBeInTheDocument();
     });
@@ -215,7 +233,7 @@ describe("album dashboard and open", () => {
         .mockResolvedValueOnce(firstPage)
         .mockResolvedValueOnce({ ...firstPage, albums: [createdAlbum, ...firstPage.albums.slice(0, 5)] }),
     });
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     const add = screen.getByRole("button", { name: "Add album" });
     add.focus();
 
@@ -249,7 +267,7 @@ describe("album dashboard and open", () => {
         .mockResolvedValueOnce(firstPage)
         .mockResolvedValueOnce({ ...firstPage, albums: [renamedAlbum, ...firstPage.albums.slice(1)] }),
     });
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     const rename = await screen.findByRole("button", { name: `Rename ${firstAlbum.title}` });
 
     fireEvent.click(rename);
@@ -289,7 +307,7 @@ describe("album dashboard and open", () => {
         .mockResolvedValueOnce({ ...firstPage, totalAlbums: 6, totalPages: 1 }),
       remove: vi.fn().mockReturnValueOnce(pendingDelete).mockResolvedValueOnce(undefined),
     });
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     await screen.findByRole("link", { name: firstAlbum.title });
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -315,7 +333,7 @@ describe("album dashboard and open", () => {
   it.each(["finished", "cancelled"])("should return to a previous page and dismiss a popup after its animation is %s", async (animationOutcome) => {
     const client = buildClient({ list: vi.fn().mockResolvedValueOnce(firstPage).mockResolvedValueOnce(secondPage).mockResolvedValueOnce(firstPage) });
     if (animationOutcome === "cancelled") dialogAnimationFinished.mockRejectedValueOnce(new DOMException("Animation cancelled", "AbortError"));
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
     await screen.findByRole("link", { name: firstAlbum.title });
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
@@ -348,6 +366,7 @@ describe("album dashboard and open", () => {
             : {
                 year: firstAlbum.year,
                 photoRoot: "/photos",
+                photoInventories: {},
                 chapters: [],
                 countries: [],
                 spreads: [{ id: "opening", chapter: null, kind: "album_start", slots: [] }],
@@ -355,7 +374,7 @@ describe("album dashboard and open", () => {
         ),
     });
 
-    render(() => <App client={client} />);
+    render(() => <App client={client} events={events} />);
 
     expect(screen.getByRole("status", { name: "Loading album" })).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(status === 404 ? "could not be found" : "could not be loaded");
@@ -367,6 +386,36 @@ describe("album dashboard and open", () => {
       expect(screen.queryByRole("button", { name: "Retry album" })).not.toBeInTheDocument();
     }
   });
+  it.each(["interrupted", "invalid"] as const)("should report an initial %s stream and recover by reading existing workspace state", async (kind) => {
+    window.history.replaceState(null, "", `/albums/${firstAlbum.id}`);
+    let receive: (event: PhotoEvent) => void = () => {
+      throw new Error("Not subscribed");
+    };
+    const liveEvents: AlbumPhotoEvents = {
+      subscribe: (_id, listener) => {
+        receive = listener;
+        return vi.fn();
+      },
+    };
+    const client = buildClient();
+    render(() => <App client={client} events={liveEvents} />);
+
+    receive({ kind });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      kind === "invalid" ? "Live photo update could not be decoded" : "Live photo updates interrupted",
+    );
+    if (kind === "invalid") {
+      expect(screen.getByRole("link", { name: "Reopen album" })).toHaveAttribute("href", window.location.href);
+      expect(screen.queryByRole("status", { name: "Loading album" })).not.toBeInTheDocument();
+    }
+    expect(client.workspace).not.toHaveBeenCalled();
+    receive({ kind: "subscribed" });
+    await screen.findByRole("heading", { name: "A year in photographs / 2026" });
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(client.workspace).toHaveBeenCalledOnce();
+    expect(client.refreshPhotos).not.toHaveBeenCalled();
+  });
 });
 
 function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
@@ -377,6 +426,7 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
     open: vi.fn().mockResolvedValue({ ...firstAlbum, synopsis: "The sea at dawn." }),
     remove: vi.fn().mockResolvedValue(undefined),
     workspace: vi.fn().mockResolvedValue({
+      photoInventories: {},
       year: firstAlbum.year,
       photoRoot: "/photos",
       chapters: [],
@@ -385,6 +435,8 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
     }),
     createChapter: vi.fn(),
     updateChapter: vi.fn(),
+    chapterPhotos: vi.fn(),
+    refreshPhotos: vi.fn(),
     ...overrides,
   };
 }

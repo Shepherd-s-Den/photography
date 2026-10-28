@@ -1,10 +1,10 @@
 import { Show, createMemo } from "solid-js";
 import type { Chapter, Country } from "../model/Workspace";
-import { describePeriod } from "./ChapterDetails";
+import { describeCountryLabel, describePeriod } from "./ChapterDetails";
 
 export function ChapterMetadata(props: {
-  chapter: Chapter;
-  countries: readonly Country[];
+  chapter: Pick<Chapter, "name" | "countries" | "kind" | "start" | "end">;
+  countries: readonly Pick<Country, "id" | "name">[];
   unavailable: string | undefined;
   onEdit: (opener: HTMLButtonElement) => void;
 }) {
@@ -23,16 +23,12 @@ export function ChapterMetadata(props: {
             <dd>{props.chapter.name}</dd>
           </div>
           <div>
-            <dt>Countries</dt>
+            <dt>{describeCountryLabel(props.chapter.countries.length)}</dt>
             <dd>{countryNames()}</dd>
           </div>
           <div>
             <dt>Period</dt>
             <dd>{describePeriod(props.chapter)}</dd>
-          </div>
-          <div class="folder-metadata">
-            <dt>Photo folder</dt>
-            <dd>{props.chapter.sourceFolder}</dd>
           </div>
         </dl>
         <button

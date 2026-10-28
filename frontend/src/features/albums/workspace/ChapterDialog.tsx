@@ -1,17 +1,18 @@
 import { Show, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
 import type { Chapter, ChapterDetails, Country } from "../model/Workspace";
+import type { ChapterSave } from "../model/Photo";
 import { describeFailure } from "../model/Presentation";
 import { CountryPicker } from "./CountryPicker";
 import { suggestFolder, validateChapter } from "./ChapterDetails";
 
 export function ChapterDialog(props: {
-  save: (details: ChapterDetails) => Promise<{ id: string }>;
+  save: (details: ChapterDetails) => Promise<ChapterSave>;
   year: number;
   photoRoot: string;
   countries: readonly Country[];
   homeAvailable: boolean;
   chapter: Pick<Chapter, "kind" | "name" | "countries" | "start" | "end" | "sourceFolder"> | undefined;
-  onSaved: (chapterId: string) => void;
+  onSaved: (result: ChapterSave) => void;
   onClose: () => void;
   returnFocus: () => void;
 }) {
@@ -60,7 +61,7 @@ export function ChapterDialog(props: {
     setPending(true);
     try {
       const saved = await props.save(details);
-      props.onSaved(saved.id);
+      props.onSaved(saved);
     } catch (failure) {
       setError(describeFailure(failure));
       setPending(false);
