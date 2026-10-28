@@ -7,19 +7,19 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
 import photography.adapters.sqlite.SqlitePhotoPlacementRepository
-import photography.adapters.filesystem.{FilePhotoStorage, FileThumbnailStorage}
+import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
-import photography.ports.PhotoRepository
+import photography.ports.{PhotoRepository, ThumbnailStorage}
 import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
-import photography.usecases.{ChapterPlanning, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
-import java.nio.file.Path
+import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
     chapters: ChapterManager[F],
     templates: SpreadTemplateManager[F],
-    workspaces: AlbumWorkspaceManager[F]
+    workspaces: AlbumWorkspaceManager[F],
+    photoEvents: AlbumPhotoEvents[F]
 )
 
 object AppManagers:
@@ -28,7 +28,7 @@ object AppManagers:
       pageSize: AlbumPageSize,
       photoRoot: PhotoSource,
       photoRepository: PhotoRepository[ConnectionIO],
-      thumbnailRoot: Path,
+      thumbnails: ThumbnailStorage[F],
       quality: ThumbnailQuality
   ): Resource[F, AppManagers[F]] =
     Resource.eval(Mutex[F]).flatMap: mutex =>
@@ -44,11 +44,11 @@ object AppManagers:
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)
       val placements         = SqlitePhotoPlacementRepository.make
       val inventory          = PhotoInventory.make[F, ConnectionIO](photoRepository, placements, chapterRepository)
-      val thumbnails         = FileThumbnailStorage.make[F](thumbnailRoot)
       val storage            = FilePhotoStorage.make(thumbnails)
       val generator          = PhotoThumbnailGenerator.make[F](quality)
       val planning           = ChapterPlanning.make(templates)
-      ChapterPhotoImport.make(storage, photoRepository, generator).map: imports =>
-        val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
-        val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
-        AppManagers(albums, chapters, templates, workspaces)
+      Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
+        ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
+          val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
+          val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
+          AppManagers(albums, chapters, templates, workspaces, events)

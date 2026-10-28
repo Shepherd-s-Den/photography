@@ -278,12 +278,13 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           Mutex[IO].flatMap: mutex =>
             given Mutex[IO] = mutex
             val imports     = new ChapterPhotoImport[IO]:
-              override def prepare(chapter: ChapterId, source: PhotoSource): IO[Request] = Request(chapter, source, generation = BigInt(1)).pure[IO]
-              override def launch(request: Request): IO[Scheduling]                      =
+              override def prepare(parent: AlbumId, chapter: ChapterId, source: PhotoSource): IO[Request] =
+                Request(parent, chapter, source, generation = BigInt(1)).pure[IO]
+              override def launch(request: Request): IO[Scheduling] =
                 mutex.lock.surround(Scheduling.Failed.pure[IO])
-              override def retire(retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] = IO.unit
-              override def suspend(chapter: ChapterId): IO[Unit]                              = IO.unit
-              override def status(chapter: ChapterId): IO[ExecutionOutcome]                   =
+              override def retire(parent: AlbumId, retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] = IO.unit
+              override def suspend(chapter: ChapterId): IO[Unit]                                               = IO.unit
+              override def status(chapter: ChapterId): IO[ExecutionOutcome]                                    =
                 ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue]).pure[IO]
             val planning = ChapterPlanning.make(templates)
             val manager  = ChapterManager.make(albums, chapters, planning, imports, photos)
@@ -365,7 +366,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         _       <- sql"UPDATE chapter SET source_folder = '../invalid'".update.run.transact(xa)
         invalid <- repository.findSource(chapter.id).transact(xa).attempt
       yield
-        assertEquals(found, ChapterRepository.SourceResult.Found(chapter.sourceFolder))
+        assertEquals(found, ChapterRepository.SourceResult.Found(albumId, chapter.sourceFolder))
         assertEquals(absent, ChapterRepository.SourceResult.ChapterNotFound)
         assert(invalid.isLeft)
 

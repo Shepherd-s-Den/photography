@@ -55,6 +55,9 @@ object FilePhotoStorage:
     override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): F[ThumbnailStorage.StoreResult] =
       thumbnails.storeThumbnail(location, image)
 
+    override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): F[ThumbnailStorage.ReadResult] =
+      thumbnails.readThumbnail(location, version = version)
+
     override def removeThumbnail(location: ThumbnailLocation): F[ThumbnailStorage.RemoveResult] =
       thumbnails.removeThumbnail(location)
 

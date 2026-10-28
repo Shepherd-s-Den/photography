@@ -4,6 +4,8 @@ import cats.effect.{Deferred, IO, Ref}
 import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.{Blank, Not}
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -189,6 +191,8 @@ final class PhotoWriteRecoveryComponentTest extends CatsEffectSuite:
       override def listUnfinishedWrites: IO[PhotoRepository.ListUnfinishedWritesResult] =
         maybePending.getOrElse(refs.pending.get.map(intents => PhotoRepository.ListUnfinishedWritesResult.Listed(intents = intents)))
     val storage = new ThumbnailStorage[IO]:
+      override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+        IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected read"))
       override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
         IO.raiseError[ThumbnailStorage.StoreResult](new AssertionError("Unexpected thumbnail storage"))
       override def removeThumbnail(location: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =

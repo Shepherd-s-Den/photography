@@ -8,6 +8,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
 import io.github.iltotore.iron.constraint.collection.MinLength
+import io.github.iltotore.iron.constraint.all.{Blank, Not}
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -298,6 +299,8 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       override def run[A](program: Db[A]): IO[A]     = events.update(_ :+ "transaction") >> program.run(())
       override def resolve[A](program: Db[A]): IO[A] = resolving >> program.run(())
     val photoStorage = new PhotoStorage[IO]:
+      override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+        IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected thumbnail read"))
       override def discoverOriginals(source: PhotoSource): IO[PhotoStorage.DiscoveryResult] = IO(assertEquals(source, original.source)) >>
         discovery
       override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] = events.update(_ :+ "read") >> readResult

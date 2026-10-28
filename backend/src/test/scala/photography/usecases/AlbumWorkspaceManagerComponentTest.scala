@@ -133,11 +133,11 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     val photos = new PhotoInventory[IO]:
       override def listChapter(id: ChapterId): IO[PhotoInventory.ListResult] = inventory(id)
     val imports = new ChapterPhotoImport[IO]:
-      override def status(id: ChapterId): IO[ExecutionOutcome]                   = execution(id)
-      override def prepare(chapter: ChapterId, source: PhotoSource): IO[Request] =
+      override def status(id: ChapterId): IO[ExecutionOutcome]                                    = execution(id)
+      override def prepare(parent: AlbumId, chapter: ChapterId, source: PhotoSource): IO[Request] =
         IO.raiseError[Request](new AssertionError("Unexpected import preparation"))
       override def launch(request: Request): IO[Scheduling] = IO.raiseError[Scheduling](new AssertionError("Unexpected import launch"))
-      override def retire(retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] =
+      override def retire(parent: AlbumId, retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] =
         IO.raiseError[Unit](new AssertionError("Unexpected retirement"))
       override def suspend(chapter: ChapterId): IO[Unit] = IO.raiseError[Unit](new AssertionError("Unexpected suspension"))
     AlbumWorkspaceManager.make(albums, catalog, photos, imports, photoRoot = "/photos")

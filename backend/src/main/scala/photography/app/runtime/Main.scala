@@ -11,10 +11,13 @@ import org.typelevel.doobie.ConnectionIO
 import org.typelevel.doobie.implicits.*
 import photography.adapters.http.{AlbumApi, AlbumWorkspaceApi, HealthRoutes, SpreadTemplateApi, StaticSite}
 import photography.adapters.filesystem.FileThumbnailStorage
+import photography.adapters.http.{AlbumPhotoEventsApi, ThumbnailApi}
 import photography.adapters.sqlite.SqlitePhotoRepository
 import photography.app.config.{AppConfig, HttpServerConfig}
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.usecases.PhotoWriteRecovery
+import photography.ports.ThumbnailStorage
+import scala.concurrent.duration.*
 
 object Main extends IOApp.Simple:
 
@@ -37,11 +40,10 @@ object Main extends IOApp.Simple:
             IO.raiseError[Unit](new IllegalStateException(s"Photo write recovery failed: ${failure.issues}"))
         val pageSize      = config.albums.pageSize
         val photoRoot     = config.albums.photoRoot
-        val thumbnailRoot = config.thumbnails.root
         val quality       = config.thumbnails.quality
-        val buildManagers = AppManagers.make[IO](resources.sqlite, pageSize, photoRoot, photos, thumbnailRoot = thumbnailRoot, quality)
+        val buildManagers = AppManagers.make[IO](resources.sqlite, pageSize, photoRoot, photos, thumbnails, quality)
         val serve         = buildManagers.use: managers =>
-          val server = buildHttpApp(managers).flatMap(httpApp => buildHttpServer(config.http, httpApp))
+          val server = buildHttpApp(managers, thumbnails).flatMap(httpApp => buildHttpServer(config.http, httpApp))
           server.useForever.void
         for
           _ <- resources.flyway.migrate
@@ -50,11 +52,13 @@ object Main extends IOApp.Simple:
           _ <- serve
         yield ()
 
-  private def buildHttpApp(managers: AppManagers[IO]) =
-    val metadata  = AlbumApi.make(managers.albums).routes
-    val workspace = AlbumWorkspaceApi.make(managers.workspaces, managers.albums, managers.chapters).routes
-    val api       = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> SpreadTemplateApi.make(managers.templates).routes
+  private def buildHttpApp(managers: AppManagers[IO], thumbnails: ThumbnailStorage[IO]) =
+    val metadata     = AlbumApi.make(managers.albums).routes
+    val workspace    = AlbumWorkspaceApi.make(managers.workspaces, managers.albums, managers.chapters).routes
+    val thumbnailApi = ThumbnailApi.make(thumbnails).routes
+    val events       = AlbumPhotoEventsApi.make(managers.photoEvents).routes
+    val api = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> events <+> thumbnailApi <+> SpreadTemplateApi.make(managers.templates).routes
     StaticSite.make(api, assetRoot = "frontend").map(_.app)
 
   private def buildHttpServer(config: HttpServerConfig, app: HttpApp[IO]) =
-    EmberServerBuilder.default[IO].withHost(config.host).withPort(config.port).withHttpApp(app).build
+    EmberServerBuilder.default[IO].withHost(config.host).withPort(config.port).withIdleTimeout(60.seconds).withHttpApp(app).build

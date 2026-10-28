@@ -114,6 +114,45 @@ final class FileThumbnailStorageSeamIntegrationTest extends CatsEffectSuite:
         new Thumbnail(location, version = "version", dimensions = dimensions, quality = quality, bytes = tooMany)
     }
 
+  test("should read the stored content version and distinguish absence from read failure"):
+    buildDirectory.use: root =>
+      val file                          = root.resolve(s"${location.value}.jpg")
+      val storage                       = FileThumbnailStorage.make[IO](root)
+      val version: String :| Not[Blank] = "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222"
+
+      for
+        absent      <- storage.readThumbnail(location, version = version)
+        _           <- storage.storeThumbnail(location, image)
+        found       <- storage.readThumbnail(location, version = version)
+        stale       <- storage.readThumbnail(location, version = "wrong-version")
+        missingRoot <- FileThumbnailStorage.make[IO](root.resolve("absent")).readThumbnail(location, version = version)
+        invalidRoot <- FileThumbnailStorage.make[IO](file).readThumbnail(location, version = version)
+        relative    <- FileThumbnailStorage.make[IO](Path.of("relative")).readThumbnail(location, version = version)
+        _           <- IO.blocking(Files.write(file, Array.emptyByteArray))
+        empty       <- storage.readThumbnail(location, version = version)
+        _           <- IO.blocking(Files.write(file, Array.fill[Byte](300001)(1)))
+        excessive   <- storage.readThumbnail(location, version = version)
+      yield
+        assertEquals(found, ReadResult.Read(bytes))
+        assertEquals(Vector(absent, stale, missingRoot), Vector.fill(3)(ReadResult.NotFound))
+        assertEquals(Vector(invalidRoot, relative, empty, excessive), Vector.fill(4)(ReadResult.Failed))
+
+  test("should reject a managed filename pointing outside its configured root"):
+    buildDirectory.use: root =>
+      val nested  = root.resolve("managed")
+      val outside = root.resolve("original.jpg")
+      val link    = nested.resolve(s"${location.value}.jpg")
+
+      for
+        _      <- IO.blocking(Files.createDirectory(nested))
+        _      <- IO.blocking(Files.write(outside, bytes.toArray))
+        _      <- IO.blocking(Files.createSymbolicLink(link, outside))
+        result <- FileThumbnailStorage.make[IO](nested).readThumbnail(location, version = "version")
+        _      <- IO.blocking(Files.delete(link))
+        _      <- IO.blocking(Files.delete(nested))
+        _      <- IO.blocking(Files.delete(outside))
+      yield assertEquals(result, ReadResult.NotFound)
+
   private def buildDirectory =
     Resource.make(IO.blocking(Files.createTempDirectory(Path.of("target"), "thumbnails-").toAbsolutePath)): root =>
       val artifacts = Vector(

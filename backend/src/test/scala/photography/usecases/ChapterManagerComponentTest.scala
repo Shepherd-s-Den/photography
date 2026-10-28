@@ -584,7 +584,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       override def findSource(id: ChapterId): IO[ChapterRepository.SourceResult] =
         val saved =
           current.chapters.find(_.id.value === id.value).fold[ChapterRepository.SourceResult](ChapterRepository.SourceResult.ChapterNotFound):
-            value => ChapterRepository.SourceResult.Found(value.sourceFolder)
+            value => ChapterRepository.SourceResult.Found(current.id, value.sourceFolder)
         maybeSource.getOrElse(saved.pure[IO])
       override def create(
           parent: AlbumId,
@@ -605,11 +605,12 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         override def run[A](program: IO[A]): IO[A]     = program
         override def resolve[A](program: IO[A]): IO[A] = program
       val imports = new ChapterPhotoImport[IO]:
-        override def prepare(id: ChapterId, source: PhotoSource): IO[Request] =
-          refs.preparations.update(_ :+ (id, source)) >> preparation.as(Request(id, source, generation = BigInt(0)))
+        override def prepare(parent: AlbumId, id: ChapterId, source: PhotoSource): IO[Request] =
+          IO(assertEquals(parent, current.id)) >> refs.preparations.update(_ :+ (id, source)) >>
+            preparation.as(Request(parent, id, source, generation = BigInt(0)))
         override def launch(request: Request): IO[Scheduling] =
           mutex.lock.surround(refs.launches.update(_ :+ request) >> scheduling)
-        override def retire(retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] =
+        override def retire(parent: AlbumId, retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] =
           refs.retirements.update(_ ++ retirements) >> retirement
         override def suspend(id: ChapterId): IO[Unit]            = refs.suspensions.update(_ :+ id)
         override def status(id: ChapterId): IO[ExecutionOutcome] =

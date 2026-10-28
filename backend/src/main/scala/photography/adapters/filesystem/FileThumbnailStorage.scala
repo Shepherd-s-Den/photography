@@ -2,6 +2,7 @@ package photography.adapters.filesystem
 
 import cats.effect.{Async, Resource}
 import cats.syntax.all.*
+import fs2.io.file.{Files as StreamFiles, Path as StreamPath}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import org.typelevel.log4cats.Logger
@@ -10,7 +11,8 @@ import photography.ports.ThumbnailStorage
 import photography.ports.ThumbnailStorage.*
 import photography.syntax.SyncSyntax.*
 import java.nio.channels.FileChannel
-import java.nio.file.{Files, Path, StandardCopyOption, StandardOpenOption}
+import java.nio.file.{Files, NoSuchFileException, Path, StandardCopyOption, StandardOpenOption}
+import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 import java.util.HexFormat
 
@@ -31,13 +33,25 @@ object FileThumbnailStorage:
           _      <- force(partial, StandardOpenOption.WRITE)
           _      <- Files.move(partial, target, StandardCopyOption.ATOMIC_MOVE).blocking[F]
           _      <- force(root, StandardOpenOption.READ)
-          digest <- HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).blocking[F]
+          digest <- computeVersion(bytes).blocking[F]
         yield digest
-      write.map: digest =>
-        val version = digest.refineUnsafe[Not[Blank]]
-        val size    = image.bytes.size.refineUnsafe[ThumbnailByteCountConstraint]
+      write.map: version =>
+        val size = image.bytes.size.refineUnsafe[ThumbnailByteCountConstraint]
         StoreResult.Stored(Thumbnail(location, version = version, dimensions = image.dimensions, quality = image.quality, bytes = size))
       .handleErrorWith(error => Logger[F].error(error)("Thumbnail storage failed").as(StoreResult.Failed))
+
+    override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): F[ReadResult] =
+      val read = checkRoot().liftTo[F] >> resolveThumbnail(location).flatMap:
+        case None       => ReadResult.NotFound.pure[F]
+        case Some(path) =>
+          StreamFiles.forAsync[F].readAll(StreamPath.fromNioPath(path)).take(300001).compile.toVector.flatMap: bytes =>
+            val read = bytes.refineEither[ThumbnailBytesConstraint].leftMap(new IllegalStateException(_))
+            read.liftTo[F].flatMap: content =>
+              computeVersion(content.toArray).blocking[F].map: actualVersion =>
+                if (actualVersion: String) === (version: String) then ReadResult.Read(content) else ReadResult.NotFound
+      read.recoverWith:
+        case _: NoSuchFileException => ReadResult.NotFound.pure[F]
+        case error                  => Logger[F].error(error)("Managed thumbnail read failed").as(ReadResult.Failed)
 
     override def removeThumbnail(location: ThumbnailLocation): F[RemoveResult] =
       val remove =
@@ -53,6 +67,16 @@ object FileThumbnailStorage:
     private def force(path: Path, access: StandardOpenOption) =
       Resource.fromAutoCloseable(FileChannel.open(path, access).blocking[F])
         .use(channel => channel.force(true).blocking[F])
+
+    private def resolveThumbnail(location: ThumbnailLocation) =
+      Async[F].blocking:
+        val directory = root.toRealPath()
+        val file      = directory.resolve(s"${location.value}.jpg").toRealPath()
+        val contained = file.startsWith(directory) && Files.readAttributes(file, classOf[BasicFileAttributes]).isRegularFile
+        Option.when(contained)(file)
+
+    private def computeVersion(bytes: Array[Byte]) =
+      HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).refineUnsafe[Not[Blank]]
 
     private def checkRoot() =
       val valid = root.isAbsolute && root.normalize().toString === root.toString

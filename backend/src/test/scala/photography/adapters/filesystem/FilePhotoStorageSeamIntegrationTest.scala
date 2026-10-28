@@ -251,16 +251,18 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
       ThumbnailQuality.Standard
     )
     val expected      = Thumbnail(location, version = "supplied-version", image.dimensions, image.quality, bytes = 1)
-    val expectedCalls = Vector(ThumbnailCall.Store(location, image), ThumbnailCall.Remove(location))
+    val expectedCalls = Vector(ThumbnailCall.Store(location, image), ThumbnailCall.Read(location, expected.version), ThumbnailCall.Remove(location))
 
     Ref.of[IO, Vector[ThumbnailCall]](Vector.empty[ThumbnailCall]).flatMap: calls =>
       val storage = buildForwardingStorage(calls, expected)
       for
         stored      <- storage.storeThumbnail(location, image)
+        read        <- storage.readThumbnail(location, version = expected.version)
         removed     <- storage.removeThumbnail(location)
         actualCalls <- calls.get
       yield
         assertEquals(stored, ThumbnailStorage.StoreResult.Stored(expected))
+        assertEquals(read, ThumbnailStorage.ReadResult.Read(image.bytes))
         assertEquals(removed, ThumbnailStorage.RemoveResult.Failed)
         assertEquals(actualCalls, expectedCalls)
 
@@ -303,10 +305,14 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
 
   private enum ThumbnailCall:
     case Store(location: ThumbnailLocation, image: EncodedThumbnail)
+    case Read(location: ThumbnailLocation, version: String :| Not[Blank])
     case Remove(location: ThumbnailLocation)
 
   private def buildForwardingStorage(calls: Ref[IO, Vector[ThumbnailCall]], stored: Thumbnail) =
     val thumbnails = new ThumbnailStorage[IO]:
+      override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+        val bytes = Vector(1.toByte).refineUnsafe[ThumbnailBytesConstraint]
+        calls.update(_ :+ ThumbnailCall.Read(location, version)).as(ThumbnailStorage.ReadResult.Read(bytes))
       override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
         calls.update(_ :+ ThumbnailCall.Store(location, image)).as(ThumbnailStorage.StoreResult.Stored(stored))
       override def removeThumbnail(location: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =

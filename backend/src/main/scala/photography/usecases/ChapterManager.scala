@@ -59,11 +59,12 @@ object ChapterManager:
             id       <- persistCreation(album, currentChapters = saved.chapters, chapter).eitherT
           yield id
         program.value.flatMap: outcome =>
-          outcome.traverse(id => photos.prepare(id, sourceFolder).attempt.tupleLeft(id))
+          outcome.traverse(id => photos.prepare(album, id, sourceFolder).attempt.tupleLeft(id))
       MonadCancelThrow[F].uncancelable: _ =>
         creation.flatMap:
           case Left(failure)        => translateCreateFailure(failure).pure[F]
-          case Right((id, request)) => launchImport(request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(CreateResult.Created(id, _))
+          case Right((id, request)) =>
+            launchImport(album, request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(CreateResult.Created(id, _))
 
     override def update(
         album: AlbumId,
@@ -81,31 +82,32 @@ object ChapterManager:
             retirements <- prepareRetirements(chapter, sourceChanged = plan.sourceChanged).lift[UpdateFailure]
             command <- allocateUpdate(album, chapter, name, countries = countries, plan.period, sourceFolder, order = plan.order).lift[UpdateFailure]
             _       <- persistUpdate(plan.previousDestination, command, retirements = retirements).eitherT
-            maybeRequest <- prepareImport(chapter, sourceFolder, sourceChanged = plan.sourceChanged).lift[UpdateFailure]
+            maybeRequest <- prepareImport(album, chapter, sourceFolder, sourceChanged = plan.sourceChanged).lift[UpdateFailure]
           yield maybeRequest.map(value => ImportLaunch(value, retirements = retirements))
         program.value
       MonadCancelThrow[F].uncancelable: _ =>
         update.flatMap:
           case Left(failure)       => translateUpdateFailure(failure).pure[F]
           case Right(None)         => UpdateResult.Updated(Scheduling.NotRequested).pure[F]
-          case Right(Some(launch)) => launchImport(launch.request, retirements = launch.retirements).map(UpdateResult.Updated(_))
+          case Right(Some(launch)) => launchImport(album, launch.request, retirements = launch.retirements).map(UpdateResult.Updated(_))
       .handleErrorWith(error => Logger[F].error(error)("Chapter update failed").as(UpdateResult.Failed))
 
     override def refresh(chapter: ChapterId): F[RefreshResult] =
       val refresh = summon[Mutex[F]].lock.surround:
         Transaction[Db, F].run(chapters.findSource(chapter)).flatMap:
-          case ChapterRepository.SourceResult.Found(source) =>
-            photos.prepare(chapter, source).attempt.map(_.asRight[RefreshResult])
-          case ChapterRepository.SourceResult.ChapterNotFound => RefreshResult.ChapterNotFound.asLeft[Either[Throwable, Request]].pure[F]
-          case ChapterRepository.SourceResult.Failed          => RefreshResult.Failed.asLeft[Either[Throwable, Request]].pure[F]
+          case ChapterRepository.SourceResult.Found(album, source) =>
+            photos.prepare(album, chapter, source).attempt.tupleLeft(album).map(_.asRight[RefreshResult])
+          case ChapterRepository.SourceResult.ChapterNotFound => RefreshResult.ChapterNotFound.asLeft[(AlbumId, Either[Throwable, Request])].pure[F]
+          case ChapterRepository.SourceResult.Failed          => RefreshResult.Failed.asLeft[(AlbumId, Either[Throwable, Request])].pure[F]
       MonadCancelThrow[F].uncancelable: _ =>
         refresh.flatMap:
-          case Right(request) => launchImport(request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(RefreshResult.Scheduled(_))
-          case Left(failure)  => failure.pure[F]
+          case Right((album, request)) =>
+            launchImport(album, request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(RefreshResult.Scheduled(_))
+          case Left(failure) => failure.pure[F]
       .handleErrorWith(error => Logger[F].error(error)("Chapter photo Refresh failed").as(RefreshResult.Failed))
 
-    private def launchImport(request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement]) =
-      val launch = photos.retire(retirements = retirements) >> request.traverse(photos.launch).flatMap:
+    private def launchImport(album: AlbumId, request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement]) =
+      val launch = photos.retire(album, retirements = retirements) >> request.traverse(photos.launch).flatMap:
         case Right(scheduling) => scheduling.pure[F]
         case Left(error)       => Logger[F].error(error)("Saved chapter photo import could not be prepared").as(Scheduling.Failed)
       launch.handleErrorWith(error => Logger[F].error(error)("Saved chapter photo import could not be launched").as(Scheduling.Failed))
@@ -191,10 +193,10 @@ object ChapterManager:
         case PhotoRepository.WriteResult.Applied => ().pure[Db]
         case PhotoRepository.WriteResult.Failed  => new IllegalStateException("Chapter photo removal rejected").raiseError[Db, Unit]
 
-    private def prepareImport(chapter: ChapterId, source: PhotoSource, sourceChanged: Boolean) =
+    private def prepareImport(album: AlbumId, chapter: ChapterId, source: PhotoSource, sourceChanged: Boolean) =
       if !sourceChanged then none[Either[Throwable, Request]].pure[F]
       else
-        photos.prepare(chapter, source).attempt.flatTap:
+        photos.prepare(album, chapter, source).attempt.flatTap:
           case Left(_)                      => photos.suspend(chapter)
           case _: Right[Throwable, Request] => ().pure[F]
         .map(_.some)
