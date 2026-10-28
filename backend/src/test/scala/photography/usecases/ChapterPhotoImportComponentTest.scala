@@ -42,15 +42,15 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       _ <- buildImport(refs, storage)(using mutex).use: imports =>
         for
           initial <- mutex.lock.surround(imports.prepare(chapter, source))
-          queued  <- imports.launch(initial)
+          queued  <- imports.launch(initial, retirements = Vector.empty[PhotoWriteIntent.Retirement])
           _       <- entered.get
           overlap <- mutex.lock.surround(imports.prepare(chapter, source))
-          shared  <- imports.launch(overlap)
+          shared  <- imports.launch(overlap, retirements = Vector.empty[PhotoWriteIntent.Retirement])
           active  <- imports.status(chapter)
           _       <- release.complete(())
           _       <- awaitFinished(imports)
           retry   <- mutex.lock.surround(imports.prepare(chapter, source))
-          retried <- imports.launch(retry)
+          retried <- imports.launch(retry, retirements = Vector.empty[PhotoWriteIntent.Retirement])
           _       <- awaitFinished(imports)
           actual  <- refs.scans.get
         yield
@@ -72,13 +72,13 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       _ <- buildImport(refs, storage)(using mutex).use: imports =>
         for
           original  <- mutex.lock.surround(imports.prepare(chapter, source))
-          _         <- imports.launch(original)
+          _         <- imports.launch(original, retirements = Vector.empty[PhotoWriteIntent.Retirement])
           _         <- entered.get
           changed   <- mutex.lock.surround(imports.prepare(chapter, source = "/photos/b"))
           latest    <- mutex.lock.surround(imports.prepare(chapter, source))
-          obsolete  <- imports.launch(changed)
-          queued    <- imports.launch(latest)
-          duplicate <- imports.launch(original)
+          obsolete  <- imports.launch(changed, retirements = Vector.empty[PhotoWriteIntent.Retirement])
+          queued    <- imports.launch(latest, retirements = Vector.empty[PhotoWriteIntent.Retirement])
+          duplicate <- imports.launch(original, retirements = Vector.empty[PhotoWriteIntent.Retirement])
           _         <- release.complete(())
           _         <- awaitFinished(imports)
           actual    <- refs.scans.get
@@ -104,12 +104,12 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
           for
             idle         <- imports.status(chapter)
             request      <- mutex.lock.surround(imports.prepare(chapter, source))
-            _            <- imports.launch(request)
+            _            <- imports.launch(request, retirements = Vector.empty[PhotoWriteIntent.Retirement])
             _            <- stored.get
             latest       <- if supersede then changeSource else request.pure[IO]
             _            <- launchLatest.get
             beforeLaunch <- imports.status(chapter)
-            _            <- if supersede then imports.launch(latest).void else IO.unit
+            _            <- if supersede then imports.launch(latest, retirements = Vector.empty[PhotoWriteIntent.Retirement]).void else IO.unit
             _            <- awaitFinished(imports)
             status       <- imports.status(chapter)
             written      <- refs.saves.get
@@ -141,11 +141,81 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       storage = buildStorage(refs, _ => PhotoStorage.DiscoveryResult.Failed.pure[IO])
       imports <- buildImport(refs, storage)(using mutex).use(_.pure[IO])
       request <- mutex.lock.surround(imports.prepare(chapter, source))
-      result  <- imports.launch(request)
+      result  <- imports.launch(request, retirements = Vector.empty[PhotoWriteIntent.Retirement])
       status  <- imports.status(chapter)
     yield
       assertEquals(result, Scheduling.Failed)
       assertEquals(status, Status.LaunchFailed)
+
+  test("should block an uncertain source generation until saved metadata prepares another pass"):
+    val refs = Refs()
+
+    (Mutex[IO], Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit]).tupled.flatMap { case (mutex, stored, release, inspect) =>
+      val storage = buildPublicationStorage(refs, stored = stored, release = release)
+      val program = buildImport(refs, storage)(using mutex).use: imports =>
+        for
+          original <- mutex.lock.surround(imports.prepare(chapter, source))
+          _        <- imports.launch(original, retirements = Vector.empty[PhotoWriteIntent.Retirement])
+          _        <- stored.get
+          _        <- mutex.lock.surround(imports.suspend(chapter))
+          _        <- inspect.get
+          status   <- imports.status(chapter)
+          saved    <- refs.saves.get
+          deleted  <- refs.removed.get
+          latest   <- mutex.lock.surround(imports.prepare(chapter, source))
+          _        <- imports.launch(latest, retirements = Vector.empty[PhotoWriteIntent.Retirement])
+          _        <- awaitFinished(imports)
+        yield
+          assertEquals(status, Status.Uncertain)
+          assertEquals(saved, Vector.empty[Photo])
+          assertEquals(deleted.size, 1)
+
+      for
+        control <- TestControl.execute(program)
+        _       <- control.tick
+        _       <- release.complete(())
+        _       <- control.tick
+        _       <- inspect.complete(())
+        _       <- control.tick
+        result  <- control.results
+      yield assertEquals(result, Outcome.succeeded[Id, Throwable, Unit](()).some)
+    }
+
+  test("should supervise targeted retirement beyond caller cancellation without holding the chapter lock"):
+    Vector(false, true).traverse_ { fails =>
+      val refs                                = Refs()
+      val retired                             = ThumbnailLocation(new UUID(0L, 70L))
+      val intent: PhotoWriteIntent.Retirement =
+        PhotoWriteIntent.Retirement(PhotoWriteIntentId(new UUID(0L, 71L)), chapter, PhotoId(new UUID(0L, 72L)), retired)
+      (Mutex[IO], Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit]).tupled.flatMap { case (mutex, entered, release, inspect) =>
+        val cleanup = (_: ThumbnailLocation) =>
+          entered.complete(()).void >> release.get.as(if fails then ThumbnailStorage.RemoveResult.Failed else ThumbnailStorage.RemoveResult.Removed)
+        val storage = buildStorage(refs, _ => PhotoStorage.DiscoveryResult.Failed.pure[IO], cleanup = cleanup)
+        val program = buildImport(refs, storage)(using mutex).use: imports =>
+          for
+            request <- mutex.lock.surround(imports.prepare(chapter, source))
+            caller  <- (imports.launch(request, retirements = Vector(intent)) >> IO.never[Unit]).start
+            _       <- entered.get
+            _       <- caller.cancel
+            _       <- mutex.lock.surround(imports.prepare(ChapterId(new UUID(0L, 73L)), source))
+            before  <- refs.completed.get
+            _       <- inspect.get
+            after   <- refs.completed.get
+          yield
+            assertEquals(before, Vector.empty[PhotoWriteIntentId])
+            assertEquals(after, if fails then Vector.empty[PhotoWriteIntentId] else Vector(intent.id))
+
+        for
+          control <- TestControl.execute(program)
+          _       <- control.tick
+          _       <- release.complete(())
+          _       <- control.tick
+          _       <- inspect.complete(())
+          _       <- control.tick
+          result  <- control.results
+        yield assertEquals(result, Outcome.succeeded[Id, Throwable, Unit](()).some)
+      }
+    }
 
   private def awaitFinished(imports: ChapterPhotoImport[IO]) =
     val finished = (IO.cede >> imports.status(chapter)).map:
@@ -154,9 +224,10 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
     finished.iterateUntil(identity).void
 
   final private case class Refs():
-    val scans: Ref[IO, Vector[PhotoSource]]         = Ref.unsafe(Vector.empty)
-    val saves: Ref[IO, Vector[Photo]]               = Ref.unsafe(Vector.empty)
-    val removed: Ref[IO, Vector[ThumbnailLocation]] = Ref.unsafe(Vector.empty)
+    val completed: Ref[IO, Vector[PhotoWriteIntentId]] = Ref.unsafe(Vector.empty)
+    val scans: Ref[IO, Vector[PhotoSource]]            = Ref.unsafe(Vector.empty)
+    val saves: Ref[IO, Vector[Photo]]                  = Ref.unsafe(Vector.empty)
+    val removed: Ref[IO, Vector[ThumbnailLocation]]    = Ref.unsafe(Vector.empty)
 
   private def buildImport(refs: Refs, storage: PhotoStorage[IO])(using Mutex[IO]) =
     given IdGenerator[IO] with
@@ -172,7 +243,7 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       override def recordWrite(intent: PhotoWriteIntent): Db[PhotoRepository.RecordWriteResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.RecordWriteResult](PhotoRepository.RecordWriteResult.Recorded.pure[IO])
       override def completeWrite(id: PhotoWriteIntentId): Db[PhotoRepository.CompleteWriteResult] =
-        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](PhotoRepository.CompleteWriteResult.Completed.pure[IO])
+        Kleisli.liftF[IO, Unit, PhotoRepository.CompleteWriteResult](refs.completed.update(_ :+ id).as(PhotoRepository.CompleteWriteResult.Completed))
       override def listUnfinishedWrites: Db[PhotoRepository.ListUnfinishedWritesResult] =
         Kleisli.liftF[IO, Unit, PhotoRepository.ListUnfinishedWritesResult](PhotoRepository.ListUnfinishedWritesResult.Failed.pure[IO])
     val generator = new PhotoThumbnailGenerator[IO]:
@@ -181,7 +252,13 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
         PhotoThumbnailGenerator.GenerationResult.Generated(image).pure[IO]
     ChapterPhotoImport.make(storage, photos, generator)
 
-  private def buildStorage(refs: Refs, discover: PhotoSource => IO[PhotoStorage.DiscoveryResult]) =
+  // scalafix:off DisableSyntax.defaultArgs
+  private def buildStorage(
+      refs: Refs,
+      discover: PhotoSource => IO[PhotoStorage.DiscoveryResult],
+      cleanup: ThumbnailLocation => IO[ThumbnailStorage.RemoveResult] =
+        _ => IO.raiseError[ThumbnailStorage.RemoveResult](new AssertionError("Unexpected removal"))
+  ) =
     new PhotoStorage[IO]:
       override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult]    = refs.scans.update(_ :+ value) >> discover(value)
       override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =
@@ -189,7 +266,8 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
         IO.raiseError[ThumbnailStorage.StoreResult](new AssertionError("Unexpected store"))
       override def removeThumbnail(location: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =
-        IO.raiseError[ThumbnailStorage.RemoveResult](new AssertionError("Unexpected removal"))
+        cleanup(location)
+  // scalafix:on DisableSyntax.defaultArgs
 
   private def buildPublicationStorage(refs: Refs, stored: Deferred[IO, Unit], release: Deferred[IO, Unit]) =
     new PhotoStorage[IO]:
