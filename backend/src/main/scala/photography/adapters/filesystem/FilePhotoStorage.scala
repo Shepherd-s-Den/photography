@@ -21,7 +21,7 @@ import java.security.MessageDigest
 import java.time.LocalDateTime
 import java.time.format.{DateTimeFormatter, ResolverStyle}
 import java.util.{HexFormat, Locale}
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.imageio.ImageIO
 import javax.imageio.stream.MemoryCacheImageInputStream
 import scala.jdk.CollectionConverters.*
@@ -47,7 +47,8 @@ object FilePhotoStorage:
           middle   <- inspectOriginal(path).blocking[F]
           repeated <- bufferOriginal(path)
           after    <- inspectOriginal(path).blocking[F]
-        yield if before === middle && middle === after && bytes === repeated then decoded else ReadResult.Unstable
+          stable   <- (before === middle && middle === after && bytes === repeated).blocking[F]
+        yield if stable then decoded else ReadResult.Unstable
       read.handleErrorWith(error => Logger[F].error(error)("Original read failed").as(ReadResult.Failed))
 
     override def storeThumbnail(location: ThumbnailLocation, image: EncodedThumbnail): F[ThumbnailStorage.StoreResult] =
@@ -110,13 +111,11 @@ object FilePhotoStorage:
       try
         ImageIO.getImageReaders(input).asScala.nextOption().flatMap: reader =>
           try
-            val warnings = new ConcurrentLinkedQueue[String]()
-            reader.addIIOReadWarningListener { (_, warning) =>
-              val _ = warnings.add(warning)
-            }
+            val hasWarnings = new AtomicBoolean(false)
+            reader.addIIOReadWarningListener((_, _) => hasWarnings.set(true))
             reader.setInput(input)
             val image = reader.read(0)
-            Option.when(warnings.isEmpty)(image)
+            Option.when(!hasWarnings.get())(image)
           finally reader.dispose()
       finally input.close()
 
