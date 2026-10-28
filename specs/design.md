@@ -86,7 +86,7 @@ Each album has a required immutable year identifying at most one album and a fre
 ### Values
 
 - Album years are integers from 1900 through 2100.
-- Each chapter requires a full backend-visible absolute source-folder path, unique within its album, without parent traversal; the folder need not exist yet. Suggestions use `<photoRoot>/<year>/selection/<destination>`. Photo paths remain relative to their chapter folder and cannot escape that root.
+- Each chapter requires a full backend-visible absolute source-folder path, unique within its album, without parent traversal; the folder need not exist yet. Suggestions use `<photoRoot>/<year>/selection/<destination>`. Photo locations combine that source folder with one validated immediate filename, rejecting separators and parent-traversal names.
 - Sources contain immediate regular JPEG files (`.jpg`/`.jpeg`, case-insensitive); discovery reports unsupported files. Original files are referenced in place, read-only. Same-path replacements retain photo identity, caption and placement.
 - Capture time uses camera-local EXIF values, with missing/invalid dates treated as undated rather than inferred from file timestamps or a timezone. Order is capture time ascending, undated last, then case-insensitive filename, exact filename and chapter ID.
 - Each complete photo has one orientation-correct, uncropped JPEG thumbnail, never upscaled. Low permits at most 1024px/75,000 bytes, Standard 1536px/150,000 bytes and High 2048px/300,000 bytes. These are ceilings; bounded adaptive encoding lowers JPEG quality and then dimensions when needed, explicitly failing if no output fits.
