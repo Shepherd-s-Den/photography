@@ -11,7 +11,7 @@ import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.ports.{PhotoPlacementRepository, PhotoRepository, PhotoStorage, ThumbnailStorage}
 import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
-import photography.usecases.{PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
+import photography.usecases.{ChapterPlanning, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
@@ -42,8 +42,9 @@ object AppManagers:
       val inventory          = PhotoInventory.make[F, ConnectionIO](photoRepository, placements)
       val storage            = buildPhotoStorage[F]
       val generator          = buildThumbnailGenerator[F]
+      val planning           = ChapterPlanning.make(templates)
       ChapterPhotoImport.make(storage, photoRepository, generator).map: imports =>
-        val chapters   = ChapterManager.make(albumRepository, chapterRepository, templates, imports, photoRepository)
+        val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
         val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, photoRoot)
         AppManagers(albums, chapters, templates, workspaces)
 

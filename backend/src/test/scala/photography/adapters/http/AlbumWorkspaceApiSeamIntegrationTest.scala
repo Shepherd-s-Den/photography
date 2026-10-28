@@ -31,9 +31,11 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
   private val photo        = SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(0L, 7L)), box, bleed = Set.empty)
   private val template     = SpreadTemplateId(new UUID(0L, 4L))
   private val chapter      =
-    val destination = Destination(DestinationId(new UUID(0L, 10L)), name = "Coast", NonEmptyList.one(country))
-    val opening     = Spread.ChapterStart(SpreadId(new UUID(0L, 3L)), template, Vector(photo), text, placements = Vector.empty[SpreadPlacement])
-    val photos      = Spread.PhotosOnly(SpreadId(new UUID(0L, 5L)), template, NonEmptyList.one(photo), placements = Vector.empty[SpreadPlacement])
+    val destination = Destination(DestinationId(new UUID(0L, 10L)), name = "Coast", countries = NonEmptyList.one(country))
+    val opening     =
+      Spread.ChapterStart(SpreadId(new UUID(0L, 3L)), template, photoSlots = Vector(photo), text, placements = Vector.empty[SpreadPlacement])
+    val photos =
+      Spread.PhotosOnly(SpreadId(new UUID(0L, 5L)), template, photoSlots = NonEmptyList.one(photo), placements = Vector.empty[SpreadPlacement])
     Chapter(
       ChapterId(new UUID(0L, 2L)),
       destination,
@@ -41,13 +43,13 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       description = "Sea air",
       sourceFolder = "/photos/coast",
       opening,
-      Vector(photos)
+      spreads = Vector(photos)
     )
   private val album =
     val emptyPhotos     = Vector.empty[SpreadSlot.Photo]
     val emptyPlacements = Vector.empty[SpreadPlacement]
     val opening         = Spread.AlbumStart(SpreadId(new UUID(0L, 11L)), template, photoSlots = emptyPhotos, text, placements = emptyPlacements)
-    Album(AlbumId(new UUID(0L, 1L)), year = 2024, title = "Our year", synopsis = "", Instant.EPOCH, opening, Vector(chapter))
+    Album(AlbumId(new UUID(0L, 1L)), year = 2024, title = "Our year", synopsis = "", Instant.EPOCH, opening, chapters = Vector(chapter))
 
   private val emptyInventories           = Map.empty[ChapterId, PhotoInventory.Inventory]
   private val workspace: GetResult.Found =

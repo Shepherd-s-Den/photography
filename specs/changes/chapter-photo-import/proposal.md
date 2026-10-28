@@ -341,7 +341,7 @@ enum ThumbnailQuality:
 | --- | --- |
 | Capture time | Camera-local EXIF date/time; missing/invalid dates become undated photos, not skipped JPEGs; never infer timezone or modification time. |
 | Order | Capture time ascending, undated last; case-insensitive filename, exact filename, then chapter ID break ties. |
-| Source | Immediate regular JPEG files (`.jpg`/`.jpeg`, case-insensitive); no recursion or symlink imports. |
+| Source | Immediate regular JPEG files (`.jpg`/`.jpeg`, case-insensitive) in the configured source directory. |
 | Thumbnail | One orientation-correct, uncropped JPEG; no upscale; selected quality sets resolution/byte ceilings, not target file size. |
 | Ownership | Every photo belongs to exactly one chapter. Synopsis/Cover list all chapters' photos without changing ownership; chapter spreads list their chapter. |
 | Counts / Refresh | Counts describe completed photo rows; images appear progressively. Synopsis/Cover Refresh reconciles every chapter's directory. |
@@ -371,7 +371,7 @@ Refresh regenerates when source bytes or configured quality differ; ordinary ope
 
 Use immutable content-versioned file keys/URLs with `Cache-Control: private, max-age=31536000, immutable`; changed output receives a new key/URL. Inventory/status responses remain uncached.
 
-Inventories include versioned application thumbnail URLs, never NAS/original paths. http4s static-file delivery serves only the thumbnail root, rejects traversal/symlink escapes and needs no photo-ID lookup or generator call.
+Inventories include versioned application thumbnail URLs, never NAS/original paths. http4s static-file delivery serves only the thumbnail root, rejects path traversal and needs no photo-ID lookup or generator call.
 
 The browser fetches those URLs near the viewport. Missing files return 404, read failures remain explicit; neither starts processing. Preset byte/pixel ceilings bound transfer and decoded-image size.
 
@@ -428,7 +428,7 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | --- | --- |
 | I1 | Creation succeeds before a slow 200-file discovery unblocks; later discovery failure preserves the chapter, and work needs no browser request. |
 | I2 | Folder save/clearing commit atomically or roll back together; release the lock before scheduling, without waiting for old/new scanning or image work. |
-| I3 | Import immediate-folder JPEGs; count unsupported files and reject symlinks. |
+| I3 | Import immediate-folder regular JPEGs and count unsupported files. |
 | I4 | Skip undecodable JPEGs without per-photo UI; continue remaining files. |
 | I5 | Each new photo appears only after its complete row/thumbnail commit; earlier photos are browsable while others are processing. |
 | I6 | Refresh detects additions and same-name edits by content hash, regenerating their thumbnails even when timestamps/file sizes are unchanged. |
@@ -447,7 +447,7 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | T5 | Environment overrides flow through HOCON/PureConfig; invalid settings fail startup, and unset quality selects Standard. |
 | T6 | Quality changes regenerate on Refresh without changing photo identity/placement or publishing multiple variants. |
 | T7 | Near-viewport loading and immutable version URLs permit cached reuse; changed thumbnails cannot reuse stale content URLs. |
-| T8 | Supplied thumbnail URLs serve only managed files without photo lookup or generation; missing files return 404, and traversal/symlink escapes cannot expose originals. |
+| T8 | Supplied thumbnail URLs serve only managed files without photo lookup or generation; missing files return 404, and path traversal cannot expose originals. |
 | T9 | Thumbnail generation is suspended in F's blocking facility; while a generation call is blocked, unrelated compute-fiber work remains responsive. |
 | T10 | Restart resolves pending per-photo publication/retirement intents without scanning originals or thumbnail storage, preserves committed images and retries failed cleanup without discarding evidence. |
 | S1 | One album SSE subscription identifies changed chapters and processing outcomes; UI updates each chapter collection and derives Synopsis/Cover without a separate album-photo read. |

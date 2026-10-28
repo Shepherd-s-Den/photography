@@ -66,8 +66,8 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       yield
         val newestFirst = albums.take(1) ++ albums.drop(1).reverse
         assertEquals(empty, ListResult.Listed(AlbumPageSlice(totalAlbums = 0, albums = Vector.empty[Album])))
-        assertEquals(first, ListResult.Listed(AlbumPageSlice(totalAlbums = 3, newestFirst.take(2))))
-        assertEquals(last, ListResult.Listed(AlbumPageSlice(totalAlbums = 3, newestFirst.drop(2))))
+        assertEquals(first, ListResult.Listed(AlbumPageSlice(totalAlbums = 3, albums = newestFirst.take(2))))
+        assertEquals(last, ListResult.Listed(AlbumPageSlice(totalAlbums = 3, albums = newestFirst.drop(2))))
         assertEquals(beyond, ListResult.Listed(AlbumPageSlice(totalAlbums = 3, albums = Vector.empty[Album])))
 
   test("should enforce unique required years atomically under concurrent creation"):
@@ -136,13 +136,22 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 11)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0))
       val emptyPhotoSlots = Vector.empty[SpreadSlot.Photo]
       val emptyPlacements = Vector.empty[SpreadPlacement]
-      val chapterOpening  = Spread.ChapterStart(SpreadId(buildUuid(index = 10)), templateId, emptyPhotoSlots, textSlot, emptyPlacements)
-      val country         = Country(CountryId(buildUuid(index = 12)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
-      val destination     = Destination(DestinationId(buildUuid(index = 14)), name = "Home", NonEmptyList.one(country))
-      val period          = VisitPeriod(firstDay = LocalDate.of(1901, 1, 1), days = 365)
-      val emptySpreads    = Vector.empty[Spread.PhotosOnly]
-      val home            =
-        Chapter(ChapterId(buildUuid(index = 13)), destination, period, description = "", sourceFolder = "/photos/Home", chapterOpening, emptySpreads)
+      val chapterOpening  =
+        Spread.ChapterStart(SpreadId(buildUuid(index = 10)), templateId, photoSlots = emptyPhotoSlots, textSlot, placements = emptyPlacements)
+      val country      = Country(CountryId(buildUuid(index = 12)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
+      val destination  = Destination(DestinationId(buildUuid(index = 14)), name = "Home", countries = NonEmptyList.one(country))
+      val period       = VisitPeriod(firstDay = LocalDate.of(1901, 1, 1), days = 365)
+      val emptySpreads = Vector.empty[Spread.PhotosOnly]
+      val home         =
+        Chapter(
+          ChapterId(buildUuid(index = 13)),
+          destination,
+          period,
+          description = "",
+          sourceFolder = "/photos/Home",
+          chapterOpening,
+          spreads = emptySpreads
+        )
 
       Vector(
         album.copy(chapters = Vector(home)) -> buildCover(album),
@@ -369,20 +378,29 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         val expectedText        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 412)), box)
         val expectedPlacements  = Vector(expectedPlacement)
         val expectedChapter     =
-          Spread.ChapterStart(SpreadId(buildUuid(index = 405)), expectedTemplateId, Vector(expectedSlot), expectedText, expectedPlacements)
+          Spread.ChapterStart(
+            SpreadId(buildUuid(index = 405)),
+            expectedTemplateId,
+            photoSlots = Vector(expectedSlot),
+            expectedText,
+            placements = expectedPlacements
+          )
         val expectedPhotosSlot       = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 411)), box, bleed = Set.empty[SpreadEdge])
         val expectedPhotosTemplateId = SpreadTemplateId(buildUuid(index = 409))
         val emptyPlacements          = Vector.empty[SpreadPlacement]
         val expectedPhotoSlots       = NonEmptyList.one(expectedPhotosSlot)
-        val expectedPhotos    = Spread.PhotosOnly(SpreadId(buildUuid(index = 410)), expectedPhotosTemplateId, expectedPhotoSlots, emptyPlacements)
-        val expectedCountry   = Country(CountryId(buildUuid(index = 400)), code = "IS", name = "Iceland", AbsoluteLocation(Path.of("/flags/is.svg")))
-        val japan             = Country(CountryId(buildUuid(index = 430)), code = "JP", name = "Japan", AbsoluteLocation(Path.of("/flags/jp.svg")))
-        val destination       = Destination(DestinationId(buildUuid(index = 401)), name = "Coast", NonEmptyList.of(expectedCountry, japan))
-        val period            = VisitPeriod(firstDay = LocalDate.of(1970, 1, 1), days = 1)
-        val expectedSpreads   = Vector(expectedPhotos)
-        val expectedChapterId = ChapterId(buildUuid(index = 402))
+        val expectedPhotos           =
+          Spread.PhotosOnly(SpreadId(buildUuid(index = 410)), expectedPhotosTemplateId, photoSlots = expectedPhotoSlots, placements = emptyPlacements)
+        val expectedCountry = Country(CountryId(buildUuid(index = 400)), code = "IS", name = "Iceland", AbsoluteLocation(Path.of("/flags/is.svg")))
+        val japan           = Country(CountryId(buildUuid(index = 430)), code = "JP", name = "Japan", AbsoluteLocation(Path.of("/flags/jp.svg")))
+        val destination     =
+          Destination(DestinationId(buildUuid(index = 401)), name = "Coast", countries = NonEmptyList.of(expectedCountry, japan))
+        val period                    = VisitPeriod(firstDay = LocalDate.of(1970, 1, 1), days = 1)
+        val expectedSpreads           = Vector(expectedPhotos)
+        val expectedChapterId         = ChapterId(buildUuid(index = 402))
         val sourceFolder: PhotoSource = "/photos/coast"
-        val chapter         = Chapter(expectedChapterId, destination, period, description = "", sourceFolder, expectedChapter, expectedSpreads)
+        val chapter                   =
+          Chapter(expectedChapterId, destination, period, description = "", sourceFolder, expectedChapter, spreads = expectedSpreads)
         val secondPhotoSlot = expectedSlot.copy(id = PhotoSpreadSlotId(buildUuid(index = 422)))
         val secondTextSlot  = expectedChapter.textSlot.copy(id = TextSpreadSlotId(buildUuid(index = 423)))
         val secondSpreadId  = SpreadId(buildUuid(index = 421))
@@ -404,7 +422,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(found, GetResult.Found(expectedAlbum))
         assertEquals(renamed, RenameResult.Renamed(expectedAlbum.copy(title = changedTitle)))
         assertEquals(reloaded, GetResult.Found(expectedAlbum.copy(title = changedTitle)))
-        assertEquals(expectedAlbum.countries, Vector(expectedCountry, japan))
+        assertEquals(expectedAlbum.collectCountries, Vector(expectedCountry, japan))
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(owned, 0L)
         assertEquals(shared, (249L, 1L, 33L, 1L))
@@ -433,9 +451,10 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     val textBox         = SlotBox(x = 50.104993, y = 0.914609, width = 49.601025, height = 98.170781)
     val text            = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = index * 1000 + 4)), textBox)
     val emptyPlacements = Vector.empty[SpreadPlacement]
-    val start           = Spread.AlbumStart(spreadId, SpreadTemplateId(buildUuid(index = 1)), photoSlots = photos, textSlot = text, emptyPlacements)
-    val albumCreatedAt  = if index === 1 then createdAt.plusSeconds(1) else createdAt
-    val year            = (1900 + index).refineUnsafe[AlbumYearConstraint]
+    val start           =
+      Spread.AlbumStart(spreadId, SpreadTemplateId(buildUuid(index = 1)), photoSlots = photos, textSlot = text, placements = emptyPlacements)
+    val albumCreatedAt = if index === 1 then createdAt.plusSeconds(1) else createdAt
+    val year           = (1900 + index).refineUnsafe[AlbumYearConstraint]
     Album(albumId, year, title = "My photographs", synopsis = "", albumCreatedAt, start, chapters = Vector.empty[Chapter])
 
   private def buildCover(album: Album) =

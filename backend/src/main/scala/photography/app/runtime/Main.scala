@@ -37,7 +37,8 @@ object Main extends IOApp.Simple:
           case failure: PhotoWriteRecovery.RecoveryResult.Failed =>
             IO.raiseError[Unit](new IllegalStateException(s"Photo write recovery failed: ${failure.issues}"))
         val serve = AppManagers.make[IO](resources.sqlite, config.albums.pageSize, config.albums.photoRoot, photos).use: managers =>
-          buildHttpServer(config.http, buildHttpApp(managers)).useForever.void
+          val server = buildHttpApp(managers).flatMap(httpApp => buildHttpServer(config.http, httpApp))
+          server.useForever.void
         for
           _ <- resources.flyway.migrate
           _ <- recover
@@ -49,7 +50,7 @@ object Main extends IOApp.Simple:
     val metadata  = AlbumApi.make(managers.albums).routes
     val workspace = AlbumWorkspaceApi.make(managers.workspaces, managers.albums, managers.chapters).routes
     val api       = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> SpreadTemplateApi.make(managers.templates).routes
-    StaticSite.make(api, "frontend").app
+    StaticSite.make(api, assetRoot = "frontend").map(_.app)
 
   private def buildHttpServer(config: HttpServerConfig, app: HttpApp[IO]) =
     EmberServerBuilder.default[IO].withHost(config.host).withPort(config.port).withHttpApp(app).build

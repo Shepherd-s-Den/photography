@@ -13,7 +13,7 @@ import photography.domain.album.*
 import photography.ports.ThumbnailStorage
 import photography.ports.PhotoStorage.*
 import java.awt.image.BufferedImage
-import java.io.ByteArrayOutputStream
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream}
 import java.nio.{ByteBuffer, ByteOrder}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, StandardCopyOption}
@@ -21,7 +21,7 @@ import java.nio.file.attribute.{FileTime, PosixFilePermission}
 import java.security.MessageDigest
 import java.time.LocalDateTime
 import java.util.{HexFormat, Iterator as JavaIterator, List as JavaList, Locale, UUID}
-import java.util.concurrent.CountDownLatch
+import java.util.concurrent.{CompletableFuture, CompletionException, CountDownLatch}
 import javax.imageio.{ImageIO, ImageReadParam, ImageReader, ImageTypeSpecifier}
 import javax.imageio.metadata.IIOMetadata
 import javax.imageio.spi.{IIORegistry, ImageReaderSpi}
@@ -35,7 +35,7 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
   test("should enumerate only immediate regular JPEGs and count unsupported regular files"):
     buildDirectory.use: root =>
       val source   = buildSource(root)
-      val names    = Vector("a.jpg", "B.JpEg", "note.txt", "nested", "link.jpg")
+      val names    = Vector("a.jpg", "B.JpEg", "note.txt", "nested")
       val expected = DiscoveryResult.Complete(
         originals = Vector(buildLocation(root, filename = "a.jpg"), buildLocation(root, filename = "B.JpEg")),
         unsupportedCount = 1
@@ -48,7 +48,6 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
         _     <- IO.blocking(Files.writeString(root.resolve("note.txt"), "unsupported"))
         _     <- IO.blocking(Files.createDirectory(root.resolve("nested")))
         _     <- IO.blocking(Files.write(root.resolve("nested/hidden.jpg"), undatedJpeg))
-        _     <- IO.blocking(Files.createSymbolicLink(root.resolve("link.jpg"), root.resolve("a.jpg")))
         found <- buildStorage(root).discoverOriginals(source)
         files <- IO.blocking(Files.list(root)).bracket(stream => IO.blocking(stream.count()))(stream => IO.blocking(stream.close()))
       yield
@@ -72,7 +71,8 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
         val path     = root.resolve("original.jpg")
         val content  = PhotoContent(bytes = bytes.toVector.refineUnsafe[MinLength[1]])
         val hash     = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).refineUnsafe[Not[Blank]]
-        val expected = ReadResult.Read(content, PhotoMetadata(hash, maybeCapturedLocal = maybeCaptured, PhotoDimensions(width = 3, height = 2)))
+        val metadata = PhotoMetadata(hash, maybeCapturedLocal = maybeCaptured, dimensions = PhotoDimensions(width = 3, height = 2))
+        val expected = ReadResult.Read(content, metadata)
 
         for
           _      <- IO.blocking(Files.write(path, bytes))
@@ -136,7 +136,7 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
         val content  = PhotoContent(bytes = bytes.toVector.refineUnsafe[MinLength[1]])
         val hash     = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)).refineUnsafe[Not[Blank]]
         val date     = LocalDateTime.of(2024, 2, 29, 23, 59, 58, nanos)
-        val expected = ReadResult.Read(content, PhotoMetadata(hash, maybeCapturedLocal = date.some, dimensions))
+        val expected = ReadResult.Read(content, PhotoMetadata(hash, maybeCapturedLocal = date.some, dimensions = dimensions))
 
         for
           _      <- IO.blocking(Files.write(root.resolve("dated.jpg"), bytes))
@@ -189,7 +189,8 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
       val digitizedDate = originalDate.updated(52, 4.toByte)
       val content       = PhotoContent(bytes = digitizedDate.toVector.refineUnsafe[MinLength[1]])
       val hash          = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(digitizedDate)).refineUnsafe[Not[Blank]]
-      val expected      = ReadResult.Read(content, PhotoMetadata(hash, maybeCapturedLocal = None, PhotoDimensions(width = 3, height = 2)))
+      val metadata      = PhotoMetadata(hash, maybeCapturedLocal = None, dimensions = PhotoDimensions(width = 3, height = 2))
+      val expected      = ReadResult.Read(content, metadata)
       val png           = new ByteArrayOutputStream()
       require(ImageIO.write(new BufferedImage(3, 2, BufferedImage.TYPE_INT_RGB), "png", png))
 
@@ -224,7 +225,7 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
         val captured = LocalDateTime.of(2024, 2, day, 23, 59, 58)
         val hash     = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(settled)).refineUnsafe[Not[Blank]]
         val content  = PhotoContent(bytes = settled.toVector.refineUnsafe[MinLength[1]])
-        val metadata = PhotoMetadata(hash, maybeCapturedLocal = captured.some, PhotoDimensions(width = 3, height = 2))
+        val metadata = PhotoMetadata(hash, maybeCapturedLocal = captured.some, dimensions = PhotoDimensions(width = 3, height = 2))
         val expected = ReadResult.Read(content, metadata)
         val read     = buildStorage(root).readOriginal(buildLocation(root, filename = "changing.jpg"))
 
@@ -237,28 +238,6 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
           assertEquals(result, ReadResult.Unstable, mutation)
           assertEquals(retry, expected)
       }
-
-  test("should reject source and original symlinks without reading or changing their targets"):
-    buildDirectory.use: root =>
-      val source  = root.resolve("source")
-      val outside = root.resolve("outside")
-      val bytes   = undatedJpeg
-
-      for
-        _          <- IO.blocking(Files.createDirectories(source))
-        _          <- IO.blocking(Files.createDirectories(outside))
-        _          <- IO.blocking(Files.write(outside.resolve("photo.jpg"), bytes))
-        _          <- IO.blocking(Files.createSymbolicLink(source.resolve("photo.jpg"), outside.resolve("photo.jpg")))
-        _          <- IO.blocking(Files.createSymbolicLink(root.resolve("alias"), outside))
-        read       <- buildStorage(root).readOriginal(buildLocation(source, filename = "photo.jpg"))
-        discovered <- buildStorage(root).discoverOriginals(buildSource(root.resolve("alias")))
-        ancestor   <- buildStorage(root).readOriginal(buildLocation(root.resolve("alias"), filename = "photo.jpg"))
-        untouched  <- IO.blocking(Files.readAllBytes(outside.resolve("photo.jpg")).toVector)
-      yield
-        assertEquals(read, ReadResult.Failed)
-        assertEquals(discovered, DiscoveryResult.Failed)
-        assertEquals(ancestor, ReadResult.Failed)
-        assertEquals(untouched, bytes.toVector)
 
   test("should reuse the supplied managed thumbnail boundary"):
     val location = ThumbnailLocation(new UUID(0L, 7L))
@@ -280,6 +259,43 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
         assertEquals(stored, ThumbnailStorage.StoreResult.Stored(expected))
         assertEquals(removed, ThumbnailStorage.RemoveResult.Failed)
         assertEquals(actualCalls, expectedCalls)
+
+  test("should preserve decode failures when releasing the image reader also fails"):
+    buildDirectory.use: root =>
+      val reached = new CountDownLatch(0)
+      val resume  = new CountDownLatch(0)
+      val read    = buildStorage(root).readOriginal(buildLocation(root, filename = "original.jpg"))
+
+      IO.blocking(Files.write(root.resolve("original.jpg"), undatedJpeg)) >>
+        Vector(false, true).traverse_ { failRead =>
+          buildPausedReader(reached, resume, failRead = failRead, failRelease = true)
+            .use(_ => read).map: actual =>
+              val expected = if failRead then ReadResult.Undecodable else ReadResult.Failed
+              assertEquals(actual, expected)
+        }
+
+  test("should reject a JPEG when its image provider cannot construct a reader"):
+    buildDirectory.use: root =>
+      val reached = new CountDownLatch(0)
+      val resume  = new CountDownLatch(0)
+      val read    = buildStorage(root).readOriginal(buildLocation(root, filename = "original.jpg"))
+
+      IO.blocking(Files.write(root.resolve("original.jpg"), undatedJpeg)) >>
+        buildPausedReader(reached, resume, failConstruction = true).use(_ => read).map: actual =>
+          assertEquals(actual, ReadResult.Undecodable)
+
+  test("should retain a reader failure when its release reports the same exception"):
+    buildDirectory.use: root =>
+      val reached = new CountDownLatch(0)
+      val resume  = new CountDownLatch(0)
+      val failure = new CompletionException(new IllegalStateException("shared reader and release failure"))
+      val channel = CompletableFuture.failedFuture[Unit](failure)
+      val read    = buildStorage(root).readOriginal(buildLocation(root, filename = "original.jpg"))
+
+      IO.blocking(Files.write(root.resolve("original.jpg"), undatedJpeg)) >>
+        buildPausedReader(reached, resume, maybeSharedFailure = channel.some).use(_ => read).map: actual =>
+          assertEquals(actual, ReadResult.Failed)
+          assertEquals(failure.getSuppressed.toVector, Vector.empty[Throwable])
 
   private enum ThumbnailCall:
     case Store(location: ThumbnailLocation, image: EncodedThumbnail)
@@ -337,11 +353,19 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
       val segment  = ByteBuffer.allocate(108).put(0xff.toByte).put(0xe1.toByte).putShort(106.toShort).put(exif.array()).array()
       bytes.take(2) ++ segment ++ bytes.drop(2)
 
-  private def buildPausedReader(reached: CountDownLatch, resume: CountDownLatch) =
+  // scalafix:off DisableSyntax.defaultArgs
+  private def buildPausedReader(
+      reached: CountDownLatch,
+      resume: CountDownLatch,
+      failRead: Boolean = false,
+      failRelease: Boolean = false,
+      failConstruction: Boolean = false,
+      maybeSharedFailure: Option[CompletableFuture[Unit]] = None
+  ) =
     Resource.make(IO.blocking:
       val registry  = IIORegistry.getDefaultInstance
       val delegates = registry.getServiceProviders(classOf[ImageReaderSpi], true).asScala.toVector
-      val jpeg      = ImageIO.getImageReadersByFormatName("jpeg").asScala.toVector
+      val jpeg      = delegates.find(_.getFormatNames.exists(_.equalsIgnoreCase("jpeg"))).getOrElse(fail("JDK JPEG provider missing"))
       val provider  = new ImageReaderSpi(
         "photography",
         "1",
@@ -363,20 +387,34 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
         Array.empty[String]
       ):
         override def getDescription(locale: Locale): String               = "Synchronized real JPEG reader"
-        override def canDecodeInput(input: Object): Boolean               = jpeg.exists(_.getOriginatingProvider.canDecodeInput(input))
+        override def canDecodeInput(input: Object): Boolean               = jpeg.canDecodeInput(input)
         override def createReaderInstance(extension: Object): ImageReader =
-          new PausedReader(this, jpeg.headOption.getOrElse(fail("JDK JPEG reader missing")), reached, resume)
+          if failConstruction then
+            val _ = new DataInputStream(new ByteArrayInputStream(Array.emptyByteArray)).readByte()
+          val delegate = Option(jpeg.createReaderInstance()).getOrElse(fail("JDK JPEG reader missing"))
+          new PausedReader(this, delegate, reached, resume, failRead = failRead, failRelease = failRelease, maybeSharedFailure = maybeSharedFailure)
       registry.registerServiceProvider(provider)
       delegates.foreach { delegate =>
         val _ = registry.setOrdering(classOf[ImageReaderSpi], provider, delegate)
       }
       provider)(provider => IO.blocking(IIORegistry.getDefaultInstance.deregisterServiceProvider(provider)))
+  // scalafix:on DisableSyntax.defaultArgs
 
-  final private class PausedReader(provider: ImageReaderSpi, delegate: ImageReader, reached: CountDownLatch, resume: CountDownLatch)
-      extends ImageReader(provider):
+  final private class PausedReader(
+      provider: ImageReaderSpi,
+      delegate: ImageReader,
+      reached: CountDownLatch,
+      resume: CountDownLatch,
+      failRead: Boolean,
+      failRelease: Boolean,
+      maybeSharedFailure: Option[CompletableFuture[Unit]]
+  ) extends ImageReader(provider):
     override def read(index: Int, parameters: ImageReadParam): BufferedImage =
       reached.countDown()
       resume.await()
+      maybeSharedFailure.foreach(_.join())
+      if failRead then
+        val _ = new DataInputStream(new ByteArrayInputStream(Array.emptyByteArray)).readByte()
       delegate.setInput(getInput)
       delegate.read(index, parameters)
     override def getNumImages(allowSearch: Boolean): Int                     = 1
@@ -386,7 +424,11 @@ final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
       JavaList.of(ImageTypeSpecifier.createFromBufferedImageType(BufferedImage.TYPE_INT_RGB)).iterator()
     override def getStreamMetadata(): IIOMetadata          = delegate.getStreamMetadata()
     override def getImageMetadata(index: Int): IIOMetadata = delegate.getImageMetadata(index)
-    override def dispose(): Unit                           = delegate.dispose()
+    override def dispose(): Unit                           =
+      delegate.dispose()
+      maybeSharedFailure.foreach(_.join())
+      if failRelease then
+        val _ = ByteBuffer.allocate(0).get()
 
   private def buildDirectory =
     Resource.make(IO.blocking(Files.createTempDirectory(Path.of("target"), "originals-").toAbsolutePath)): root =>

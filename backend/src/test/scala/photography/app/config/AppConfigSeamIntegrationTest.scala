@@ -7,7 +7,7 @@ import pureconfig.ConfigSource
 
 final class AppConfigSeamIntegrationTest extends CatsEffectSuite:
 
-  test("should load the mock application.conf from test resources"):
+  test("should load the configured absolute photo root"):
     AppConfig.load[IO](ConfigSource.resources("app-config-seam/application.conf")).map: config =>
       assertEquals(config.albums.photoRoot: String, "/library/photos")
 

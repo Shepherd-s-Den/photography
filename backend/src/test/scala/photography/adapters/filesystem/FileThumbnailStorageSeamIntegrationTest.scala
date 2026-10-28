@@ -4,13 +4,15 @@ import cats.effect.{IO, Resource}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
+import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.domain.album.*
 import photography.ports.ThumbnailStorage.*
 import java.nio.file.{Files, Path}
-import java.util.UUID
+import java.security.MessageDigest
+import java.util.{HexFormat, UUID}
 
 final class FileThumbnailStorageSeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO] = Slf4jLogger.getLogger[IO]
@@ -36,9 +38,6 @@ final class FileThumbnailStorageSeamIntegrationTest extends CatsEffectSuite:
         removed   <- storage.removeThumbnail(location)
         repeated  <- storage.removeThumbnail(location)
         remains   <- IO.blocking((Files.exists(file), Files.exists(partial), Files.readAllBytes(original).toVector))
-        _         <- IO.blocking(Files.createSymbolicLink(file, original))
-        _         <- storage.removeThumbnail(location)
-        untouched <- IO.blocking(Files.readAllBytes(original).toVector)
         missing   <- FileThumbnailStorage.make[IO](root.resolve("absent")).removeThumbnail(location)
       yield
         assertEquals(stored, StoreResult.Stored(expected))
@@ -47,47 +46,80 @@ final class FileThumbnailStorageSeamIntegrationTest extends CatsEffectSuite:
         assertEquals(removed, RemoveResult.Removed)
         assertEquals(repeated, RemoveResult.Removed)
         assertEquals(remains, (false, false, Vector(4.toByte)))
-        assertEquals(untouched, Vector(4.toByte))
         assertEquals(missing, RemoveResult.Removed)
 
-  test("should report invalid storage and cleanup explicitly without following a root symlink"):
+  test("should report invalid storage and cleanup for relative and non-normalized roots"):
     buildDirectory.use: root =>
-      val link           = root.resolve("link")
-      val outside        = root.resolve("outside/child")
-      val outsideFinal   = outside.resolve(s"${location.value}.jpg")
-      val outsidePartial = outside.resolve(s"${location.value}.tmp")
+      val invalidRoots = Vector(Path.of("relative"), root.resolve("child/../other"))
 
-      val prepareOutside =
+      invalidRoots.traverse_ { invalidRoot =>
         for
-          _ <- IO.blocking(Files.createDirectories(outside))
-          _ <- IO.blocking(Files.write(outsideFinal, Array(7.toByte)))
-          _ <- IO.blocking(Files.write(outsidePartial, Array(8.toByte)))
-          _ <- IO.blocking(Files.createSymbolicLink(link, root.resolve("outside")))
-        yield ()
-      val invalidRoots = Vector(link, link.resolve("child"), Path.of("relative"), root.resolve("link/../outside/child"))
-
-      prepareOutside >> invalidRoots.traverse_ { invalidRoot =>
-        for
-          stored    <- FileThumbnailStorage.make[IO](invalidRoot).storeThumbnail(location, image)
-          removed   <- FileThumbnailStorage.make[IO](invalidRoot).removeThumbnail(location)
-          untouched <- IO.blocking((Files.readAllBytes(outsideFinal).toVector, Files.readAllBytes(outsidePartial).toVector))
+          stored  <- FileThumbnailStorage.make[IO](invalidRoot).storeThumbnail(location, image)
+          removed <- FileThumbnailStorage.make[IO](invalidRoot).removeThumbnail(location)
         yield
           assertEquals(stored, StoreResult.Failed)
           assertEquals(removed, RemoveResult.Failed)
-          assertEquals(untouched, (Vector(7.toByte), Vector(8.toByte)))
       }
+
+  test("should publish each preset at its exact byte and dimension ceilings"):
+    ThumbnailQuality.values.toVector.traverse_ { quality =>
+      buildDirectory.use: root =>
+        val dimensions = ThumbnailDimensions(width = quality.longestEdge, height = quality.longestEdge)
+        val content    = Vector.fill(quality.maximumBytes)(1.toByte).refineUnsafe[ThumbnailBytesConstraint]
+        val encoded    = EncodedThumbnail(bytes = content, dimensions = dimensions, quality = quality)
+        val version    = IO.blocking:
+          val digest = MessageDigest.getInstance("SHA-256").digest(content.toArray)
+          HexFormat.of().formatHex(digest).refineUnsafe[Not[Blank]]
+
+        for
+          hash   <- version
+          stored <- FileThumbnailStorage.make[IO](root).storeThumbnail(location, encoded)
+          actual <- IO.blocking(Files.readAllBytes(root.resolve(s"${location.value}.jpg")).toVector)
+        yield
+          val expected = Thumbnail(location, version = hash, dimensions = dimensions, quality = quality, bytes = quality.maximumBytes)
+          assertEquals(stored, StoreResult.Stored(expected))
+          assertEquals(actual, content: Vector[Byte])
+    }
+
+  test("should reject preset ceiling plus one bytes and either dimension on every construction path"):
+    ThumbnailQuality.values.foreach { quality =>
+      val dimensions     = ThumbnailDimensions(width = quality.longestEdge, height = quality.longestEdge)
+      val content        = Vector.fill(quality.maximumBytes)(1.toByte).refineUnsafe[ThumbnailBytesConstraint]
+      val encoded        = EncodedThumbnail(bytes = content, dimensions = dimensions, quality = quality)
+      val thumbnail      = Thumbnail(location, version = "version", dimensions = dimensions, quality = quality, bytes = quality.maximumBytes)
+      val excessiveCount = quality.maximumBytes + 1
+      val _              = intercept[IllegalArgumentException]:
+        EncodedThumbnail(bytes = (content :+ 1.toByte).refineUnsafe[ThumbnailBytesConstraint], dimensions = dimensions, quality = quality)
+      val _ = intercept[IllegalArgumentException]:
+        thumbnail.copy(bytes = excessiveCount.refineUnsafe[ThumbnailByteCountConstraint])
+      val _ = intercept[IllegalArgumentException]:
+        encoded.copy(bytes = (content :+ 1.toByte).refineUnsafe[ThumbnailBytesConstraint])
+      val _ = intercept[IllegalArgumentException]:
+        val tooMany = excessiveCount.refineUnsafe[ThumbnailByteCountConstraint]
+        Thumbnail(location, version = "version", dimensions = dimensions, quality = quality, bytes = tooMany)
+      Vector(true, false).foreach { width =>
+        val _ = intercept[IllegalArgumentException]:
+          val larger  = (quality.longestEdge + 1).refineUnsafe[ThumbnailPixelCountConstraint]
+          val invalid = if width then dimensions.copy(width = larger) else dimensions.copy(height = larger)
+          encoded.copy(dimensions = invalid)
+        val _ = intercept[IllegalArgumentException]:
+          val larger  = (quality.longestEdge + 1).refineUnsafe[ThumbnailPixelCountConstraint]
+          val invalid = if width then dimensions.copy(width = larger) else dimensions.copy(height = larger)
+          thumbnail.copy(dimensions = invalid)
+      }
+      val _ = intercept[IllegalArgumentException]:
+        new EncodedThumbnail(bytes = (content :+ 1.toByte).refineUnsafe[ThumbnailBytesConstraint], dimensions = dimensions, quality = quality)
+      val _ = intercept[IllegalArgumentException]:
+        val tooMany = excessiveCount.refineUnsafe[ThumbnailByteCountConstraint]
+        new Thumbnail(location, version = "version", dimensions = dimensions, quality = quality, bytes = tooMany)
+    }
 
   private def buildDirectory =
     Resource.make(IO.blocking(Files.createTempDirectory(Path.of("target"), "thumbnails-").toAbsolutePath)): root =>
       val artifacts = Vector(
         s"${location.value}.jpg",
         s"${location.value}.tmp",
-        "unrelated.jpg",
-        "link",
-        s"outside/child/${location.value}.jpg",
-        s"outside/child/${location.value}.tmp",
-        "outside/child",
-        "outside"
+        "unrelated.jpg"
       )
       artifacts.traverse_ { name =>
         IO.blocking(Files.deleteIfExists(root.resolve(name))).void

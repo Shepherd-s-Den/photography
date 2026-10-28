@@ -27,11 +27,13 @@ final class SqliteCountryRepositorySeamIntegrationTest extends CatsEffectSuite:
         case ListResult.Listed(countries) =>
           val actual =
             countries.toList.map(country => (country.id.value.toString, country.code: String, country.name: String, country.flag.value.toString))
+          val expectedRomania = ("10000000-0000-0000-0000-000000000001", "RO", "Romania", "/flags/ro.svg")
 
           assertEquals(actual, expected)
           assertEquals(countries.size, 249)
           assertEquals(countries.toList.map(_.id).distinct.size, 249)
           assertEquals(countries.toList.map(_.code).distinct.size, 249)
+          assertEquals(actual.find { case (_, code, _, _) => code === "RO" }, expectedRomania.some)
           assert(countries.toList.forall(country => country.code.matches("[A-Z]{2}") && country.name.nonEmpty && country.flag.value.isAbsolute))
         case result => fail(s"Expected the complete country catalog, obtained $result")
 

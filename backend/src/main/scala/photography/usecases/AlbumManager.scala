@@ -38,14 +38,26 @@ object AlbumManager:
 
     override def list(page: Int): F[ListAlbumsResult] =
       repository.list(offset = 0, limit = pageSize).flatMap:
-        case AlbumRepository.ListResult.Failed(_)     => ListAlbumsResult.Failed.pure[F]
-        case AlbumRepository.ListResult.Listed(slice) => buildListResult(page, slice)
+        case AlbumRepository.ListResult.Failed(_)         => ListAlbumsResult.Failed.pure[F]
+        case AlbumRepository.ListResult.Listed(firstPage) =>
+          val totalAlbums  = firstPage.totalAlbums
+          val totalPages   = ((totalAlbums + pageSize - 1) / pageSize).toInt
+          val selectedPage = if totalPages === 0 then 1 else page.max(1).min(totalPages)
+          val offset       = (selectedPage - 1) * pageSize
+          val selected     =
+            if offset === 0 then AlbumRepository.ListResult.Listed(firstPage).pure[F] else repository.list(offset = offset, limit = pageSize)
+          selected.map:
+            case AlbumRepository.ListResult.Listed(slice) =>
+              val result =
+                AlbumPage(albums = slice.albums, page = selectedPage, pageSize = pageSize, totalAlbums = totalAlbums, totalPages = totalPages)
+              ListAlbumsResult.Listed(result)
+            case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     override def create(year: AlbumYear, title: AlbumTitle): F[CreateAlbumResult] =
       spreads.listAlbumStartTemplates.flatMap:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
           val template = templates.head
-          buildInitialComposition(year, title, template.id, template.photoSlots, template.textSlot).flatMap { case (album, cover) =>
+          buildInitialComposition(year, title, template.id, photoSlots = template.photoSlots, template.textSlot).flatMap { case (album, cover) =>
             repository.create(album, cover).map:
               case AlbumRepository.CreateResult.Created                                         => CreateAlbumResult.Created(album)
               case AlbumRepository.CreateResult.Failed(AlbumRepository.Failure.YearAlreadyUsed) => CreateAlbumResult.YearAlreadyUsed
@@ -70,19 +82,6 @@ object AlbumManager:
         case AlbumRepository.DeleteResult.Deleted   => DeleteAlbumResult.Deleted
         case AlbumRepository.DeleteResult.NotFound  => DeleteAlbumResult.NotFound
         case AlbumRepository.DeleteResult.Failed(_) => DeleteAlbumResult.Failed
-
-    private def buildListResult(requestedPage: Int, firstPage: AlbumRepository.AlbumPageSlice) =
-      val totalAlbums   = firstPage.totalAlbums
-      val totalPages    = ((totalAlbums + pageSize - 1) / pageSize).toInt
-      val selectedPage  = if totalPages === 0 then 1 else requestedPage.max(1).min(totalPages)
-      val offset        = (selectedPage - 1) * pageSize
-      val selectedSlice =
-        if offset === 0 then AlbumRepository.ListResult.Listed(firstPage).pure[F] else repository.list(offset = offset, limit = pageSize)
-      selectedSlice.map:
-        case AlbumRepository.ListResult.Listed(slice) =>
-          val page = AlbumPage(slice.albums, selectedPage, pageSize, totalAlbums, totalPages)
-          ListAlbumsResult.Listed(page)
-        case AlbumRepository.ListResult.Failed(_) => ListAlbumsResult.Failed
 
     private def buildInitialComposition(
         year: AlbumYear,

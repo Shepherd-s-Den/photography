@@ -200,7 +200,7 @@ object AlbumWorkspaceApi:
       val album          = found.album
       val opening        = encodeSpread(album.opening, maybeChapter = None)
       val chapterSpreads = album.chapters.flatMap: chapter =>
-        (Vector(chapter.opening) ++ chapter.spreads).map(spread => encodeSpread(spread, chapter.id.some))
+        (Vector(chapter.opening) ++ chapter.spreads).map(spread => encodeSpread(spread, maybeChapter = chapter.id.some))
       Json.obj(
         "year"      -> Json.fromInt(album.year),
         "photoRoot" -> Json.fromString(found.photoRoot),

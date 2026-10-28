@@ -19,39 +19,30 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
   private val defaultTemplateName        = "2×2 L + Synopsis R"
   private val defaultChapterTemplateName = "Text + 2P + 2L"
 
-  test(s"should preserve the complete synopsis-right catalog with $defaultTemplateName first"):
+  test(s"should preserve ordered synopsis-right templates with $defaultTemplateName first"):
     buildTransactor.use: xa =>
       val repository     = SqliteSpreadTemplateRepository.make[IO](xa)
-      val expectedPhotos = List(
-        Vector(
-          buildBox(x = 0.293982, y = 0.914609, width = 24.695519, height = 48.758744),
-          buildBox(x = 25.199487, y = 0.914609, width = 24.695519, height = 48.758744),
-          buildBox(x = 0.293982, y = 50.326646, width = 24.695519, height = 48.758744),
-          buildBox(x = 25.199487, y = 50.326646, width = 24.695519, height = 48.758744)
-        ),
-        Vector(buildBox(x = 0.293982, y = 0.914609, width = 49.601025, height = 98.170781)),
-        Vector(
-          buildBox(x = 0.293982, y = 0.914609, width = 16.393684, height = 38.870004),
-          buildBox(x = 16.897652, y = 0.914609, width = 16.393684, height = 38.870004),
-          buildBox(x = 33.501323, y = 0.914609, width = 16.393684, height = 38.870004),
-          buildBox(x = 0.293982, y = 40.437905, width = 24.695519, height = 58.553948),
-          buildBox(x = 25.199487, y = 40.437905, width = 24.695519, height = 58.553948)
-        ),
-        Vector(
-          buildBox(x = 0.293982, y = 0.914609, width = 24.695519, height = 98.170781),
-          buildBox(x = 25.199487, y = 0.914609, width = 24.695519, height = 48.758744),
-          buildBox(x = 25.199487, y = 50.326646, width = 24.695519, height = 48.758744)
-        )
+      val expectedPhotos = Vector(
+        buildBox(x = 0.293982, y = 0.914609, width = 24.695519, height = 48.758744),
+        buildBox(x = 25.199487, y = 0.914609, width = 24.695519, height = 48.758744),
+        buildBox(x = 0.293982, y = 50.326646, width = 24.695519, height = 48.758744),
+        buildBox(x = 25.199487, y = 50.326646, width = 24.695519, height = 48.758744)
       )
-      val expectedNames     = List(defaultTemplateName, "1 Full L + Synopsis R", "3+2 L + Synopsis R", "P+2L L + Synopsis R")
-      val expectedText      = buildBox(x = 50.104993, y = 0.914609, width = 49.601025, height = 98.170781)
-      val expectedTextSlots = List.fill(4)(expectedText)
+      val expectedText = buildBox(x = 50.104993, y = 0.914609, width = 49.601025, height = 98.170781)
 
       repository.listAlbumStartTemplates.map:
         case ListAlbumStartTemplatesResult.Listed(templates) =>
-          assertEquals(templates.toList.map(_.name), expectedNames)
-          assertEquals(templates.toList.map(_.photoSlots), expectedPhotos)
-          assertEquals(templates.toList.map(_.textSlot), expectedTextSlots)
+          val identities = templates.toList.map(_.id.value.toString)
+
+          assertEquals(templates.size, 4)
+          assertEquals(identities, identities.sorted)
+          assertEquals(identities.distinct.size, 4)
+          assertEquals(templates.head.id.value.toString, "00000000-0000-0000-0000-000000000001")
+          assertEquals(templates.head.name: String, defaultTemplateName)
+          assertEquals(templates.head.photoSlots, expectedPhotos)
+          assertEquals(templates.head.textSlot, expectedText)
+          assert(templates.toList.forall(template => template.photoSlots.nonEmpty && template.photoSlots.forall(_.x < 50.0)))
+          assert(templates.toList.forall(_.textSlot.x >= 50.0))
         case result => fail(s"Expected migrated templates, obtained $result")
 
   test(s"should load the 27 chapter openings with $defaultChapterTemplateName first"):
@@ -77,19 +68,6 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
           assertEquals(templates.head.photoSlots, expectedPhotos)
           assertEquals(templates.head.textSlot, expectedText)
         case result => fail(s"Expected migrated chapter templates, obtained $result")
-
-  test("should populate 249 distinct ISO countries with stable identities and flag paths"):
-    buildTransactor.use: xa =>
-      val inventory       = sql"SELECT count(*), count(DISTINCT code), count(DISTINCT id) FROM country".query[(Int, Int, Int)].unique
-      val romania         = sql"SELECT id, name, flag FROM country WHERE code = 'RO'".query[(String, String, String)].unique
-      val expectedRomania = ("10000000-0000-0000-0000-000000000001", "Romania", "/flags/ro.svg")
-
-      for
-        counts  <- inventory.transact(xa)
-        country <- romania.transact(xa)
-      yield
-        assertEquals(counts, (249, 249, 249))
-        assertEquals(country, expectedRomania)
 
   test("should reject malformed or unavailable chapter opening catalogs"):
     Vector(

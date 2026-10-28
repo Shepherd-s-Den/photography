@@ -11,11 +11,14 @@ final class SyncSyntaxTest extends CatsEffectSuite:
     val executions = new AtomicInteger(0)
     val work       = executions.incrementAndGet().blocking[IO]
 
-    for
-      before <- IO(executions.get())
-      first  <- work
-      second <- work
-    yield assertEquals((before, first, second), (0, 1, 2))
+    val observed =
+      for
+        before <- IO(executions.get())
+        first  <- work
+        second <- work
+      yield (before, first, second)
+
+    observed.map(actual => assertEquals(actual, (0, 1, 2)))
 
   test("should capture blocking failures in the effect"):
     val work = require(requirement = false, message = "expected").blocking[IO]

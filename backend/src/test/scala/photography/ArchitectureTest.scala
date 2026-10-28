@@ -2,6 +2,7 @@ package photography
 
 import cats.syntax.all.*
 import com.tngtech.archunit.core.importer.{ClassFileImporter, ImportOption}
+import com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition.slices
 import munit.FunSuite
@@ -18,6 +19,13 @@ class ArchitectureTest extends FunSuite:
 
   test("should keep layers pointing inward and adapters isolated from each other"):
     assertNotEquals(testCodeLocation, classOf[Album].getProtectionDomain.getCodeSource.getLocation.toURI.toString)
+    val doobieTargets = classes.iterator.asScala
+      .filter(_.getPackageName === "photography.adapters.sqlite")
+      .flatMap(_.getDirectDependenciesFromSelf.asScala.map(_.getTargetClass))
+      .filter(_.getName.startsWith("org.typelevel.doobie.")).toVector
+
+    assert(doobieTargets.nonEmpty)
+    assert(doobieTargets.forall(resideInAnyPackage("org.typelevel.doobie..").test))
     noClasses()
       .that()
       .resideInAPackage("photography.domain..")
@@ -29,7 +37,7 @@ class ArchitectureTest extends FunSuite:
         "photography.usecases..",
         "photography.adapters..",
         "photography.app..",
-        "doobie.."
+        "org.typelevel.doobie.."
       )
       .check(classes)
     noClasses()
@@ -43,7 +51,7 @@ class ArchitectureTest extends FunSuite:
         "photography.usecases..",
         "photography.adapters..",
         "photography.app..",
-        "doobie.."
+        "org.typelevel.doobie.."
       )
       .check(classes)
     noClasses()
@@ -51,14 +59,20 @@ class ArchitectureTest extends FunSuite:
       .resideInAPackage("photography.ports..")
       .should()
       .dependOnClassesThat()
-      .resideInAnyPackage("photography.capabilities..", "photography.usecases..", "photography.adapters..", "photography.app..", "doobie..")
+      .resideInAnyPackage(
+        "photography.capabilities..",
+        "photography.usecases..",
+        "photography.adapters..",
+        "photography.app..",
+        "org.typelevel.doobie.."
+      )
       .check(classes)
     noClasses()
       .that()
       .resideInAPackage("photography.usecases..")
       .should()
       .dependOnClassesThat()
-      .resideInAnyPackage("photography.adapters..", "photography.app..", "doobie..")
+      .resideInAnyPackage("photography.adapters..", "photography.app..", "org.typelevel.doobie..")
       .check(classes)
     noClasses()
       .that()
@@ -72,17 +86,20 @@ class ArchitectureTest extends FunSuite:
     val capabilities = Set(
       "cats.Monad",
       "cats.MonadError",
+      "cats.Functor",
       "cats.effect.kernel.Async",
       "cats.effect.kernel.MonadCancel",
+      "cats.effect.kernel.Sync",
+      "cats.effect.kernel.Clock",
       "cats.effect.std.Mutex",
       "org.typelevel.log4cats.Logger",
       "photography.capabilities.IdGenerator",
+      "photography.capabilities.Clock",
       "photography.capabilities.Transaction"
     )
-    val photoImplementations = classes.iterator.asScala
-      .filter(value => value.getPackageName === "photography.usecases" && value.getName.contains("LivePhoto")).toVector
-    assert(photoImplementations.nonEmpty)
-    photoImplementations.foreach { implementation =>
+    val implementations = classes.iterator.asScala.filter(_.getSimpleName.startsWith("Live")).toVector
+    assert(implementations.nonEmpty)
+    implementations.foreach { implementation =>
       implementation.getConstructors.iterator.asScala.foreach { constructor =>
         val dependencies = constructor.getRawParameterTypes.iterator.asScala.filterNot(value => capabilities.contains(value.getName)).toVector
         assert(dependencies.sizeIs <= 5, s"${implementation.getName} injects ${dependencies.size} collaborators: $dependencies")

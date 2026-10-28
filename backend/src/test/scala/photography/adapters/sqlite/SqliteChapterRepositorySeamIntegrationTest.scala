@@ -18,8 +18,8 @@ import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.{AlbumRepository, ChapterRepository, PhotoRepository, SpreadTemplateRepository}
 import photography.syntax.SyncSyntax.*
-import photography.usecases.{ChapterManager, ChapterPhotoImport, PhotoWriteRecovery, SpreadTemplateManager}
-import photography.usecases.ChapterPhotoImport.{Request, Scheduling, Status}
+import photography.usecases.{ChapterManager, ChapterPhotoImport, ChapterPlanning, PhotoWriteRecovery, SpreadTemplateManager}
+import photography.usecases.ChapterPhotoImport.{ExecutionOutcome, Request, Scheduling, Status}
 
 import java.nio.file.{Files, Path}
 import java.time.{Instant, LocalDate}
@@ -55,23 +55,30 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val chapters = SqliteChapterRepository.make
       val unknown  = NonEmptyList.one(CountryId(new UUID(9L, 99L)))
 
-      for
-        _       <- seedAlbum(xa)
-        first   <- buildChapter(xa, index = 1)
-        second  <- buildChapter(xa, index = 2)
-        _       <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
-        before  <- countRows.transact(xa)
-        created <- chapters.create(albumId, second.copy(countries = unknown), order = NonEmptyList.of(first.id, second.id)).transact(xa)
-        name    = first.name
-        folder  = first.sourceFolder
-        order   = NonEmptyList.one(first.id)
-        command = ChapterRepository.Update(albumId, first.id, destination, name, countries = unknown, period, folder, order = order)
-        updated <- chapters.update(command).transact(xa)
-        after   <- countRows.transact(xa)
-      yield
-        assertEquals(created, ChapterRepository.CreateResult.UnknownCountries)
-        assertEquals(updated, ChapterRepository.UpdateResult.UnknownCountries)
-        assertEquals(after, before)
+      (buildChapter(xa, index = 1), buildChapter(xa, index = 2)).tupled.flatMap { case (first, second) =>
+        val command = ChapterRepository.Update(
+          albumId,
+          first.id,
+          destination,
+          first.name,
+          countries = unknown,
+          period,
+          first.sourceFolder,
+          order = NonEmptyList.one(first.id)
+        )
+
+        for
+          _       <- seedAlbum(xa)
+          _       <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          before  <- countRows.transact(xa)
+          created <- chapters.create(albumId, second.copy(countries = unknown), order = NonEmptyList.of(first.id, second.id)).transact(xa)
+          updated <- chapters.update(command).transact(xa)
+          after   <- countRows.transact(xa)
+        yield
+          assertEquals(created, ChapterRepository.CreateResult.UnknownCountries)
+          assertEquals(updated, ChapterRepository.UpdateResult.UnknownCountries)
+          assertEquals(after, before)
+      }
 
   test("should persist complete openings and supplied order, isolate shared destinations and preserve description and composition on metadata edits"):
     buildTransactor.use: xa =>
@@ -82,45 +89,55 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val newFolder: PhotoSource   = "/photos/changed"
       val countryIds               = newCountries.map(_.id)
 
-      for
-        _       <- seedAlbum(xa)
-        first   <- buildChapter(xa, index = 1)
-        second  <- buildChapter(xa, index = 2)
-        created <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
-        added   <- chapters.create(albumId, second, order = NonEmptyList.of(second.id, first.id)).transact(xa)
-        initial <- albums.get(albumId)
-        _       <- sql"UPDATE chapter SET destination_id = ${first.destinationId.value} WHERE id = ${second.id.value}".update.run.transact(xa)
-        _       <- insertPhotoComposition(first.id, first.opening.id).transact(xa)
-        before  <- albums.get(albumId)
-        order   = NonEmptyList.of(first.id, second.id)
-        command = ChapterRepository.Update(albumId, first.id, destination, newName, countries = countryIds, period, newFolder, order = order)
-        updated <- chapters.update(command).transact(xa)
-        loaded  <- albums.get(albumId)
-      yield
-        val originalDestination = Destination(first.destinationId, first.name, NonEmptyList.of(country, otherCountry))
-        val changedDestination  = originalDestination.copy(name = newName, countries = newCountries)
-        val secondDestination   = Destination(second.destinationId, second.name, NonEmptyList.of(country, otherCountry))
-        val emptySpreads        = Vector.empty[Spread.PhotosOnly]
-        val expectedFirst  = Chapter(first.id, originalDestination, first.period, first.description, first.sourceFolder, first.opening, emptySpreads)
-        val expectedSecond =
-          Chapter(second.id, secondDestination, second.period, second.description, second.sourceFolder, second.opening, emptySpreads)
-        initial match
-          case AlbumRepository.GetResult.Found(album) => assertEquals(album.chapters, Vector(expectedSecond, expectedFirst))
-          case result                                 => fail(s"Expected complete created chapters, obtained $result")
-        (before, loaded) match
-          case (AlbumRepository.GetResult.Found(original), AlbumRepository.GetResult.Found(album)) =>
-            val expected =
-              original.chapters.find(_.id.value === first.id.value).map(_.copy(destination = changedDestination, sourceFolder = newFolder))
-            val actual = album.chapters.headOption.map(chapter => chapter.copy(destination = chapter.destination.copy(id = first.destinationId)))
+      (buildChapter(xa, index = 1), buildChapter(xa, index = 2)).tupled.flatMap { case (first, second) =>
+        val command = ChapterRepository.Update(
+          albumId,
+          first.id,
+          destination,
+          newName,
+          countries = countryIds,
+          period,
+          newFolder,
+          order = NonEmptyList.of(first.id, second.id)
+        )
 
-            assertEquals(created, ChapterRepository.CreateResult.Saved)
-            assertEquals(added, ChapterRepository.CreateResult.Saved)
-            assertEquals(updated, ChapterRepository.UpdateResult.Saved)
-            assertEquals(album.chapters.map(_.id), Vector(first.id, second.id))
-            assertEquals(actual, expected)
-            assertEquals(album.chapters.lastOption.map(_.destination), originalDestination.some)
-            assertEquals(album.chapters.lastOption.map(_.opening), second.opening.some)
-          case result => fail(s"Expected complete persisted album, obtained $result")
+        for
+          _       <- seedAlbum(xa)
+          created <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          added   <- chapters.create(albumId, second, order = NonEmptyList.of(second.id, first.id)).transact(xa)
+          initial <- albums.get(albumId)
+          _       <- sql"UPDATE chapter SET destination_id = ${first.destinationId.value} WHERE id = ${second.id.value}".update.run.transact(xa)
+          _       <- insertPhotoComposition(first.id, first.opening.id).transact(xa)
+          before  <- albums.get(albumId)
+          updated <- chapters.update(command).transact(xa)
+          loaded  <- albums.get(albumId)
+        yield
+          val originalDestination = Destination(first.destinationId, first.name, countries = NonEmptyList.of(country, otherCountry))
+          val changedDestination  = originalDestination.copy(name = newName, countries = newCountries)
+          val secondDestination   = Destination(second.destinationId, second.name, countries = NonEmptyList.of(country, otherCountry))
+          val emptySpreads        = Vector.empty[Spread.PhotosOnly]
+          val expectedFirst       =
+            Chapter(first.id, originalDestination, first.period, first.description, first.sourceFolder, first.opening, spreads = emptySpreads)
+          val expectedSecond =
+            Chapter(second.id, secondDestination, second.period, second.description, second.sourceFolder, second.opening, spreads = emptySpreads)
+          initial match
+            case AlbumRepository.GetResult.Found(album) => assertEquals(album.chapters, Vector(expectedSecond, expectedFirst))
+            case result                                 => fail(s"Expected complete created chapters, obtained $result")
+          (before, loaded) match
+            case (AlbumRepository.GetResult.Found(original), AlbumRepository.GetResult.Found(album)) =>
+              val expected =
+                original.chapters.find(_.id.value === first.id.value).map(_.copy(destination = changedDestination, sourceFolder = newFolder))
+              val actual = album.chapters.headOption.map(chapter => chapter.copy(destination = chapter.destination.copy(id = first.destinationId)))
+
+              assertEquals(created, ChapterRepository.CreateResult.Saved)
+              assertEquals(added, ChapterRepository.CreateResult.Saved)
+              assertEquals(updated, ChapterRepository.UpdateResult.Saved)
+              assertEquals(album.chapters.map(_.id), Vector(first.id, second.id))
+              assertEquals(actual, expected)
+              assertEquals(album.chapters.lastOption.map(_.destination), originalDestination.some)
+              assertEquals(album.chapters.lastOption.map(_.opening), second.opening.some)
+            case result => fail(s"Expected complete persisted album, obtained $result")
+      }
 
   test("should leave all persisted rows unchanged after late opening, association or ordering failures"):
     Vector(
@@ -135,14 +152,13 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val chapters = SqliteChapterRepository.make
 
         for
-          _      <- seedAlbum(xa)
-          first  <- buildChapter(xa, index = 1)
-          _      <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
-          before <- albums.get(albumId)
-          rows   <- countRows.transact(xa)
-          second <- buildChapter(xa, index = 2)
-          _      <- Fragment.const(trigger).update.run.transact(xa)
-
+          _       <- seedAlbum(xa)
+          first   <- buildChapter(xa, index = 1)
+          _       <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          before  <- albums.get(albumId)
+          rows    <- countRows.transact(xa)
+          second  <- buildChapter(xa, index = 2)
+          _       <- Fragment.const(trigger).update.run.transact(xa)
           failed  <- chapters.create(albumId, second, order = NonEmptyList.of(second.id, first.id)).transact(xa).attempt
           after   <- albums.get(albumId)
           counted <- countRows.transact(xa)
@@ -167,10 +183,9 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         )
 
         for
-          _      <- seedAlbum(xa)
-          _      <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
-          before <- countRows.transact(xa)
-
+          _       <- seedAlbum(xa)
+          _       <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          before  <- countRows.transact(xa)
           results <- cases.traverse { case (chapter, order) => chapters.create(albumId, chapter, order = order).transact(xa).attempt }
           after   <- countRows.transact(xa)
         yield
@@ -189,34 +204,39 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val trigger                      = sql"""CREATE TRIGGER fail_update BEFORE UPDATE OF position ON chapter WHEN NEW.position = 0
                            BEGIN SELECT RAISE(IGNORE); END"""
 
-      for
-        _           <- seedAlbum(xa)
-        first       <- buildChapter(xa, index = 1)
-        absentAlbum <- chapters.create(missing, first, order = NonEmptyList.one(first.id)).transact(xa)
-        _           <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
-        before      <- albums.get(albumId)
-        rows        <- countRows.transact(xa)
-        name           = first.name
-        countries      = first.countries
-        folder         = first.sourceFolder
-        order          = NonEmptyList.one(first.id)
-        unknownChapter = ChapterId(new UUID(3L, 3L))
-        command        = ChapterRepository.Update(albumId, first.id, destination, name, countries = countries, period, folder, order = order)
-        revised        = command.copy(name = revisedName, countries = revisedCountries, sourceFolder = revisedFolder)
-        absentEdit  <- chapters.update(command.copy(album = missing)).transact(xa)
-        absentChild <- chapters.update(command.copy(chapter = unknownChapter)).transact(xa)
-        _           <- trigger.update.run.transact(xa)
+      buildChapter(xa, index = 1).flatMap: first =>
+        val unknownChapter = ChapterId(new UUID(3L, 3L))
+        val command        = ChapterRepository.Update(
+          albumId,
+          first.id,
+          destination,
+          first.name,
+          countries = first.countries,
+          period,
+          first.sourceFolder,
+          order = NonEmptyList.one(first.id)
+        )
+        val revised = command.copy(name = revisedName, countries = revisedCountries, sourceFolder = revisedFolder)
 
-        failed  <- chapters.update(revised).transact(xa).attempt
-        after   <- albums.get(albumId)
-        counted <- countRows.transact(xa)
-      yield
-        assertEquals(absentAlbum, ChapterRepository.CreateResult.AlbumNotFound)
-        assertEquals(absentEdit, ChapterRepository.UpdateResult.AlbumNotFound)
-        assertEquals(absentChild, ChapterRepository.UpdateResult.ChapterNotFound)
-        assert(failed.isLeft)
-        assertEquals(after, before)
-        assertEquals(counted, rows)
+        for
+          _           <- seedAlbum(xa)
+          absentAlbum <- chapters.create(missing, first, order = NonEmptyList.one(first.id)).transact(xa)
+          _           <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          before      <- albums.get(albumId)
+          rows        <- countRows.transact(xa)
+          absentEdit  <- chapters.update(command.copy(album = missing)).transact(xa)
+          absentChild <- chapters.update(command.copy(chapter = unknownChapter)).transact(xa)
+          _           <- trigger.update.run.transact(xa)
+          failed      <- chapters.update(revised).transact(xa).attempt
+          after       <- albums.get(albumId)
+          counted     <- countRows.transact(xa)
+        yield
+          assertEquals(absentAlbum, ChapterRepository.CreateResult.AlbumNotFound)
+          assertEquals(absentEdit, ChapterRepository.UpdateResult.AlbumNotFound)
+          assertEquals(absentChild, ChapterRepository.UpdateResult.ChapterNotFound)
+          assert(failed.isLeft)
+          assertEquals(after, before)
+          assertEquals(counted, rows)
 
   test("should commit source clearing with metadata and evidence or preserve all state, then recover only retired files after reopening"):
     Vector("saved", "acknowledgement", "evidence", "removal", "order", "unknown-country", "unchanged").traverse_ { stage =>
@@ -259,12 +279,15 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
             given Mutex[IO] = mutex
             val imports     = new ChapterPhotoImport[IO]:
               override def prepare(chapter: ChapterId, source: PhotoSource): IO[Request] = Request(chapter, source, generation = BigInt(1)).pure[IO]
-              override def launch(request: Request, retirements: Vector[PhotoWriteIntent.Retirement]): IO[Scheduling] =
+              override def launch(request: Request): IO[Scheduling]                      =
                 mutex.lock.surround(Scheduling.Failed.pure[IO])
-              override def suspend(chapter: ChapterId): IO[Unit]  = IO.unit
-              override def status(chapter: ChapterId): IO[Status] = Status.Idle.pure[IO]
-            val manager = ChapterManager.make(albums, chapters, templates, imports, photos)
-            val trigger = stage match
+              override def retire(retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] = IO.unit
+              override def suspend(chapter: ChapterId): IO[Unit]                              = IO.unit
+              override def status(chapter: ChapterId): IO[ExecutionOutcome]                   =
+                ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue]).pure[IO]
+            val planning = ChapterPlanning.make(templates)
+            val manager  = ChapterManager.make(albums, chapters, planning, imports, photos)
+            val trigger  = stage match
               case "evidence" => "CREATE TRIGGER reject_write BEFORE INSERT ON photo_write_intent BEGIN SELECT RAISE(ABORT, 'evidence'); END"
               case "removal"  => "CREATE TRIGGER reject_write BEFORE DELETE ON photo BEGIN SELECT RAISE(ABORT, 'remove'); END"
               case "order"    =>
@@ -403,7 +426,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           _     <- IO(assertEquals(saved, AlbumRepository.CreateResult.Created))
           _     <- insertCountries.update.run.transact(xa)
         yield ()
-      case value => IO.raiseError[Unit](new IllegalStateException(s"Missing album templates: $value"))
+      case value => new IllegalStateException(s"Missing album templates: $value").raiseError[IO, Unit]
 
   private def buildAlbum(template: SpreadTemplate.AlbumStart) =
     val photos = template.photoSlots.zipWithIndex.map { case (box, index) =>
@@ -411,7 +434,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     }
     val textSlot        = SpreadSlot.Text(TextSpreadSlotId(new UUID(4L, 11L)), template.textSlot)
     val emptyPlacements = Vector.empty[SpreadPlacement]
-    val opening         = Spread.AlbumStart(SpreadId(new UUID(4L, 10L)), template.id, photos, textSlot, emptyPlacements)
+    val opening         = Spread.AlbumStart(SpreadId(new UUID(4L, 10L)), template.id, photoSlots = photos, textSlot, placements = emptyPlacements)
     val album           = Album(albumId, year = 2026, title = "Album", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
     val cover           = Cover(albumId, SpineOwner.Front, CoverSlot(CoverSlotId(new UUID(4L, 12L))), CoverSlot(CoverSlotId(new UUID(4L, 13L))))
     (album, cover)
@@ -423,13 +446,23 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val photos   = template.photoSlots.zipWithIndex.map { case (box, position) =>
           SpreadSlot.Photo(PhotoSpreadSlotId(new UUID(index.toLong, position.toLong)), box, bleed = Set(SpreadEdge.Left))
         }
-        val textSlot                  = SpreadSlot.Text(TextSpreadSlotId(new UUID(index.toLong, 101L)), template.textSlot)
-        val emptyPlacements           = Vector.empty[SpreadPlacement]
-        val opening                   = Spread.ChapterStart(SpreadId(new UUID(index.toLong, 100L)), template.id, photos, textSlot, emptyPlacements)
+        val textSlot        = SpreadSlot.Text(TextSpreadSlotId(new UUID(index.toLong, 101L)), template.textSlot)
+        val emptyPlacements = Vector.empty[SpreadPlacement]
+        val opening         =
+          Spread.ChapterStart(SpreadId(new UUID(index.toLong, 100L)), template.id, photoSlots = photos, textSlot, placements = emptyPlacements)
         val chapterId                 = ChapterId(new UUID(index.toLong, 102L))
         val destinationId             = DestinationId(new UUID(index.toLong, 103L))
         val countryIds                = NonEmptyList.of(country.id, otherCountry.id)
         val sourceFolder: PhotoSource = s"/photos/$index".refineUnsafe
         val description               = "Retained description"
-        ChapterRepository.NewChapter(chapterId, destinationId, name = "Trip", countryIds, period, description, sourceFolder, opening).pure[IO]
-      case value => IO.raiseError[ChapterRepository.NewChapter](new IllegalStateException(s"Missing chapter templates: $value"))
+        ChapterRepository.NewChapter(
+          chapterId,
+          destinationId,
+          name = "Trip",
+          countries = countryIds,
+          period,
+          description = description,
+          sourceFolder,
+          opening
+        ).pure[IO]
+      case value => new IllegalStateException(s"Missing chapter templates: $value").raiseError[IO, ChapterRepository.NewChapter]

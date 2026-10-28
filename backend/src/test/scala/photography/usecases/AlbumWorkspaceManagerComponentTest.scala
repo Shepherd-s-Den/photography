@@ -46,7 +46,8 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
 
   test("should assemble the complete album and selectable countries with the configured photo root"):
     val manager  = buildManager(GetAlbumResult.Found(album), CountryRepository.ListResult.Listed(countries))
-    val expected = GetResult.Found(album, countries, photoRoot = "/photos", photoInventories = Map.empty[ChapterId, PhotoInventory.Inventory])
+    val expected =
+      GetResult.Found(album, countries = countries, photoRoot = "/photos", photoInventories = Map.empty[ChapterId, PhotoInventory.Inventory])
 
     manager.get(album.id).map(result => assertEquals(result, expected))
 
@@ -54,7 +55,7 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     val other       = chapter.copy(id = ChapterId(new UUID(0L, 9L)), sourceFolder = "/photos/other")
     val current     = album.copy(chapters = Vector(chapter, other))
     val inventories = Map(chapter.id -> emptyInventory, other.id -> emptyInventory)
-    val expected    = GetResult.Found(current, countries, photoRoot = "/photos", photoInventories = inventories)
+    val expected    = GetResult.Found(current, countries = countries, photoRoot = "/photos", photoInventories = inventories)
     val savedAlbum  = GetAlbumResult.Found(current)
     val catalog     = CountryRepository.ListResult.Listed(countries)
     val failedRead  = buildManager(savedAlbum, catalog, inventory = _ => PhotoInventory.ListResult.Failed.pure[IO]).get(album.id)
@@ -78,7 +79,9 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     )
 
     scenarios.traverse_ { case (albumResult, countryResult, expected) =>
-      buildManager(albumResult, countryResult).get(album.id).map(result => assertEquals(result, expected))
+      val manager = buildManager(albumResult, countryResult)
+
+      manager.get(album.id).map(result => assertEquals(result, expected))
     }
 
   // scalafix:off DisableSyntax.defaultArgs

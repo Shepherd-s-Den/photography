@@ -27,7 +27,7 @@ object SqliteChapterRepository:
           _ <- initial.liftTo[ConnectionIO]
           _ <- validateOpening(opening.template, photos = opening.photoSlots.map(_.box), opening.textSlot.box)
           _ <- insertDestination(chapter.destinationId.value, chapter.name, countries = chapter.countries)
-          _ <- insertChapter(album, chapter.id, chapter.destinationId, chapter.description, chapter.period, chapter.sourceFolder)
+          _ <- insertChapter(album, chapter.id, chapter.destinationId, description = chapter.description, chapter.period, chapter.sourceFolder)
           _ <- insertOpening(chapter.id, opening.id, opening.template, photos = opening.photoSlots, opening.textSlot)
           _ <- persistOrder(album, order = order)
         yield CreateResult.Saved: CreateResult
@@ -73,13 +73,14 @@ object SqliteChapterRepository:
       sql"DELETE FROM destination WHERE id = $id AND NOT EXISTS (SELECT 1 FROM chapter WHERE destination_id = $id)".update.run.void
 
     private def insertDestination(id: UUID, name: DestinationName, countries: NonEmptyList[CountryId]) =
+      val insert          = sql"INSERT INTO destination (id, name) VALUES ($id, ${name: String})"
       val insertCountries = countries.toList.zipWithIndex.traverse_ { case (country, position) =>
         val insert = sql"""INSERT INTO destination_country (destination_id, country_id, position)
           VALUES ($id, ${country.value}, $position)"""
-        insert.update.run.flatMap(requireOne)
+        insert.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1).void
       }
       for
-        _ <- sql"INSERT INTO destination (id, name) VALUES ($id, ${name: String})".update.run.flatMap(requireOne)
+        _ <- insert.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1)
         _ <- insertCountries
       yield ()
 
@@ -97,18 +98,20 @@ object SqliteChapterRepository:
         VALUES (${chapter.value}, ${album.value}, ${destination.value}, $description,
                 $start, $end, (SELECT coalesce(max(position), -1) + 1 FROM chapter WHERE album_id = ${album.value}),
                 ${folder: String})"""
-      insert.update.run.flatMap(requireOne)
+      insert.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1).void
 
     private def updateMetadata(album: AlbumId, chapter: ChapterId, destination: UUID, period: VisitPeriod, folder: PhotoSource) =
-      val start = period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
-      val end   = period.firstDay.plusDays(period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
-      sql"""UPDATE chapter SET destination_id = $destination, start_ms = $start, end_ms = $end, source_folder = ${folder: String}
-            WHERE id = ${chapter.value} AND album_id = ${album.value}""".update.run.flatMap(requireOne)
+      val start  = period.firstDay.atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
+      val end    = period.firstDay.plusDays(period.days).atStartOfDay(ZoneOffset.UTC).toInstant.toEpochMilli
+      val update = sql"""UPDATE chapter SET destination_id = $destination, start_ms = $start, end_ms = $end, source_folder = ${folder: String}
+            WHERE id = ${chapter.value} AND album_id = ${album.value}"""
+      update.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1).void
 
     private def persistOrder(album: AlbumId, order: NonEmptyList[ChapterId]) =
       val supplied       = order.toList.map(_.value)
       val writePositions = supplied.zipWithIndex.traverse_ { case (id, position) =>
-        sql"UPDATE chapter SET position = $position WHERE album_id = ${album.value} AND id = $id".update.run.flatMap(requireOne)
+        val update = sql"UPDATE chapter SET position = $position WHERE album_id = ${album.value} AND id = $id"
+        update.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1).void
       }
       for
         stored <- sql"SELECT id FROM chapter WHERE album_id = ${album.value}".query[UUID].to[List]
@@ -133,20 +136,18 @@ object SqliteChapterRepository:
       val insertText = sql"""INSERT INTO spread_text_slot (id, spread_id, x, y, width, height)
         VALUES (${text.id.value}, ${spread.value}, ${text.box})"""
       for
-        _ <- insert.update.run.flatMap(requireOne)
+        _ <- insert.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1)
         _ <- photos.traverse_(slot => insertPhotoSlot(spread, slot))
-        _ <- insertText.update.run.flatMap(requireOne)
+        _ <- insertText.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1)
       yield ()
 
     private def insertPhotoSlot(spread: SpreadId, slot: SpreadSlot.Photo) =
       val insert = sql"INSERT INTO spread_photo_slot (id, spread_id, x, y, width, height) VALUES (${slot.id.value}, ${spread.value}, ${slot.box})"
       val insertBleed = slot.bleed.toList.traverse_ { edge =>
-        sql"INSERT INTO spread_photo_slot_bleed (slot_id, edge) VALUES (${slot.id.value}, $edge)".update.run.flatMap(requireOne)
+        val insert = sql"INSERT INTO spread_photo_slot_bleed (slot_id, edge) VALUES (${slot.id.value}, $edge)"
+        insert.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1).void
       }
       for
-        _ <- insert.update.run.flatMap(requireOne)
+        _ <- insert.update.run.ensure(new IllegalStateException("Expected one persisted row"))(_ === 1)
         _ <- insertBleed
       yield ()
-
-    private def requireOne(count: Int) =
-      Either.cond(count === 1, (), new IllegalStateException("Expected one persisted row")).liftTo[ConnectionIO]

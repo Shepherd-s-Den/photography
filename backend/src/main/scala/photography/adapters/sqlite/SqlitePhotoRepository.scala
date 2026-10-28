@@ -110,7 +110,7 @@ object SqlitePhotoRepository:
 
     override def listUnfinishedWrites: ConnectionIO[ListUnfinishedWritesResult] =
       sql"SELECT id, chapter_id, photo_id, kind, location, previous FROM photo_write_intent ORDER BY id"
-        .query[(UUID, UUID, UUID, String, UUID, Option[UUID])].to[Vector].flatMap(_.traverse(decodeIntent))
+        .query[(UUID, UUID, UUID, String, UUID, Option[UUID])].to[Vector].flatMap(rows => rows.traverse(decodeIntent).liftTo[ConnectionIO])
         .map(intents => ListUnfinishedWritesResult.Listed(intents = intents))
 
     private def decodeIntent(row: (UUID, UUID, UUID, String, UUID, Option[UUID])) =
@@ -124,10 +124,11 @@ object SqlitePhotoRepository:
             ThumbnailLocation(location),
             maybePrevious = maybePrevious.map(ThumbnailLocation(_))
           )
-            .pure[ConnectionIO]
+            .asRight[IllegalArgumentException]
         case "retirement" if maybePrevious.isEmpty =>
-          PhotoWriteIntent.Retirement(PhotoWriteIntentId(id), ChapterId(chapter), PhotoId(photo), ThumbnailLocation(location)).pure[ConnectionIO]
-        case _ => new IllegalArgumentException("Invalid photo write evidence").raiseError[ConnectionIO, PhotoWriteIntent]
+          PhotoWriteIntent.Retirement(PhotoWriteIntentId(id), ChapterId(chapter), PhotoId(photo), ThumbnailLocation(location))
+            .asRight[IllegalArgumentException]
+        case _ => new IllegalArgumentException("Invalid photo write evidence").asLeft[PhotoWriteIntent]
 
     private given refinedStringMeta[C](using RuntimeConstraint[String, C]): Meta[String :| C] =
       Meta[String].tiemap[String :| C](_.refineEither[C])(value => value: String)
