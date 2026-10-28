@@ -15,7 +15,6 @@ import photography.adapters.sqlite.SqlitePhotoRepository
 import photography.app.config.{AppConfig, HttpServerConfig}
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.usecases.PhotoWriteRecovery
-import pureconfig.ConfigSource
 
 object Main extends IOApp.Simple:
 
@@ -24,7 +23,7 @@ object Main extends IOApp.Simple:
   private given Clock[IO]                   = Clock.make[IO]
 
   override def run: IO[Unit] =
-    AppConfig.load[IO](ConfigSource.defaultApplication).flatMap: config =>
+    AppConfig.make.flatMap: config =>
       AppResourcesBuilder.make(config.sqlite).build[IO].use: resources =>
         given Transaction[ConnectionIO, IO] with
           override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(resources.sqlite)
