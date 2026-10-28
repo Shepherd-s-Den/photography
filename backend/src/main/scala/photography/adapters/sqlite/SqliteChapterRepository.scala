@@ -19,9 +19,10 @@ object SqliteChapterRepository:
 
   final private class LiveChapterRepository extends ChapterRepository[ConnectionIO]:
     override def findSource(chapter: ChapterId): ConnectionIO[SourceResult] =
-      sql"SELECT source_folder FROM chapter WHERE id = ${chapter.value}".query[String].option.flatMap:
-        case Some(source) =>
-          source.refineEither[PhotoSourceConstraint].leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO].map(SourceResult.Found(_))
+      sql"SELECT album_id, source_folder FROM chapter WHERE id = ${chapter.value}".query[(UUID, String)].option.flatMap:
+        case Some((album, source)) =>
+          source.refineEither[PhotoSourceConstraint].leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
+            .map(SourceResult.Found(AlbumId(album), _))
         case None => SourceResult.ChapterNotFound.pure[ConnectionIO]
 
     override def create(album: AlbumId, chapter: NewChapter, order: NonEmptyList[ChapterId]): ConnectionIO[CreateResult] =

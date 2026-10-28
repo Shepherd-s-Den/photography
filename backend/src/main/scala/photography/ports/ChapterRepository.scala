@@ -14,7 +14,7 @@ trait ChapterRepository[F[_]]:
 
 object ChapterRepository:
   enum SourceResult:
-    case Found(source: PhotoSource)
+    case Found(album: AlbumId, source: PhotoSource)
     case ChapterNotFound, Failed
 
   final case class Update(

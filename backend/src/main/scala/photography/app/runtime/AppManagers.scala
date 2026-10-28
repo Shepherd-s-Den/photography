@@ -12,14 +12,15 @@ import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.ports.PhotoRepository
 import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
-import photography.usecases.{ChapterPlanning, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
+import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
 import java.nio.file.Path
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
     chapters: ChapterManager[F],
     templates: SpreadTemplateManager[F],
-    workspaces: AlbumWorkspaceManager[F]
+    workspaces: AlbumWorkspaceManager[F],
+    photoEvents: AlbumPhotoEvents[F]
 )
 
 object AppManagers:
@@ -48,7 +49,8 @@ object AppManagers:
       val storage            = FilePhotoStorage.make(thumbnails)
       val generator          = PhotoThumbnailGenerator.make[F](quality)
       val planning           = ChapterPlanning.make(templates)
-      ChapterPhotoImport.make(storage, photoRepository, generator).map: imports =>
-        val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
-        val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
-        AppManagers(albums, chapters, templates, workspaces)
+      Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
+        ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
+          val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
+          val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
+          AppManagers(albums, chapters, templates, workspaces, events)

@@ -58,7 +58,7 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
       (ChapterRepository.SourceResult.ChapterNotFound, PhotoInventory.ListResult.ChapterNotFound),
       (ChapterRepository.SourceResult.Failed, PhotoInventory.ListResult.Failed),
       (
-        ChapterRepository.SourceResult.Found(source = "/photos"),
+        ChapterRepository.SourceResult.Found(AlbumId(new UUID(0L, 99L)), source = "/photos"),
         PhotoInventory.ListResult.Listed(PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty[PhotoId]))
       )
     ).traverse_ { case (source, expected) =>
@@ -76,7 +76,7 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
       listed: PhotoRepository.ListResult,
       placed: PhotoPlacementRepository.FindResult,
       maybeTransactionError: Option[Throwable] = None,
-      source: ChapterRepository.SourceResult = ChapterRepository.SourceResult.Found(source = "/photos")
+      source: ChapterRepository.SourceResult = ChapterRepository.SourceResult.Found(AlbumId(new UUID(0L, 99L)), source = "/photos")
   ) =
     given Transaction[Db, IO] with
       override def run[A](program: Db[A]): IO[A] =
