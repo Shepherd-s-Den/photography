@@ -20,7 +20,7 @@ Save a chapter and open its workspace without waiting for directory discovery or
 | --- | --- |
 | `PhotoManager[F]` use case | Reconcile supplied chapter/source metadata: compare hashes/quality, generate/store thumbnails and persist complete photos through its three collaborators. |
 | `PhotoInventory[F]` use case | Compose photo/placement reads in one database snapshot, order the returned view and derive counts. |
-| `PhotoThumbnailGenerator[F]` use case | Generate from supplied in-memory content with injected quality settings; suspend Thumbnailator in `Async[F].blocking` (`IO.blocking` for IO), never on a compute thread. |
+| `PhotoThumbnailGenerator[F]` use case | Generate from supplied in-memory content with injected quality settings; suspend image processing in `Async[F].blocking` (`IO.blocking` for IO), never on a compute thread. |
 | `PhotoStorage[F]` port / NAS adapter | Discover/read originals in place; store/delete individual thumbnails in application-owned storage. Translate photo locations to filesystem paths and suspend filesystem IO; originals are read-only. |
 | `PhotoRepository[Db]` port / SQLite adapter | Read/save/remove complete photos and durable photo-write evidence; placement and filesystem operations remain separate. |
 | `PhotoPlacementRepository[F]` port / SQLite adapter | Read authoritative placed-photo identities for counts. Existing foreign-key cascades enforce reference integrity on photo deletion, preserving slots; no placement-write API is needed. |
@@ -77,7 +77,7 @@ Allocate each exclusive `ThumbnailLocation` before journaling or storage; even i
 
 Result names in the sketches denote operation-owned companion sum types, not top-level workflow envelopes. `PhotoContent` contains immutable encoded original bytes; generation consumes no chapter, hash or capture-date metadata.
 
-Reuse plant-journal's **Thumbnailator** library for EXIF-aware resizing/JPEG encoding. Its smallest-output fallback is unsuitable here: exceeding the selected byte ceiling fails generation explicitly.
+Use **TwelveMonkeys common-image 3.15.3** for image resizing and orientation transforms, with memory-only JPEG decoding/encoding. Exceeding the selected byte ceiling fails generation explicitly.
 
 Use **metadata-extractor 2.22.0** for EXIF metadata from buffered JPEG bytes, avoiding a bespoke EXIF/TIFF parser. Capture dates retain camera-local semantics independently of thumbnail generation.
 
@@ -482,7 +482,7 @@ The spike's adapter is disposable evidence. Production scheduling, SSE, concurre
 | --- | --- | --- |
 | `specs/design.md` | Album workflow | Chapter-owned photos shown chapter-locally or across all chapters on Synopsis/Cover, accessible controls and grouped spread navigation. |
 | `specs/design.md` | Values | JPEG eligibility, stable chapter/source identity, camera-local ordering and one orientation-correct, uncropped, non-upscaled thumbnail with preset resolution/byte ceilings. |
-| `specs/design.md` | Placements and gear | PhotoManager coordinates creation/Refresh processing through filesystem/metadata ports and Thumbnailator generation; complete-row publication, hash freshness, explicit restart retry and source-authoritative removal. |
+| `specs/design.md` | Placements and gear | PhotoManager coordinates creation/Refresh processing through filesystem/metadata ports and in-memory thumbnail generation; complete-row publication, hash freshness, explicit restart retry and source-authoritative removal. |
 | `specs/design.md` | Architecture constraints | Effectful blocking thumbnail generation; initial workspace chapter inventories, chapter-addressed http4s SSE catch-up and derived album views, independently of lazy static thumbnail delivery. |
 | `specs/operational.md` | Production deployment | NAS mounts, quality/root settings, journal reconciliation before readiness, explicit Refresh after interruption and unbuffered heartbeat-capable SSE proxy configuration. |
 | `specs/contracts.md` | Contract inventory | Breaking undeployed photo schema, single complete-photo table with technical write journal, inventory/Refresh/SSE and saved-with-scheduling outcomes. |
