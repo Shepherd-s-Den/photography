@@ -39,9 +39,21 @@ object PhotoThumbnailGenerator:
         bytes       <- content.bytes.toArray.blocking[F]
         orientation <- readOrientation(bytes = bytes).blocking[F]
         decoded     <- decodeImage(bytes = bytes)
-        thumbnail   <- transformImage(decoded, orientation).blocking[F]
-        encoded     <- encodeImage(thumbnail)
+        encoded     <- fitThumbnail(decoded, orientation, longestEdge = quality.longestEdge)
       yield encoded
+
+    private def fitThumbnail(original: BufferedImage, orientation: Int, longestEdge: Int) =
+      Async[F].tailRecM(longestEdge): edge =>
+        transformImage(original, orientation, longestEdge = edge).blocking[F].flatMap: image =>
+          encodeAtQuality(image).map:
+            case None if edge > 1 => math.max(1, edge * 4 / 5).asLeft[Option[EncodedThumbnail]]
+            case result           => result.asRight[Int]
+
+    private def encodeAtQuality(image: BufferedImage) =
+      Async[F].tailRecM(85): compression =>
+        encodeImage(image, compression).map:
+          case None if compression > 65 => (compression - 5).asLeft[Option[EncodedThumbnail]]
+          case result                   => result.asRight[Int]
 
     private def readOrientation(bytes: Array[Byte]) =
       val metadata = JpegMetadataReader.readMetadata(new ByteArrayInputStream(bytes))
@@ -63,11 +75,11 @@ object PhotoThumbnailGenerator:
             Option(reader.read(0)).filter(_ => !warnings.get()).toRight(new IIOException("Invalid JPEG image"))
           }.blocking[F].flatMap(_.liftTo[F])
 
-    private def transformImage(image: BufferedImage, orientation: Int) =
-      orientImage(resizeImage(image), orientation = orientation)
+    private def transformImage(image: BufferedImage, orientation: Int, longestEdge: Int) =
+      orientImage(resizeImage(image, longestEdge), orientation = orientation)
 
-    private def resizeImage(image: BufferedImage) =
-      val scale  = math.min(1.0, quality.longestEdge.toDouble / math.max(image.getWidth, image.getHeight))
+    private def resizeImage(image: BufferedImage, longestEdge: Int) =
+      val scale  = math.min(1.0, longestEdge.toDouble / math.max(image.getWidth, image.getHeight))
       val width  = math.max(1, math.round(image.getWidth * scale).toInt)
       val height = math.max(1, math.round(image.getHeight * scale).toInt)
       val output = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
@@ -84,11 +96,11 @@ object PhotoThumbnailGenerator:
         case 8 => ImageUtil.createRotated(image, ImageUtil.ROTATE_90_CCW)
         case _ => image
 
-    private def encodeImage(image: BufferedImage) =
+    private def encodeImage(image: BufferedImage, compression: Int) =
       new ByteArrayOutputStream().blocking[F].flatMap: bytes =>
         val output = Resource.makeCase(new MemoryCacheImageOutputStream(bytes).blocking[F]):
           case (stream, exit) => releaseAfterProcessing(stream.close().blocking[F], exit)
-        output.use(stream => writeJpeg(image, stream)) >>
+        output.use(stream => writeJpeg(image, stream, compression)) >>
           {
             val dimensions = ThumbnailDimensions(
               width = image.getWidth.refineUnsafe[ThumbnailPixelCountConstraint],
@@ -97,14 +109,14 @@ object PhotoThumbnailGenerator:
             validateThumbnail(bytes = bytes.toByteArray.toVector, dimensions)
           }.blocking[F]
 
-    private def writeJpeg(image: BufferedImage, output: MemoryCacheImageOutputStream) =
+    private def writeJpeg(image: BufferedImage, output: MemoryCacheImageOutputStream, compression: Int) =
       val acquire = ImageIO.getImageWritersByFormatName("jpeg").asScala.nextOption().flatMap(Option(_))
         .toRight(new IIOException("JPEG encoder unavailable")).blocking[F].flatMap(_.liftTo[F])
       Resource.makeCase(acquire) { case (writer, exit) => releaseAfterProcessing(writer.dispose().blocking[F], exit) }.use: writer =>
         {
           val parameters = writer.getDefaultWriteParam
           parameters.setCompressionMode(ImageWriteParam.MODE_EXPLICIT)
-          parameters.setCompressionQuality(0.85f)
+          parameters.setCompressionQuality(compression / 100.0f)
           writer.setOutput(output)
           val metadata = writer.getDefaultImageMetadata(ImageTypeSpecifier.createFromRenderedImage(image), parameters)
           val encoded  = new IIOImage(image, JavaList.of[BufferedImage](), metadata)

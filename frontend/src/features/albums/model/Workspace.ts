@@ -41,9 +41,11 @@ export type Spread = {
 } & ({ readonly kind: "album_start"; readonly chapter: null } | { readonly kind: "chapter_start" | "photos_only"; readonly chapter: string });
 
 export interface Workspace {
+  readonly photoInventories: Readonly<Record<string, PhotoInventory>>;
   readonly year: number;
   readonly photoRoot: string;
   readonly chapters: readonly Chapter[];
   readonly spreads: readonly Spread[];
   readonly countries: readonly Country[];
 }
+import type { PhotoInventory } from "./Photo";

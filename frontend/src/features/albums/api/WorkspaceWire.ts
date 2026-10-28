@@ -1,22 +1,35 @@
 import { maximumAlbumYear, minimumAlbumYear } from "../model/Album";
 import type { Chapter, Country, Slot, Spread, Workspace } from "../model/Workspace";
 import { readArray, readNumber, readRecord, readText } from "./Wire";
+import { readPhotoInventory, readScheduling } from "./PhotoWire";
+import type { ChapterSave } from "../model/Photo";
 
 export function readWorkspace(value: unknown): Workspace {
   const fields = readRecord(value);
   const year = readNumber(fields["year"]);
   if (!Number.isInteger(year) || year < minimumAlbumYear || year > maximumAlbumYear) throw new Error("Expected an album year in range");
+  const chapters = readArray(fields["chapters"]).map(readChapter);
+  const photoInventories = Object.fromEntries(
+    Object.entries(readRecord(fields["photoInventories"])).map(([id, inventory]) => [id, readPhotoInventory(inventory)]),
+  );
+  if (
+    new Set(chapters.map((chapter) => chapter.id)).size !== chapters.length ||
+    Object.keys(photoInventories).length !== chapters.length ||
+    chapters.some((chapter) => !Object.hasOwn(photoInventories, chapter.id))
+  )
+    throw new Error("Missing chapter photo inventory");
   return {
     year,
     photoRoot: readText(fields["photoRoot"]),
-    chapters: readArray(fields["chapters"]).map(readChapter),
+    chapters,
+    photoInventories,
     spreads: readArray(fields["spreads"]).map(readSpread),
     countries: readArray(fields["countries"]).map(readCountry),
   };
 }
 
-export function readChapterIdentity(value: unknown): { id: string } {
-  return { id: readText(readRecord(value)["id"]) };
+export function readChapterIdentity(value: unknown): ChapterSave {
+  return { id: readText(readRecord(value)["id"]), scheduling: readScheduling(value) };
 }
 
 function readChapter(value: unknown): Chapter {

@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       "/api": backend,
       "/health": backend,
+      "/thumbnails": backend,
     },
   },
   build: {

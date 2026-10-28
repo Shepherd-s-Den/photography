@@ -86,12 +86,19 @@ final class PhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
       }
     }
 
-  test("should reject fixed-compression output exceeding any selected byte ceiling rather than reducing resolution or returning best effort"):
+  test("should fit detailed JPEGs within every preset by adapting encoding without changing supplied originals"):
     ThumbnailQuality.values.toVector.traverse_ { quality =>
       for
         content <- IO.blocking(buildJpeg(width = quality.longestEdge, height = quality.longestEdge, maybeOrientation = None, noisy = true))
         result  <- PhotoThumbnailGenerator.make[IO](quality).generate(content)
-      yield assertEquals(result, GenerationResult.Failed)
+        decoded <- IO.blocking(ImageIO.read(new ByteArrayInputStream(requireGenerated(result).bytes.toArray)))
+      yield
+        val image = requireGenerated(result)
+        assert(image.bytes.sizeIs <= quality.maximumBytes)
+        assertEquals(image.quality, quality)
+        assertEquals(decoded.getWidth, decoded.getHeight)
+        assert(decoded.getWidth <= quality.longestEdge)
+        assertEquals((image.dimensions.width: Int, image.dimensions.height: Int), (decoded.getWidth, decoded.getHeight))
     }
 
   test("should report malformed content as generation failure and keep valid subsequent generation available"):
@@ -184,7 +191,7 @@ final class PhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
   test("should release the memory-backed JPEG encoder on write failures without hiding unexpected errors"):
     val generator = PhotoThumbnailGenerator.make[IO](ThumbnailQuality.Standard)
     val defect    = new CompletionException(new IllegalStateException("unexpected JPEG encoder defect"))
-    val cases     = Vector(WriteAction.IoFailure, WriteAction.Unexpected(defect), WriteAction.ConstructionFailure)
+    val cases     = Vector(WriteAction.IoFailure, WriteAction.Unexpected(defect), WriteAction.ConstructionFailure, WriteAction.Oversized)
 
     cases.traverse_ { action =>
       for
@@ -194,8 +201,8 @@ final class PhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
         _       <- IO.blocking(refs.maybeOutput.get().foreach(output => intercept[IOException](output.getStreamPosition)))
       yield
         val expected = action match
-          case WriteAction.IoFailure | WriteAction.ConstructionFailure => GenerationResult.Failed.asRight[Throwable]
-          case WriteAction.Unexpected(error)                           => error.asLeft[GenerationResult]
+          case WriteAction.IoFailure | WriteAction.ConstructionFailure | WriteAction.Oversized => GenerationResult.Failed.asRight[Throwable]
+          case WriteAction.Unexpected(error)                                                   => error.asLeft[GenerationResult]
         assertEquals(result, expected)
         assertEquals(refs.writerDisposed.get(), action =!= WriteAction.ConstructionFailure)
         assertEquals(refs.memoryOutput.get(), action =!= WriteAction.ConstructionFailure)
@@ -292,7 +299,7 @@ final class PhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
     case Paused(reached: CountDownLatch, resume: CountDownLatch)
 
   private enum WriteAction:
-    case IoFailure, ConstructionFailure
+    case IoFailure, ConstructionFailure, Oversized
     case Unexpected(error: CompletionException)
 
   private given Eq[ReadAction]  = Eq.fromUniversalEquals
@@ -387,17 +394,19 @@ final class PhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
 
     override def write(metadata: IIOMetadata, image: IIOImage, parameters: ImageWriteParam): Unit =
       val fixture = image.getRenderedImage.getWidth === 96 && image.getRenderedImage.getHeight === 64
-      if fixture then
+      if fixture || action === WriteAction.Oversized then
         observed.set(true)
-        getOutput match
+        val output = getOutput match
           case output: ImageOutputStream =>
             refs.maybeOutput.set(output.some)
             refs.memoryOutput.set(output.isCachedMemory && !output.isCachedFile)
+            output
           case _ => fail("Expected a memory-backed JPEG output stream")
         action match
           case WriteAction.IoFailure           => val _ = new DataInputStream(new ByteArrayInputStream(Array.emptyByteArray)).readByte()
           case WriteAction.Unexpected(error)   => CompletableFuture.failedFuture[Unit](error).join()
           case WriteAction.ConstructionFailure => fail("A failed writer cannot encode")
+          case WriteAction.Oversized           => output.write(new Array[Byte](300001))
       else
         delegate.setOutput(getOutput)
         delegate.write(metadata, image, parameters)

@@ -1,12 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { describePeriod, isCalendarDay, suggestFolder, validateChapter } from "../../../src/features/albums/workspace/ChapterDetails";
-import { findSelection, findReaderNavigation } from "../../../src/features/albums/workspace/WorkspaceSelection";
+import {
+  describeCountryLabel,
+  describePeriod,
+  isCalendarDay,
+  suggestFolder,
+  validateChapter,
+} from "../../../src/features/albums/workspace/ChapterDetails";
+import { findSelection, findReaderNavigation, findSpreadNavigation } from "../../../src/features/albums/workspace/WorkspaceSelection";
 import { getChapterCapacityReason } from "../../../src/features/albums/workspace/ChapterOutline";
 import { getCoverCredits } from "../../../src/features/albums/workspace/Canvas";
 import { searchCountries } from "../../../src/features/albums/workspace/CountryPicker";
 import { readWorkspace } from "../../../src/features/albums/api/WorkspaceWire";
+import { readPhotoInventory, readScheduling } from "../../../src/features/albums/api/PhotoWire";
 
 describe("chapter detail feedback", () => {
+  it.each([
+    [1, "Country"],
+    [2, "Countries"],
+  ] as const)("should label %i country selections as %s", (count, label) => {
+    expect(describeCountryLabel(count)).toBe(label);
+  });
   it.each([
     ["2000-02-29", true],
     ["1900-02-29", false],
@@ -127,11 +140,34 @@ describe("workspace URL selection", () => {
     expect(findReaderNavigation(spreads, findSelection(spreads, part))).toEqual({ previous, next });
   });
 
-  it("should navigate an album without chapters from its opening to Cover", () => {
+  it("should navigate an album opening to Cover and keep an empty workspace unavailable", () => {
     const spreads = [{ id: "opening", chapter: null, kind: "album_start" as const, slots: [] }];
+    const emptyNavigation = { position: undefined, total: 0, first: undefined, previous: undefined, next: undefined, last: undefined };
 
     expect(findReaderNavigation(spreads, findSelection(spreads, null))).toEqual({ previous: "cover", next: undefined });
+    expect(findSpreadNavigation([], findSelection([], null))).toEqual(emptyNavigation);
   });
+
+  it.each([
+    [null, 1, undefined, undefined, "chapter", "photo"],
+    ["chapter", 2, null, null, "photo", "photo"],
+    ["chapter-opening", 2, null, null, "photo", "photo"],
+    ["photo", 3, null, "chapter", undefined, undefined],
+    ["foreign", undefined, undefined, undefined, undefined, undefined],
+    ["cover", undefined, undefined, undefined, undefined, undefined],
+  ] as const)(
+    "should derive above-editor spread destinations from %s without wrapping or navigating Cover",
+    (part, position, first, previous, next, last) => {
+      const spreads = [
+        { id: "opening", chapter: null, kind: "album_start" as const, slots: [] },
+        { id: "chapter-opening", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
+        { id: "photo", chapter: "chapter", kind: "photos_only" as const, slots: [] },
+      ];
+      const expected = { position, total: 3, first, previous, next, last };
+
+      expect(findSpreadNavigation(spreads, findSelection(spreads, part))).toEqual(expected);
+    },
+  );
 });
 
 describe("workspace wire representations", () => {
@@ -153,6 +189,9 @@ describe("workspace wire representations", () => {
     chapters: [chapter],
     spreads: [spread],
     countries: [{ id: "jp", name: "Japan", code: "JP" }],
+    photoInventories: {
+      chapter: { photos: [], counts: { unplaced: 0, total: 0 }, processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] } },
+    },
   };
 
   const homeWorkspace = {
@@ -179,6 +218,14 @@ describe("workspace wire representations", () => {
     { ...workspace, year: 2101 },
     { ...workspace, countries: null },
     { ...workspace, photoRoot: undefined },
+    { ...workspace, photoInventories: undefined },
+    { ...workspace, photoInventories: {} },
+    { ...workspace, photoInventories: { foreign: workspace.photoInventories.chapter } },
+    {
+      ...workspace,
+      chapters: [chapter, chapter],
+      photoInventories: { chapter: workspace.photoInventories.chapter, foreign: workspace.photoInventories.chapter },
+    },
     { ...workspace, chapters: [{ ...chapter, kind: "unknown" }] },
     { ...workspace, spreads: [{ ...spread, kind: "unknown" }] },
     { ...workspace, spreads: [{ ...spread, chapter: chapter.id }] },
@@ -188,5 +235,72 @@ describe("workspace wire representations", () => {
     { ...workspace, spreads: [{ ...spread, slots: [{ ...slot, x: Number.NaN }] }] },
   ])("should reject incomplete or unknown workspace representations %j", (value) => {
     expect(() => readWorkspace(value)).toThrow();
+  });
+
+  describe("photo wire representations", () => {
+    const photo = {
+      id: "photo",
+      filename: "Photo.jpg",
+      capturedLocal: "2026-01-01T10:00",
+      width: 1200,
+      height: 800,
+      caption: null,
+      thumbnail: { url: "/thumbnails/key/version.jpg", width: 600, height: 400 },
+    };
+    const processing = {
+      state: "completed",
+      unsupportedCount: 2,
+      skippedCount: 1,
+      issues: [{ stage: "read", code: "undecodable", filename: "bad.jpg" }],
+    };
+    const inventory = { photos: [photo], counts: { unplaced: 1, total: 1 }, processing };
+
+    it.each(["idle", "queued", "running", "completed", "failed"])(
+      "should retain the complete %s inventory without altering its thumbnail URL",
+      (state) => {
+        const expected = { ...inventory, processing: { ...processing, state } };
+
+        expect(readPhotoInventory(expected)).toEqual(expected);
+        expect(readPhotoInventory({ ...inventory, photos: [{ ...photo, capturedLocal: null, caption: "Caption" }] }).photos[0]?.caption).toBe(
+          "Caption",
+        );
+      },
+    );
+
+    it.each([
+      { ...inventory, photos: null },
+      { ...inventory, photos: [{ ...photo, id: "" }] },
+      { ...inventory, counts: { unplaced: -1, total: 1 } },
+      { ...inventory, counts: { unplaced: 2, total: 1 } },
+      { ...inventory, counts: { unplaced: 0, total: 2 } },
+      { ...inventory, counts: { unplaced: 0.5, total: 1 } },
+      ...["id", "filename", "caption", "capturedLocal", "width", "height", "thumbnail"].map((field) => ({
+        ...inventory,
+        photos: [{ ...photo, [field]: undefined }],
+      })),
+      ...[0, -1, 0.5, Infinity].map((width) => ({ ...inventory, photos: [{ ...photo, thumbnail: { ...photo.thumbnail, width } }] })),
+      ...["2026-02-30T10:00", "2026-01-01T25:00", "2026-01-01T10:00Z", ""].map((capturedLocal) => ({
+        ...inventory,
+        photos: [{ ...photo, capturedLocal }],
+      })),
+      { ...inventory, photos: [photo, photo], counts: { unplaced: 1, total: 2 } },
+      ...["state", "unsupportedCount", "skippedCount", "issues"].map((field) => ({
+        ...inventory,
+        processing: { ...processing, [field]: undefined },
+      })),
+      { ...inventory, processing: { ...processing, state: "finished" } },
+      { ...inventory, processing: { ...processing, issues: [{ stage: "other", code: "undecodable", filename: null }] } },
+      { ...inventory, processing: { ...processing, issues: [{ stage: "read", code: "other", filename: null }] } },
+    ])("should reject malformed inventory rather than publish an empty success: %j", (value) => {
+      expect(() => readPhotoInventory(value)).toThrow();
+    });
+
+    it.each(["queued", "coalesced", "not-requested", "failed"])("should retain saved chapter scheduling %s", (scheduling) => {
+      expect(readScheduling({ scheduling })).toBe(scheduling);
+    });
+
+    it.each([{}, { scheduling: "completed" }])("should reject missing or malformed scheduling %j", (value) => {
+      expect(() => readScheduling(value)).toThrow();
+    });
   });
 });

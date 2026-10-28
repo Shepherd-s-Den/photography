@@ -1,0 +1,164 @@
+.photo-workspace {
+  display: grid;
+  grid-template-columns: min(var(--photo-width), max(200px, calc(100% - 372px))) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+.photo-workspace.photo-resizing {
+  user-select: none;
+}
+.photo-workspace.photos-collapsed {
+  grid-template-columns: 12px minmax(0, 1fr);
+}
+.photo-pane {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12px;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.photos-collapsed .photo-pane {
+  grid-template-columns: 12px;
+}
+.photo-controls {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  background: #fcfefe;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+.photo-controls[hidden] {
+  display: none;
+}
+.photo-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: #fcfefe;
+}
+.photo-toolbar h2 {
+  margin: 0;
+  font-size: 14px;
+}
+.photo-controls p,
+.photo-processing h3,
+.photo-processing summary {
+  margin: 6px 8px;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.photo-controls .photo-count {
+  margin: 3px 0 0;
+  font-size: 12px;
+}
+.photo-processing summary {
+  cursor: pointer;
+  color: #a42525;
+}
+.photo-thumbnails {
+  position: relative;
+}
+.photo-thumbnails img {
+  position: absolute;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  object-fit: contain;
+}
+button.photo-grip {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 12px;
+  min-height: 48px;
+  padding: 0;
+  overflow: hidden;
+  cursor: col-resize;
+  touch-action: none;
+  border: 0;
+  border-radius: 0;
+  clip-path: polygon(0 0, 100% 10px, 100% calc(100% - 10px), 0 100%);
+  color: #7a9ba0;
+  background: var(--line);
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease;
+}
+button.photo-grip::before {
+  position: absolute;
+  inset: 1px;
+  content: "";
+  clip-path: polygon(0 0.6px, 100% 9px, 100% calc(100% - 9px), 0 calc(100% - 0.6px));
+  background: linear-gradient(90deg, #e4eeee, #f3f8f8);
+}
+button.photo-grip svg {
+  position: relative;
+  width: 8px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+}
+button.photo-grip:hover,
+button.photo-grip:focus-visible {
+  background: #9abdc2;
+}
+button.photo-grip:hover::before,
+button.photo-grip:focus-visible::before {
+  background: linear-gradient(90deg, #d2e5e7, #e7f2f3);
+}
+button.photo-grip:focus-visible {
+  outline-offset: -4px;
+}
+button.photo-grip:active::before {
+  background: linear-gradient(90deg, #c6dde0, #dae9eb);
+  box-shadow: inset 1px 0 3px #25444c1f;
+}
+button.photo-grip:hover,
+button.photo-grip:focus-visible {
+  color: #28626c;
+}
+.photo-grip-help {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+@media (max-width: 680px) {
+  .photo-workspace,
+  .photo-workspace.photos-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+  .photo-pane {
+    height: max(48px, calc(85dvh - 170px));
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .photo-controls {
+    height: 100%;
+  }
+  .photos-collapsed .photo-pane {
+    width: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  button.photo-grip {
+    transition: none;
+  }
+}
