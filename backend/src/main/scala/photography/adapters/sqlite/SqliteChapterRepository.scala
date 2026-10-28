@@ -1,13 +1,10 @@
 package photography.adapters.sqlite
 
 import cats.data.NonEmptyList
-import cats.effect.Async
 import cats.syntax.all.*
-import org.typelevel.doobie.{ConnectionIO, Transactor}
+import org.typelevel.doobie.ConnectionIO
 import org.typelevel.doobie.implicits.*
-import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.SqliteCodecs.given
-import photography.capabilities.IdGenerator
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.ChapterRepository
@@ -17,11 +14,10 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 object SqliteChapterRepository:
-  def make[F[_]: Async: Logger: IdGenerator](transactor: Transactor[F]): ChapterRepository[F] =
-    new LiveChapterRepository(transactor)
+  def make: ChapterRepository[ConnectionIO] = new LiveChapterRepository
 
-  final private class LiveChapterRepository[F[_]: Async: Logger: IdGenerator](transactor: Transactor[F]) extends ChapterRepository[F]:
-    override def create(album: AlbumId, chapter: NewChapter, order: NonEmptyList[ChapterId]): F[CreateResult] =
+  final private class LiveChapterRepository extends ChapterRepository[ConnectionIO]:
+    override def create(album: AlbumId, chapter: NewChapter, order: NonEmptyList[ChapterId]): ConnectionIO[CreateResult] =
       val opening         = chapter.opening
       val distinctSlotIds = opening.photoSlots.forall(_.id.value =!= opening.textSlot.id.value)
       val isInitial       = opening.placements.isEmpty && opening.photoSlots.nonEmpty && distinctSlotIds
@@ -29,28 +25,20 @@ object SqliteChapterRepository:
       val write           =
         for
           _ <- initial.liftTo[ConnectionIO]
-          _ <- validateOpening(chapter.opening.template, chapter.opening.photoSlots.map(_.box), chapter.opening.textSlot.box)
-          _ <- insertDestination(chapter.destinationId.value, chapter.name, chapter.countries)
+          _ <- validateOpening(opening.template, photos = opening.photoSlots.map(_.box), opening.textSlot.box)
+          _ <- insertDestination(chapter.destinationId.value, chapter.name, countries = chapter.countries)
           _ <- insertChapter(album, chapter.id, chapter.destinationId, chapter.description, chapter.period, chapter.sourceFolder)
-          _ <- insertOpening(chapter.id, chapter.opening.id, chapter.opening.template, chapter.opening.photoSlots, chapter.opening.textSlot)
-          _ <- persistOrder(album, order)
+          _ <- insertOpening(chapter.id, opening.id, opening.template, photos = opening.photoSlots, opening.textSlot)
+          _ <- persistOrder(album, order = order)
         yield CreateResult.Saved: CreateResult
-      val query = albumExists(album).flatMap:
+      albumExists(album).flatMap:
         case false => CreateResult.AlbumNotFound.pure[ConnectionIO]
-        case true  => countryReferencesExist(chapter.countries).ifM(ifTrue = write, ifFalse = CreateResult.UnknownCountries.pure[ConnectionIO])
-      execute(query.transact(transactor), CreateResult.Failed)
+        case true  =>
+          countryReferencesExist(countries = chapter.countries).ifM(ifTrue = write, ifFalse = CreateResult.UnknownCountries.pure[ConnectionIO])
 
-    override def update(
-        album: AlbumId,
-        chapter: ChapterId,
-        name: DestinationName,
-        countries: NonEmptyList[CountryId],
-        period: VisitPeriod,
-        sourceFolder: PhotoSource,
-        order: NonEmptyList[ChapterId]
-    ): F[UpdateResult] =
-      val operation = IdGenerator[F].generateId.flatMap: destination =>
-        val query = albumExists(album).flatMap:
+    override def update(command: Update): ConnectionIO[UpdateResult] = command match
+      case Update(album, chapter, destination, name, countries, period, sourceFolder, order) =>
+        albumExists(album).flatMap:
           case false => UpdateResult.AlbumNotFound.pure[ConnectionIO]
           case true  =>
             sql"SELECT destination_id FROM chapter WHERE id = ${chapter.value} AND album_id = ${album.value}".query[UUID].option.flatMap:
@@ -58,14 +46,12 @@ object SqliteChapterRepository:
               case Some(previous) =>
                 val write =
                   for
-                    _ <- insertDestination(destination, name, countries)
-                    _ <- updateMetadata(album, chapter, destination, period, sourceFolder)
+                    _ <- insertDestination(destination.value, name, countries = countries)
+                    _ <- updateMetadata(album, chapter, destination.value, period, sourceFolder)
                     _ <- deleteUnreferencedDestination(previous)
-                    _ <- persistOrder(album, order)
+                    _ <- persistOrder(album, order = order)
                   yield UpdateResult.Saved: UpdateResult
-                countryReferencesExist(countries).ifM(ifTrue = write, ifFalse = UpdateResult.UnknownCountries.pure[ConnectionIO])
-        query.transact(transactor)
-      execute(operation, UpdateResult.Failed)
+                countryReferencesExist(countries = countries).ifM(ifTrue = write, ifFalse = UpdateResult.UnknownCountries.pure[ConnectionIO])
 
     private def albumExists(album: AlbumId) =
       sql"SELECT EXISTS(SELECT 1 FROM album WHERE id = ${album.value})".query[Boolean].unique
@@ -126,7 +112,7 @@ object SqliteChapterRepository:
       }
       for
         stored <- sql"SELECT id FROM chapter WHERE album_id = ${album.value}".query[UUID].to[List]
-        _      <- validateOrder(stored, supplied).liftTo[ConnectionIO]
+        _      <- validateOrder(stored = stored, supplied = supplied).liftTo[ConnectionIO]
         _      <- sql"UPDATE chapter SET position = -position - 1 WHERE album_id = ${album.value}".update.run
         _      <- writePositions
       yield ()
@@ -164,8 +150,3 @@ object SqliteChapterRepository:
 
     private def requireOne(count: Int) =
       Either.cond(count === 1, (), new IllegalStateException("Expected one persisted row")).liftTo[ConnectionIO]
-
-    private def execute[A](operation: F[A], failed: A) =
-      operation.attempt.flatMap:
-        case Right(result) => result.pure[F]
-        case Left(error)   => Logger[F].error(error)("SQLite chapter operation failed").as(failed)

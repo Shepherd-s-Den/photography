@@ -1,15 +1,17 @@
 package photography.usecases
 
 import cats.data.NonEmptyList
-import cats.effect.{IO, Ref}
+import cats.Id
+import cats.effect.{Deferred, IO, Outcome, Ref}
 import cats.effect.std.Mutex
+import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import munit.CatsEffectSuite
-import photography.capabilities.IdGenerator
+import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.ports.{AlbumRepository, ChapterRepository}
+import photography.ports.{AlbumRepository, ChapterRepository, PhotoRepository}
 import photography.usecases.ChapterManager.{CreateResult, Period, RefreshResult, UpdateResult}
 import photography.usecases.SpreadTemplateManager.ListChapterStartTemplatesResult
 import photography.usecases.ChapterPhotoImport.{Request, Scheduling, Status}
@@ -58,6 +60,158 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val photo           = Spread.PhotosOnly(SpreadId(buildUuid(index = 60)), template.id, NonEmptyList.one(photoSlot), emptyPlacements)
     val spreads         = Vector.tabulate(63)(index => photo.copy(id = SpreadId(buildUuid(index = 100 + index.toLong))))
     album.copy(chapters = Vector(chapter.copy(spreads = spreads)))
+  private val photo =
+    val metadata  = PhotoMetadata(hash = "source", maybeCapturedLocal = None, PhotoDimensions(width = 10, height = 10))
+    val thumbnail =
+      Thumbnail(ThumbnailLocation(buildUuid(index = 90)), version = "v", ThumbnailDimensions(width = 5, height = 5), ThumbnailQuality.Low, bytes = 1)
+    val photoId  = PhotoId(buildUuid(index = 91))
+    val original = OriginalPhotoLocation(chapter.sourceFolder, filename = "one.jpg")
+    Photo(photoId, chapter.id, original, metadata, thumbnail, maybeCaption = None)
+
+  test("should journal and dispatch only committed source-change retirements"):
+    val saved     = ChapterRepository.UpdateResult.Saved
+    val recorded  = PhotoRepository.RecordWriteResult.Recorded
+    val removed   = PhotoRepository.WriteResult.Applied
+    val scenarios = Vector(
+      (false, saved, recorded, removed, UpdateResult.Updated(Scheduling.NotRequested)),
+      (true, saved, recorded, removed, UpdateResult.Updated(Scheduling.Queued)),
+      (true, ChapterRepository.UpdateResult.UnknownCountries, recorded, removed, UpdateResult.Rejected(ChapterConflict.UnknownCountries)),
+      (true, saved, PhotoRepository.RecordWriteResult.Failed, removed, UpdateResult.Failed),
+      (true, saved, recorded, PhotoRepository.WriteResult.Failed, UpdateResult.Failed)
+    )
+    scenarios.traverse_ { case (changed, metadataResult, journalResult, removalResult, expected) =>
+      val refs                = Refs()
+      val source: PhotoSource = if changed then "/photos/changed" else chapter.sourceFolder
+      val name                = chapter.destination.name
+      val countryIds          = countries.map(_.id)
+      val visit               = Period.Dates(chapter.period)
+      val succeeds            = changed &&
+        (expected match
+          case _: UpdateResult.Updated => true
+          case _                       => false)
+
+      val createManager = buildManager(
+        refs,
+        current = album.copy(chapters = Vector(chapter)),
+        updateWrite = metadataResult,
+        listed = PhotoRepository.ListResult.Listed(photos = Vector(photo)).pure[IO],
+        recording = journalResult.pure[IO],
+        removal = removalResult.pure[IO]
+      )
+      for
+        manager    <- createManager
+        result     <- manager.update(album.id, chapter.id, name, countries = countryIds, visit, source)
+        dispatched <- refs.retirements.get
+        prepared   <- refs.preparations.get
+        listed     <- refs.photoReads.get
+      yield
+        assertEquals(result, expected)
+        assertEquals(dispatched.map(_.location), if succeeds then Vector(photo.thumbnail.location) else Vector.empty[ThumbnailLocation])
+        assertEquals(prepared, if succeeds then Vector((chapter.id, source)) else Vector.empty[(ChapterId, PhotoSource)])
+        assertEquals(listed, if changed then Vector(chapter.id) else Vector.empty[ChapterId])
+    }
+
+  test("should resolve lost update acknowledgements and suspend old writes when the saved state is uncertain"):
+    Vector("committed", "rolled-back", "unreadable", "missing", "unknown", "absent-chapter", "exception").traverse_ { resolution =>
+      val refs    = Refs()
+      val current = album.copy(chapters = Vector(chapter))
+      val error   = new IllegalStateException("Lost commit acknowledgement")
+      val state   = Ref.unsafe[IO, IO[AlbumRepository.GetResult]](AlbumRepository.GetResult.Found(current).pure[IO])
+      val update  = (destination: DestinationId) =>
+        val saved    = chapter.copy(destination = chapter.destination.copy(id = destination), sourceFolder = "/photos/changed")
+        val response = resolution match
+          case "committed"      => AlbumRepository.GetResult.Found(current.copy(chapters = Vector(saved))).pure[IO]
+          case "rolled-back"    => AlbumRepository.GetResult.Found(current).pure[IO]
+          case "unreadable"     => AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure).pure[IO]
+          case "missing"        => AlbumRepository.GetResult.NotFound.pure[IO]
+          case "absent-chapter" => AlbumRepository.GetResult.Found(current.copy(chapters = Vector.empty[Chapter])).pure[IO]
+          case "unknown"        =>
+            val unexpected = chapter.copy(destination = chapter.destination.copy(id = DestinationId(buildUuid(index = 999))))
+            AlbumRepository.GetResult.Found(current.copy(chapters = Vector(unexpected))).pure[IO]
+          case _ => IO.raiseError[AlbumRepository.GetResult](error)
+        state.set(response) >> IO.raiseError[Unit](error)
+      val expected                   = if resolution === "committed" then UpdateResult.Updated(Scheduling.Queued) else UpdateResult.Failed
+      val suspends                   = resolution =!= "committed" && resolution =!= "rolled-back"
+      val name                       = chapter.destination.name
+      val countryIds                 = countries.map(_.id)
+      val visit                      = Period.Dates(chapter.period)
+      val changedSource: PhotoSource = "/photos/changed"
+
+      for
+        manager   <- buildManager(refs, maybeRead = state.get.flatten.some, update = update)
+        result    <- manager.update(album.id, chapter.id, name, countries = countryIds, visit, changedSource)
+        suspended <- refs.suspensions.get
+        prepared  <- refs.preparations.get
+      yield
+        assertEquals(result, expected)
+        assertEquals(suspended, if suspends then Vector(chapter.id) else Vector.empty[ChapterId])
+        assertEquals(prepared.size, if resolution === "committed" then 1 else 0)
+    }
+
+  test("should stop before mutation when photo listing fails and report failed chapter creation explicitly"):
+    Vector(
+      PhotoRepository.ListResult.Failed.pure[IO],
+      IO.raiseError[PhotoRepository.ListResult](new IllegalStateException("Read failed"))
+    ).traverse_ { listed =>
+      val refs                       = Refs()
+      val error                      = new IllegalStateException("Write failed")
+      val name                       = chapter.destination.name
+      val countryIds                 = countries.map(_.id)
+      val visit                      = Period.Dates(chapter.period)
+      val changedSource: PhotoSource = "/photos/changed"
+
+      for
+        manager <- buildManager(refs, current = album.copy(chapters = Vector(chapter)), listed = listed, save = _ => IO.raiseError[Unit](error))
+        created <- manager.create(album.id, name = "Kyoto", countries = countryIds, visit, sourceFolder = "/photos/new")
+        updated <- manager.update(album.id, chapter.id, name, countries = countryIds, visit, changedSource)
+        writes  <- refs.updates.get
+      yield
+        assertEquals(created, CreateResult.Failed)
+        assertEquals(updated, UpdateResult.Failed)
+        assertEquals(writes, Vector.empty)
+    }
+
+  test("should hand committed source retirement to application execution before honoring request cancellation"):
+    Vector(false, true).traverse_ { cancelAtCommit =>
+      val refs = Refs()
+
+      (Deferred[IO, Unit], Deferred[IO, Unit]).tupled.flatMap { case (entered, release) =>
+        val current                    = album.copy(chapters = Vector(chapter))
+        val photoListing               = PhotoRepository.ListResult.Listed(photos = Vector(photo)).pure[IO]
+        val name                       = chapter.destination.name
+        val countryIds                 = countries.map(_.id)
+        val visit                      = Period.Dates(chapter.period)
+        val changedSource: PhotoSource = "/photos/changed"
+        val handoff                    = entered.complete(()).void >> release.get
+        val update                     = (_: DestinationId) => if cancelAtCommit then handoff else IO.unit
+        val scheduling                 = (if cancelAtCommit then IO.unit else handoff).as(Scheduling.Queued)
+        val program                    =
+          for
+            manager      <- buildManager(refs, current = current, listed = photoListing, update = update, scheduling = scheduling)
+            worker       <- manager.update(album.id, chapter.id, name, countries = countryIds, visit, changedSource).flatTap(_ => IO.cede).start
+            _            <- entered.get
+            cancellation <- worker.cancel.start
+            _            <- cancellation.join
+            outcome      <- worker.join
+            prepared     <- refs.preparations.get
+            dispatched   <- refs.retirements.get
+          yield
+            assert(outcome.isCanceled)
+            assertEquals(prepared, Vector((chapter.id, "/photos/changed": PhotoSource)))
+            assertEquals(dispatched.map(_.location), Vector(photo.thumbnail.location))
+
+        for
+          control <- TestControl.execute(program)
+          _       <- control.tick
+          waiting <- control.results
+          _       <- release.complete(())
+          _       <- control.tick
+          result  <- control.results
+        yield
+          assertEquals(waiting, None)
+          assertEquals(result, Outcome.succeeded[Id, Throwable, Unit](()).some)
+      }
+    }
 
   test("should create a multi-country chapter and its empty opening"):
     val refs                  = Refs()
@@ -330,6 +484,9 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     }
 
   final private case class Refs():
+    val retirements: Ref[IO, Vector[PhotoWriteIntent.Retirement]]                                                           = Ref.unsafe(Vector.empty)
+    val suspensions: Ref[IO, Vector[ChapterId]]                                                                             = Ref.unsafe(Vector.empty)
+    val photoReads: Ref[IO, Vector[ChapterId]]                                                                              = Ref.unsafe(Vector.empty)
     val preparations: Ref[IO, Vector[(ChapterId, PhotoSource)]]                                                             = Ref.unsafe(Vector.empty)
     val launches: Ref[IO, Vector[Request]]                                                                                  = Ref.unsafe(Vector.empty)
     val creations: Ref[IO, Vector[(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId])]] = Ref.unsafe(Vector.empty)
@@ -357,7 +514,11 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       templates: ListChapterStartTemplatesResult = ListChapterStartTemplatesResult.Listed(NonEmptyList.one(template)),
       preparation: IO[Unit] = IO.unit,
       scheduling: IO[Scheduling] = Scheduling.Queued.pure[IO],
-      save: ChapterRepository.NewChapter => IO[Unit] = _ => IO.unit
+      save: ChapterRepository.NewChapter => IO[Unit] = _ => IO.unit,
+      update: DestinationId => IO[Unit] = _ => IO.unit,
+      listed: IO[PhotoRepository.ListResult] = PhotoRepository.ListResult.Listed(photos = Vector.empty[Photo]).pure[IO],
+      recording: IO[PhotoRepository.RecordWriteResult] = PhotoRepository.RecordWriteResult.Recorded.pure[IO],
+      removal: IO[PhotoRepository.WriteResult] = PhotoRepository.WriteResult.Applied.pure[IO]
   ) =
     given IdGenerator[IO] with
       private val next                  = Ref.unsafe[IO, Long](10L)
@@ -373,35 +534,46 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         IO.raiseError[AlbumRepository.RenameResult](new AssertionError("Unexpected album rename"))
       override def delete(value: AlbumId): IO[AlbumRepository.DeleteResult] =
         IO.raiseError[AlbumRepository.DeleteResult](new AssertionError("Unexpected deletion"))
-    val repository = new ChapterRepository[IO]:
+    val writeUpdate = update
+    val repository  = new ChapterRepository[IO]:
       override def create(
           parent: AlbumId,
           chapter: ChapterRepository.NewChapter,
           order: NonEmptyList[ChapterId]
       ): IO[ChapterRepository.CreateResult] =
         refs.creations.update(_ :+ (parent, chapter, order)) >> save(chapter).as(createWrite)
-      override def update(
-          parent: AlbumId,
-          chapter: ChapterId,
-          name: DestinationName,
-          countries: NonEmptyList[CountryId],
-          period: VisitPeriod,
-          sourceFolder: PhotoSource,
-          order: NonEmptyList[ChapterId]
-      ): IO[ChapterRepository.UpdateResult] =
-        refs.updates.update(_ :+ (parent, chapter, name, countries, period, sourceFolder, order)).as(updateWrite)
+      override def update(command: ChapterRepository.Update): IO[ChapterRepository.UpdateResult] = command match
+        case ChapterRepository.Update(parent, chapter, destination, name, countries, period, sourceFolder, order) =>
+          refs.updates.update(_ :+ (parent, chapter, name, countries, period, sourceFolder, order)) >> writeUpdate(destination).as(updateWrite)
     val catalog = new SpreadTemplateManager[IO]:
       override def listAlbumStartTemplates: IO[SpreadTemplateManager.ListAlbumStartTemplatesResult] =
         IO.raiseError[SpreadTemplateManager.ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
       override def listChapterStartTemplates: IO[ListChapterStartTemplatesResult] = templates.pure[IO]
     Mutex[IO].map: mutex =>
       given Mutex[IO] = mutex
-      val imports     = new ChapterPhotoImport[IO]:
+      given Transaction[IO, IO] with
+        override def run[A](program: IO[A]): IO[A]     = program
+        override def resolve[A](program: IO[A]): IO[A] = program
+      val imports = new ChapterPhotoImport[IO]:
         override def prepare(id: ChapterId, source: PhotoSource): IO[Request] =
           refs.preparations.update(_ :+ (id, source)) >> preparation.as(Request(id, source, generation = BigInt(0)))
-        override def launch(request: Request): IO[Scheduling] = mutex.lock.surround(refs.launches.update(_ :+ request) >> scheduling)
-        override def status(id: ChapterId): IO[Status]        = Status.Idle.pure[IO]
-      ChapterManager.make(albums, repository, catalog, imports)
+        override def launch(request: Request, retirements: Vector[PhotoWriteIntent.Retirement]): IO[Scheduling] =
+          mutex.lock.surround(refs.launches.update(_ :+ request) >> refs.retirements.update(_ ++ retirements) >> scheduling)
+        override def suspend(id: ChapterId): IO[Unit]  = refs.suspensions.update(_ :+ id)
+        override def status(id: ChapterId): IO[Status] = Status.Idle.pure[IO]
+      val photoRepository = new PhotoRepository[IO]:
+        override def listChapter(id: ChapterId): IO[PhotoRepository.ListResult] =
+          refs.photoReads.update(_ :+ id) >> listed
+        override def save(photo: Photo): IO[PhotoRepository.WriteResult] =
+          IO.raiseError[PhotoRepository.WriteResult](new AssertionError("Unexpected photo save"))
+        override def remove(id: PhotoId): IO[PhotoRepository.WriteResult]                         = removal
+        override def recordWrite(intent: PhotoWriteIntent): IO[PhotoRepository.RecordWriteResult] =
+          recording
+        override def completeWrite(id: PhotoWriteIntentId): IO[PhotoRepository.CompleteWriteResult] =
+          IO.raiseError[PhotoRepository.CompleteWriteResult](new AssertionError("Unexpected completion"))
+        override def listUnfinishedWrites: IO[PhotoRepository.ListUnfinishedWritesResult] =
+          IO.raiseError[PhotoRepository.ListUnfinishedWritesResult](new AssertionError("Unexpected global listing"))
+      ChapterManager.make(albums, repository, catalog, imports, photoRepository)
   // scalafix:on DisableSyntax.defaultArgs
 
   private def buildUuid(index: Long) = new UUID(0L, index)

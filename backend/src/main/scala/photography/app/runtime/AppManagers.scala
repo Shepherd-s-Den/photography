@@ -35,7 +35,7 @@ object AppManagers:
       val templateRepository = SqliteSpreadTemplateRepository.make[F](sqlite)
       val templates          = SpreadTemplateManager.make(templateRepository)
       val albumRepository    = SqliteAlbumRepository.make[F](sqlite)
-      val chapterRepository  = SqliteChapterRepository.make[F](sqlite)
+      val chapterRepository  = SqliteChapterRepository.make
       val countries          = SqliteCountryRepository.make[F](sqlite)
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)
       val placements         = buildPhotoPlacements
@@ -43,7 +43,7 @@ object AppManagers:
       val storage            = buildPhotoStorage[F]
       val generator          = buildThumbnailGenerator[F]
       ChapterPhotoImport.make(storage, photoRepository, generator).map: imports =>
-        val chapters   = ChapterManager.make(albumRepository, chapterRepository, templates, imports)
+        val chapters   = ChapterManager.make(albumRepository, chapterRepository, templates, imports, photoRepository)
         val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, photoRoot)
         AppManagers(albums, chapters, templates, workspaces)
 

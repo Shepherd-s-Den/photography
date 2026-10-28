@@ -12,7 +12,8 @@ import photography.usecases.ChapterPhotoImport.*
 
 trait ChapterPhotoImport[F[_]]:
   def prepare(chapter: ChapterId, source: PhotoSource): F[Request]
-  def launch(request: Request): F[Scheduling]
+  def launch(request: Request, retirements: Vector[PhotoWriteIntent.Retirement]): F[Scheduling]
+  def suspend(chapter: ChapterId): F[Unit]
   def status(chapter: ChapterId): F[Status]
 
 object ChapterPhotoImport:
@@ -44,7 +45,7 @@ object ChapterPhotoImport:
             val queued     = Entry(request, Status.Queued, maybeWorker = None, previous = previous)
             (current.updated(chapter, queued), request)
 
-    override def launch(request: Request): F[Scheduling] =
+    override def launch(request: Request, retirements: Vector[PhotoWriteIntent.Retirement]): F[Scheduling] =
       val launch = summon[Mutex[F]].lock.surround:
         state.get.flatMap: current =>
           current.get(request.chapter) match
@@ -57,21 +58,27 @@ object ChapterPhotoImport:
                 register.as((Scheduling.Queued, entry.previous))
             case _ => (Scheduling.Coalesced, Vector.empty[Fiber[F, Throwable, Unit]]).pure[F]
       Async[F].uncancelable: _ =>
-        launch.flatMap { case (scheduling, previous) =>
+        retirements.traverse_(intent => supervisor.supervise(retire(intent)).void) >> launch.flatMap { case (scheduling, previous) =>
           val cancelPrevious = previous.traverse_(worker => supervisor.supervise(worker.cancel).void)
           cancelPrevious.as(scheduling)
         }.handleErrorWith: error =>
           Logger[F].error(error)("Photo import launch failed") >> recordStatus(request, Status.LaunchFailed).as(Scheduling.Failed)
 
+    override def suspend(chapter: ChapterId): F[Unit] =
+      state.update: current =>
+        current.updatedWith(chapter)(_.map(_.copy(status = Status.Uncertain)))
+
     override def status(chapter: ChapterId): F[Status] =
       state.get.map(_.get(chapter).fold[Status](Status.Idle)(_.status))
+
+    private val recovery = PhotoWriteRecovery.make(photos, storage)
 
     private def run(request: Request) =
       given Transaction[Db, F] with
         override def run[A](program: Db[A]): F[A] =
           summon[Mutex[F]].lock.surround:
             state.get.flatMap: current =>
-              val isCurrent = current.get(request.chapter).exists(_.request === request)
+              val isCurrent = current.get(request.chapter).exists(entry => entry.request === request && isActive(entry.status))
               if isCurrent then transaction.run(program)
               else Async[F].raiseError(new IllegalStateException("Photo import source was superseded"))
         override def resolve[A](program: Db[A]): F[A] = transaction.resolve(program)
@@ -79,10 +86,15 @@ object ChapterPhotoImport:
       val started = summon[Mutex[F]].lock.surround(recordStatus(request, Status.Running))
       started >> manager.refresh(request.chapter, request.source).flatMap(result => recordStatus(request, Status.Finished(result)))
 
+    private def retire(intent: PhotoWriteIntent.Retirement) =
+      recovery.resolve(intent).flatMap:
+        case PhotoWriteRecovery.RecoveryResult.Recovered       => ().pure[F]
+        case failure: PhotoWriteRecovery.RecoveryResult.Failed => Logger[F].error(s"Chapter photo retirement failed: ${failure.issues}")
+
     private def recordStatus(request: Request, status: Status) =
       state.update: current =>
         current.updatedWith(request.chapter): maybeEntry =>
-          maybeEntry.map(entry => if entry.request === request then entry.copy(status = status) else entry)
+          maybeEntry.map(entry => if entry.request === request && isActive(entry.status) then entry.copy(status = status) else entry)
 
     private def isActive(status: Status) = status match
       case Status.Queued | Status.Running => true
@@ -96,7 +108,7 @@ object ChapterPhotoImport:
     case Queued, Coalesced, NotRequested, Failed
 
   enum Status:
-    case Idle, Queued, Running, LaunchFailed
+    case Idle, Queued, Running, LaunchFailed, Uncertain
     case Finished(result: PhotoManager.RefreshResult)
 
   final private case class Entry[F[_]](

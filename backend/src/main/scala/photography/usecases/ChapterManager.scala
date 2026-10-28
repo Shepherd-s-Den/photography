@@ -1,14 +1,15 @@
 package photography.usecases
 
 import cats.data.{EitherT, NonEmptyList}
+import cats.MonadThrow
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.std.Mutex
 import cats.syntax.all.*
-import photography.capabilities.IdGenerator
+import photography.capabilities.{IdGenerator, Transaction}
 import org.typelevel.log4cats.Logger
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.ports.{AlbumRepository, ChapterRepository}
+import photography.ports.{AlbumRepository, ChapterRepository, PhotoRepository}
 import photography.syntax.EitherSyntax.*
 import photography.usecases.ChapterManager.*
 import photography.usecases.SpreadTemplateManager.ListChapterStartTemplatesResult
@@ -29,20 +30,22 @@ trait ChapterManager[F[_]]:
   def refresh(album: AlbumId, chapter: ChapterId): F[RefreshResult]
 
 object ChapterManager:
-  def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger](
+  def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       albums: AlbumRepository[F],
-      chapters: ChapterRepository[F],
+      chapters: ChapterRepository[Db],
       templates: SpreadTemplateManager[F],
-      photos: ChapterPhotoImport[F]
-  ): ChapterManager[F] =
-    new LiveChapterManager(albums, chapters, templates, photos)
+      photos: ChapterPhotoImport[F],
+      photoRepository: PhotoRepository[Db]
+  )(using Transaction[Db, F]): ChapterManager[F] =
+    new LiveChapterManager(albums, chapters, templates, photos, photoRepository)
 
-  final private class LiveChapterManager[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger](
+  final private class LiveChapterManager[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       albums: AlbumRepository[F],
-      chapters: ChapterRepository[F],
+      chapters: ChapterRepository[Db],
       templates: SpreadTemplateManager[F],
-      photos: ChapterPhotoImport[F]
-  ) extends ChapterManager[F]:
+      photos: ChapterPhotoImport[F],
+      photoRepository: PhotoRepository[Db]
+  )(using Transaction[Db, F]) extends ChapterManager[F]:
     override def create(
         album: AlbumId,
         name: DestinationName,
@@ -64,7 +67,7 @@ object ChapterManager:
       MonadCancelThrow[F].uncancelable: _ =>
         creation.flatMap:
           case Left(failure)        => translateCreateFailure(failure).pure[F]
-          case Right((id, request)) => launchImport(request).map(CreateResult.Created(id, _))
+          case Right((id, request)) => launchImport(request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(CreateResult.Created(id, _))
 
     override def update(
         album: AlbumId,
@@ -75,20 +78,26 @@ object ChapterManager:
         sourceFolder: PhotoSource
     ): F[UpdateResult] =
       val update = summon[Mutex[F]].lock.surround:
-        val program =
+        val program: EitherT[F, UpdateFailure, Option[ImportLaunch]] =
           for
-            current  <- readAlbum(album).eitherT.leftWiden[UpdateFailure]
-            resolved <- EitherT.fromEither[F](checkUpdate(current, chapter, name, period, sourceFolder))
-            changed = current.chapters.exists(value => value.id.value === chapter.value && (value.sourceFolder: String) =!= sourceFolder)
-            _       <- persistUpdate(album, current.chapters, chapter, name, countries, resolved, sourceFolder).eitherT
-            request <- EitherT.liftF(if changed then photos.prepare(chapter, sourceFolder).attempt.map(_.some) else None.pure[F])
-          yield request
+            current              <- readAlbum(album).eitherT.leftWiden[UpdateFailure]
+            (previous, resolved) <- EitherT.fromEither[F](checkUpdate(current, chapter, name, period, sourceFolder))
+            changed = (previous.sourceFolder: String) =!= sourceFolder
+            oldPhotos   <- EitherT.liftF(if changed then readPhotos(chapter) else Vector.empty[Photo].pure[F])
+            retirements <- EitherT.liftF(oldPhotos.traverse(allocateRetirement))
+            destination <- EitherT.liftF(IdGenerator[F].generateId.map(DestinationId(_)))
+            order   = buildChapterOrder(chapters = current.chapters, chapter, isHome = (name: String) === "Home", resolved)
+            command = ChapterRepository.Update(album, chapter, destination, name, countries = countries, resolved, sourceFolder, order = order)
+            _       <- persistUpdate(previous.destination.id, command, retirements = retirements).eitherT
+            request <- EitherT.liftF(if changed then prepareImport(chapter, sourceFolder).map(_.some) else None.pure[F])
+          yield request.map(value => ImportLaunch(value, retirements = retirements))
         program.value
       MonadCancelThrow[F].uncancelable: _ =>
         update.flatMap:
-          case Left(failure)        => translateUpdateFailure(failure).pure[F]
-          case Right(None)          => UpdateResult.Updated(Scheduling.NotRequested).pure[F]
-          case Right(Some(request)) => launchImport(request).map(UpdateResult.Updated(_))
+          case Left(failure)       => translateUpdateFailure(failure).pure[F]
+          case Right(None)         => UpdateResult.Updated(Scheduling.NotRequested).pure[F]
+          case Right(Some(launch)) => launchImport(launch.request, retirements = launch.retirements).map(UpdateResult.Updated(_))
+      .handleErrorWith(error => Logger[F].error(error)("Chapter update failed").as(UpdateResult.Failed))
 
     override def refresh(album: AlbumId, chapter: ChapterId): F[RefreshResult] =
       val refresh = summon[Mutex[F]].lock.surround:
@@ -101,13 +110,13 @@ object ChapterManager:
         program.value
       MonadCancelThrow[F].uncancelable: _ =>
         refresh.flatMap:
-          case Right(request)                                        => launchImport(request).map(RefreshResult.Scheduled(_))
+          case Right(request) => launchImport(request, retirements = Vector.empty[PhotoWriteIntent.Retirement]).map(RefreshResult.Scheduled(_))
           case Left(Failure.AlbumNotFound)                           => RefreshResult.AlbumNotFound.pure[F]
           case Left(MissingChapter)                                  => RefreshResult.ChapterNotFound.pure[F]
           case Left(Failure.Unavailable) | Left(_: Failure.Conflict) => RefreshResult.Failed.pure[F]
 
-    private def launchImport(request: Either[Throwable, Request]) =
-      request.traverse(photos.launch).flatMap:
+    private def launchImport(request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement]) =
+      request.traverse(value => photos.launch(value, retirements = retirements)).flatMap:
         case Right(scheduling) => scheduling.pure[F]
         case Left(error)       => Logger[F].error(error)("Saved chapter photo import could not be prepared").as(Scheduling.Failed)
       .handleErrorWith(error => Logger[F].error(error)("Saved chapter photo import could not be launched").as(Scheduling.Failed))
@@ -132,7 +141,7 @@ object ChapterManager:
         val maybeConflict =
           if existing.destination.isHome =!= ((name: String) === "Home") then ChapterConflict.TypeChange.some
           else findMetadataConflict(current.year, others, name, resolved, folder)
-        maybeConflict.toLeft(resolved).leftMap(Failure.Conflict(_))
+        maybeConflict.toLeft((existing, resolved)).leftMap(Failure.Conflict(_))
 
     private def findMetadataConflict(year: AlbumYear, chapters: Vector[Chapter], name: DestinationName, period: VisitPeriod, folder: PhotoSource) =
       val maybeHomeConflict = if (name: String) === "Home" then findHomeConflict(year, period, chapters.exists(_.destination.isHome)) else None
@@ -147,34 +156,67 @@ object ChapterManager:
           Failure.Unavailable.asLeft[(SpreadTemplateId, Vector[SlotBox], SlotBox)]
 
     private def persistCreation(album: AlbumId, currentChapters: Vector[Chapter], chapter: ChapterRepository.NewChapter) =
-      val order = buildChapterOrder(currentChapters, chapter.id, (chapter.name: String) === "Home", chapter.period)
-      chapters.create(album, chapter, order).map:
+      val order = buildChapterOrder(chapters = currentChapters, chapter.id, isHome = (chapter.name: String) === "Home", chapter.period)
+      Transaction[Db, F].run(chapters.create(album, chapter, order = order)).map:
         case ChapterRepository.CreateResult.Saved            => chapter.id.asRight[Failure]
         case ChapterRepository.CreateResult.AlbumNotFound    => Failure.AlbumNotFound.asLeft[ChapterId]
         case ChapterRepository.CreateResult.UnknownCountries => Failure.Conflict(ChapterConflict.UnknownCountries).asLeft[ChapterId]
         case ChapterRepository.CreateResult.Failed           => Failure.Unavailable.asLeft[ChapterId]
+      .handleErrorWith(error => Logger[F].error(error)("Chapter creation failed").as(Failure.Unavailable.asLeft[ChapterId]))
 
     private def persistUpdate(
-        album: AlbumId,
-        currentChapters: Vector[Chapter],
-        id: ChapterId,
-        name: DestinationName,
-        countries: NonEmptyList[CountryId],
-        period: VisitPeriod,
-        folder: PhotoSource
+        previousDestination: DestinationId,
+        command: ChapterRepository.Update,
+        retirements: Vector[PhotoWriteIntent.Retirement]
     ) =
-      val others = currentChapters.filterNot(_.id.value === id.value)
-      val order  = buildChapterOrder(others, id, (name: String) === "Home", period)
-      chapters.update(album, id, name, countries, period, folder, order).map:
+      val update = chapters.update(command).flatTap:
+        case ChapterRepository.UpdateResult.Saved => retirements.traverse_(removePhoto)
+        case _                                    => ().pure[Db]
+      val commit = Transaction[Db, F].run(update).handleErrorWith: error =>
+        resolveUpdate(command.album, command.chapter, previousDestination, command.destination, error)
+      commit.map:
         case ChapterRepository.UpdateResult.Saved            => ().asRight[UpdateFailure]
         case ChapterRepository.UpdateResult.ChapterNotFound  => MissingChapter.asLeft[Unit]
         case ChapterRepository.UpdateResult.AlbumNotFound    => Failure.AlbumNotFound.asLeft[Unit]
         case ChapterRepository.UpdateResult.UnknownCountries => Failure.Conflict(ChapterConflict.UnknownCountries).asLeft[Unit]
         case ChapterRepository.UpdateResult.Failed           => Failure.Unavailable.asLeft[Unit]
 
+    private def readPhotos(chapter: ChapterId) =
+      Transaction[Db, F].run(photoRepository.listChapter(chapter)).flatMap:
+        case PhotoRepository.ListResult.Listed(current) => current.pure[F]
+        case PhotoRepository.ListResult.Failed          => new IllegalStateException("Chapter photo listing failed").raiseError[F, Vector[Photo]]
+
+    private def allocateRetirement(photo: Photo) =
+      IdGenerator[F].generateId.map: id =>
+        PhotoWriteIntent.Retirement(PhotoWriteIntentId(id), photo.chapter, photo.id, photo.thumbnail.location): PhotoWriteIntent.Retirement
+
+    private def removePhoto(intent: PhotoWriteIntent.Retirement) =
+      val record = photoRepository.recordWrite(intent).flatMap:
+        case PhotoRepository.RecordWriteResult.Recorded => ().pure[Db]
+        case PhotoRepository.RecordWriteResult.Failed   => new IllegalStateException("Chapter retirement evidence rejected").raiseError[Db, Unit]
+      record >> photoRepository.remove(intent.photo).flatMap:
+        case PhotoRepository.WriteResult.Applied => ().pure[Db]
+        case PhotoRepository.WriteResult.Failed  => new IllegalStateException("Chapter photo removal rejected").raiseError[Db, Unit]
+
+    private def prepareImport(chapter: ChapterId, source: PhotoSource) =
+      photos.prepare(chapter, source).attempt.flatTap:
+        case Left(error)                  => Logger[F].error(error)("Committed source import preparation failed") >> photos.suspend(chapter)
+        case _: Right[Throwable, Request] => ().pure[F]
+
+    private def resolveUpdate(album: AlbumId, chapter: ChapterId, previousDestination: DestinationId, destination: DestinationId, error: Throwable) =
+      Logger[F].error(error)("Chapter update commit acknowledgement failed") >> albums.get(album).flatMap:
+        case AlbumRepository.GetResult.Found(current) =>
+          current.chapters.find(_.id.value === chapter.value) match
+            case Some(saved) if saved.destination.id.value === destination.value         => ChapterRepository.UpdateResult.Saved.pure[F]
+            case Some(saved) if saved.destination.id.value === previousDestination.value => ChapterRepository.UpdateResult.Failed.pure[F]
+            case _ => photos.suspend(chapter).as(ChapterRepository.UpdateResult.Failed)
+        case _ => photos.suspend(chapter).as(ChapterRepository.UpdateResult.Failed)
+      .handleErrorWith: failure =>
+        Logger[F].error(failure)("Chapter update commit resolution failed") >> photos.suspend(chapter).as(ChapterRepository.UpdateResult.Failed)
+
     private def buildChapterOrder(chapters: Vector[Chapter], id: ChapterId, isHome: Boolean, period: VisitPeriod) =
-      val others = chapters.map(value => ChapterOrder(value.id, value.destination.isHome, value.period))
-      orderChapterIds(NonEmptyList(ChapterOrder(id, isHome, period), others.toList))
+      val others = chapters.filterNot(_.id.value === id.value).map(value => ChapterOrder(value.id, isHome = value.destination.isHome, value.period))
+      orderChapterIds(chapters = NonEmptyList(ChapterOrder(id, isHome = isHome, period), tail = others.toList))
 
     private def resolvePeriod(year: AlbumYear, period: Period) = period match
       case Period.AlbumYear    => buildYearPeriod(year)
@@ -232,6 +274,7 @@ object ChapterManager:
       case Failure.Unavailable      => UpdateResult.Failed
 
   final private case class ChapterOrder(id: ChapterId, isHome: Boolean, period: VisitPeriod)
+  final private case class ImportLaunch(request: Either[Throwable, Request], retirements: Vector[PhotoWriteIntent.Retirement])
 
   private enum Failure:
     case AlbumNotFound, Unavailable

@@ -10,6 +10,7 @@ import photography.usecases.PhotoWriteRecovery.*
 
 trait PhotoWriteRecovery[F[_]]:
   def recover: F[RecoveryResult]
+  def resolve(intent: PhotoWriteIntent): F[RecoveryResult]
 
 object PhotoWriteRecovery:
   def make[F[_]: MonadThrow: Logger, Db[_]](
@@ -29,6 +30,10 @@ object PhotoWriteRecovery:
             val issues = results.flatten
             if issues.isEmpty then RecoveryResult.Recovered else RecoveryResult.Failed(issues = issues)
       .handleErrorWith(error => failed(error, Issue.Listing).map(issues => RecoveryResult.Failed(issues = issues)))
+
+    override def resolve(intent: PhotoWriteIntent): F[RecoveryResult] =
+      recoverWrite(intent).map: issues =>
+        if issues.isEmpty then RecoveryResult.Recovered else RecoveryResult.Failed(issues = issues)
 
     private def recoverWrite(intent: PhotoWriteIntent) =
       Transaction[Db, F].run(photos.listChapter(intent.chapter)).flatMap:
