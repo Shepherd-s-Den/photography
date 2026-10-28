@@ -1,6 +1,6 @@
 package photography.usecases
 
-import cats.data.StateT
+import cats.data.{NonEmptyList, StateT}
 import cats.effect.IO
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
@@ -9,7 +9,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.Transaction
 import photography.domain.album.*
-import photography.ports.{PhotoPlacementRepository, PhotoRepository}
+import photography.ports.{ChapterRepository, PhotoPlacementRepository, PhotoRepository}
 import java.time.LocalDateTime
 import java.util.UUID
 
@@ -53,15 +53,39 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
     )
     manager.listChapter(chapter).map(actual => assertEquals(actual, PhotoInventory.ListResult.Failed))
 
+  test("should distinguish a missing chapter from an existing empty inventory and failed source lookup"):
+    Vector(
+      (ChapterRepository.SourceResult.ChapterNotFound, PhotoInventory.ListResult.ChapterNotFound),
+      (ChapterRepository.SourceResult.Failed, PhotoInventory.ListResult.Failed),
+      (
+        ChapterRepository.SourceResult.Found(source = "/photos"),
+        PhotoInventory.ListResult.Listed(PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty[PhotoId]))
+      )
+    ).traverse_ { case (source, expected) =>
+      val manager = buildInventory(
+        PhotoRepository.ListResult.Listed(photos = Vector.empty[Photo]),
+        PhotoPlacementRepository.FindResult.Found(photos = Set.empty[PhotoId]),
+        source = source
+      )
+
+      manager.listChapter(chapter).map(actual => assertEquals(actual, expected))
+    }
+
   // scalafix:off DisableSyntax.defaultArgs
   private def buildInventory(
       listed: PhotoRepository.ListResult,
       placed: PhotoPlacementRepository.FindResult,
-      maybeTransactionError: Option[Throwable] = None
+      maybeTransactionError: Option[Throwable] = None,
+      source: ChapterRepository.SourceResult = ChapterRepository.SourceResult.Found(source = "/photos")
   ) =
     given Transaction[Db, IO] with
       override def run[A](program: Db[A]): IO[A] =
-        maybeTransactionError.fold(program.run(0).flatMap { case (steps, result) => IO(assertEquals(steps, 2)).as(result) })(IO.raiseError[A])
+        val expectedSteps = source match
+          case _: ChapterRepository.SourceResult.Found => 3
+          case _                                       => 1
+        maybeTransactionError.fold(
+          program.run(0).flatMap { case (steps, result) => IO(assertEquals(steps, expectedSteps)).as(result) }
+        )(IO.raiseError[A])
       override def resolve[A](program: Db[A]): IO[A] = program.runA(0)
     val photos = new PhotoRepository[Db]:
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
@@ -79,5 +103,11 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
     val placements = new PhotoPlacementRepository[Db]:
       override def findPlacedPhotos(id: ChapterId): Db[PhotoPlacementRepository.FindResult] =
         StateT.modify[IO, Int](_ + 1).as(placed)
-    PhotoInventory.make[IO, Db](photos, placements)
+    val chapters = new ChapterRepository[Db]:
+      override def findSource(id: ChapterId): Db[ChapterRepository.SourceResult] = StateT.modify[IO, Int](_ + 1).as(source)
+      override def create(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId]) =
+        StateT.liftF(IO.raiseError[ChapterRepository.CreateResult](new AssertionError("Unexpected chapter creation")))
+      override def update(command: ChapterRepository.Update) =
+        StateT.liftF(IO.raiseError[ChapterRepository.UpdateResult](new AssertionError("Unexpected chapter update")))
+    PhotoInventory.make[IO, Db](photos, placements, chapters)
   // scalafix:on DisableSyntax.defaultArgs

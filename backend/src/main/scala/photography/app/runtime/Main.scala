@@ -35,7 +35,12 @@ object Main extends IOApp.Simple:
           case PhotoWriteRecovery.RecoveryResult.Recovered       => IO.unit
           case failure: PhotoWriteRecovery.RecoveryResult.Failed =>
             IO.raiseError[Unit](new IllegalStateException(s"Photo write recovery failed: ${failure.issues}"))
-        val serve = AppManagers.make[IO](resources.sqlite, config.albums.pageSize, config.albums.photoRoot, photos).use: managers =>
+        val pageSize      = config.albums.pageSize
+        val photoRoot     = config.albums.photoRoot
+        val thumbnailRoot = config.thumbnails.root
+        val quality       = config.thumbnails.quality
+        val buildManagers = AppManagers.make[IO](resources.sqlite, pageSize, photoRoot, photos, thumbnailRoot = thumbnailRoot, quality)
+        val serve         = buildManagers.use: managers =>
           val server = buildHttpApp(managers).flatMap(httpApp => buildHttpServer(config.http, httpApp))
           server.useForever.void
         for

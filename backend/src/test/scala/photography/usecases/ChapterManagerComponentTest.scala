@@ -396,10 +396,10 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val current = album.copy(chapters = Vector(chapter))
     val period  = Period.Dates(chapter.period)
     val reads   = Vector(
-      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound, RefreshResult.AlbumNotFound)),
+      (AlbumRepository.GetResult.NotFound, (CreateResult.AlbumNotFound, UpdateResult.AlbumNotFound)),
       (
         AlbumRepository.GetResult.Failed(AlbumRepository.Failure.DatabaseFailure),
-        (CreateResult.Failed, UpdateResult.Failed, RefreshResult.Failed)
+        (CreateResult.Failed, UpdateResult.Failed)
       )
     )
     val writes = Vector(
@@ -424,14 +424,13 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       val observations = Refs()
 
       for
-        manager   <- buildManager(observations, maybeRead = read.pure[IO].some)
-        created   <- manager.create(album.id, name = "Kyoto", countries = countries.map(_.id), period, sourceFolder = "/photos/new")
-        updated   <- manager.update(album.id, chapter.id, name = "Kyoto", countries = countries.map(_.id), period, sourceFolder = "/photos/new")
-        refreshed <- manager.refresh(album.id, chapter.id)
-        prepared  <- observations.preparations.get
-        launched  <- observations.launches.get
+        manager  <- buildManager(observations, maybeRead = read.pure[IO].some)
+        created  <- manager.create(album.id, name = "Kyoto", countries = countries.map(_.id), period, sourceFolder = "/photos/new")
+        updated  <- manager.update(album.id, chapter.id, name = "Kyoto", countries = countries.map(_.id), period, sourceFolder = "/photos/new")
+        prepared <- observations.preparations.get
+        launched <- observations.launches.get
       yield
-        assertEquals((created, updated, refreshed), expected)
+        assertEquals((created, updated), expected)
         assertEquals(prepared, Vector.empty)
         assertEquals(launched, Vector.empty)
     }
@@ -456,7 +455,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       _           <- unavailableReads
       _           <- unavailableWrites
       absent      <- missing.update(album.id, chapter.id, name = "Kyoto", countries = countries.map(_.id), period, sourceFolder = "/photos/new")
-      refreshed   <- missing.refresh(album.id, chapter.id)
+      refreshed   <- missing.refresh(chapter.id)
       failed      <- noTemplates.create(album.id, name = "Kyoto", countries = countries.map(_.id), period, sourceFolder = "/photos/new")
       prepared    <- refs.preparations.get
       launched    <- refs.launches.get
@@ -494,7 +493,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       for
         service   <- manager
         created   <- service.create(album.id, name = "Kyoto", countries = countryIds, period, sourceFolder = "/photos/new")
-        refreshed <- service.refresh(album.id, chapter.id)
+        refreshed <- service.refresh(chapter.id)
         updated   <- service.update(album.id, chapter.id, name, countries = countryIds, period, sourceFolder = "/photos/changed")
         prepared  <- refs.preparations.get
         retired   <- refs.retirements.get
@@ -509,6 +508,22 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
           (chapter.id, "/photos/changed": PhotoSource)
         )
         assertEquals(prepared, expectedSources)
+    }
+
+  test("should fail Refresh explicitly when its authoritative saved source cannot be read"):
+    Vector(
+      ChapterRepository.SourceResult.Failed.pure[IO],
+      IO.raiseError[ChapterRepository.SourceResult](new IllegalStateException("Source lookup failed"))
+    ).traverse_ { source =>
+      val refs = Refs()
+
+      for
+        manager  <- buildManager(refs, maybeSource = source.some)
+        result   <- manager.refresh(chapter.id)
+        prepared <- refs.preparations.get
+      yield
+        assertEquals(result, RefreshResult.Failed)
+        assertEquals(prepared, Vector.empty[(ChapterId, PhotoSource)])
     }
 
   final private case class Refs():
@@ -537,6 +552,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       refs: Refs,
       current: Album = album,
       maybeRead: Option[IO[AlbumRepository.GetResult]] = None,
+      maybeSource: Option[IO[ChapterRepository.SourceResult]] = None,
       createWrite: ChapterRepository.CreateResult = ChapterRepository.CreateResult.Saved,
       updateWrite: ChapterRepository.UpdateResult = ChapterRepository.UpdateResult.Saved,
       templates: ListChapterStartTemplatesResult = ListChapterStartTemplatesResult.Listed(NonEmptyList.one(template)),
@@ -565,6 +581,11 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         IO.raiseError[AlbumRepository.DeleteResult](new AssertionError("Unexpected deletion"))
     val writeUpdate = update
     val repository  = new ChapterRepository[IO]:
+      override def findSource(id: ChapterId): IO[ChapterRepository.SourceResult] =
+        val saved =
+          current.chapters.find(_.id.value === id.value).fold[ChapterRepository.SourceResult](ChapterRepository.SourceResult.ChapterNotFound):
+            value => ChapterRepository.SourceResult.Found(value.sourceFolder)
+        maybeSource.getOrElse(saved.pure[IO])
       override def create(
           parent: AlbumId,
           chapter: ChapterRepository.NewChapter,
