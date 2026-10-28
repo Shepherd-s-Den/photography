@@ -9,21 +9,21 @@ import org.http4s.{EntityTag, HttpRoutes, Method}
 import org.http4s.dsl.Http4sDsl
 import org.http4s.headers.`If-None-Match`
 import photography.domain.album.ThumbnailLocation
-import photography.usecases.ThumbnailDelivery
-import photography.usecases.ThumbnailDelivery.GetResult
+import photography.ports.ThumbnailStorage
+import photography.ports.ThumbnailStorage.ReadResult
 import java.util.UUID
 
 trait ThumbnailApi[F[_]]:
   def routes: HttpRoutes[F]
 
 object ThumbnailApi:
-  def make[F[_]: Monad](delivery: ThumbnailDelivery[F]): ThumbnailApi[F] = new LiveThumbnailApi(delivery)
+  def make[F[_]: Monad](storage: ThumbnailStorage[F]): ThumbnailApi[F] = new LiveThumbnailApi(storage)
 
-  final private class LiveThumbnailApi[F[_]: Monad](delivery: ThumbnailDelivery[F]) extends ThumbnailApi[F] with Http4sDsl[F]:
+  final private class LiveThumbnailApi[F[_]: Monad](storage: ThumbnailStorage[F]) extends ThumbnailApi[F] with Http4sDsl[F]:
     override def routes: HttpRoutes[F] = HttpRoutes.of[F]:
       case request @ (GET | HEAD) -> Root / "thumbnails" / Location(location) / Version(version) =>
-        delivery.get(location, version = version).flatMap:
-          case GetResult.Found(bytes) =>
+        storage.readThumbnail(location, version = version).flatMap:
+          case ReadResult.Read(bytes) =>
             val matches  = request.headers.get[`If-None-Match`].exists(_.tags.forall(_.exists(_.tag === version)))
             val response = if matches then NotModified() else Ok(bytes.toArray)
             response.map: value =>
@@ -32,8 +32,8 @@ object ThumbnailApi:
               else
                 val jpeg = cached.putHeaders("Content-Type" -> "image/jpeg")
                 if request.method === Method.HEAD then jpeg.copy(body = Stream.empty) else jpeg
-          case GetResult.NotFound => NotFound()
-          case GetResult.Failed   => InternalServerError("""{"code":"service_failure"}""").map(_.putHeaders("Content-Type" -> "application/json"))
+          case ReadResult.NotFound => NotFound()
+          case ReadResult.Failed   => InternalServerError("""{"code":"service_failure"}""").map(_.putHeaders("Content-Type" -> "application/json"))
       case request if request.pathInfo.segments.headOption.exists(_.decoded() === "thumbnails") => NotFound()
 
     private object Location:

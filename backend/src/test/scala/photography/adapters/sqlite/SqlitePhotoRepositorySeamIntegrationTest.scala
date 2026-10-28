@@ -6,6 +6,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.MinLength
+import io.github.iltotore.iron.constraint.all.{Blank, Not}
 import munit.CatsEffectSuite
 import org.typelevel.doobie.implicits.*
 import org.typelevel.doobie.ConnectionIO
@@ -177,6 +178,8 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
 
             val interrupt = buildTransactor(path).use: xa =>
               val storageBoundary = new PhotoStorage[IO]:
+                override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+                  IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected thumbnail read"))
                 override def discoverOriginals(source: PhotoSource): IO[PhotoStorage.DiscoveryResult] =
                   val originals = if retiring then Vector.empty[OriginalPhotoLocation] else Vector(photo.original)
                   PhotoStorage.DiscoveryResult.Complete(originals = originals, unsupportedCount = 0).pure[IO]
@@ -260,6 +263,8 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
           override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
         val source = new PhotoStorage[IO]:
+          override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+            IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected thumbnail read"))
           override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult] =
             PhotoStorage.DiscoveryResult.Complete(originals = Vector(photo.original), unsupportedCount = 0).pure[IO]
           override def readOriginal(original: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =

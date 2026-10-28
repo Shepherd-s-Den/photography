@@ -7,13 +7,12 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
 import photography.adapters.sqlite.SqlitePhotoPlacementRepository
-import photography.adapters.filesystem.{FilePhotoStorage, FileThumbnailStorage}
+import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
-import photography.ports.PhotoRepository
+import photography.ports.{PhotoRepository, ThumbnailStorage}
 import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
 import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, PhotoThumbnailGenerator, SpreadTemplateManager}
-import java.nio.file.Path
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
@@ -29,7 +28,7 @@ object AppManagers:
       pageSize: AlbumPageSize,
       photoRoot: PhotoSource,
       photoRepository: PhotoRepository[ConnectionIO],
-      thumbnailRoot: Path,
+      thumbnails: ThumbnailStorage[F],
       quality: ThumbnailQuality
   ): Resource[F, AppManagers[F]] =
     Resource.eval(Mutex[F]).flatMap: mutex =>
@@ -45,7 +44,6 @@ object AppManagers:
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)
       val placements         = SqlitePhotoPlacementRepository.make
       val inventory          = PhotoInventory.make[F, ConnectionIO](photoRepository, placements, chapterRepository)
-      val thumbnails         = FileThumbnailStorage.make[F](thumbnailRoot)
       val storage            = FilePhotoStorage.make(thumbnails)
       val generator          = PhotoThumbnailGenerator.make[F](quality)
       val planning           = ChapterPlanning.make(templates)

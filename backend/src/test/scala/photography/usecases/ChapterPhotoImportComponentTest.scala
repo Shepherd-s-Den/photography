@@ -9,6 +9,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.collection.MinLength
+import io.github.iltotore.iron.constraint.all.{Blank, Not}
 import munit.CatsEffectSuite
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
@@ -318,6 +319,8 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
         _ => IO.raiseError[ThumbnailStorage.RemoveResult](new AssertionError("Unexpected removal"))
   ) =
     new PhotoStorage[IO]:
+      override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+        IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected thumbnail read"))
       override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult]    = refs.scans.update(_ :+ value) >> discover(value)
       override def readOriginal(location: OriginalPhotoLocation): IO[PhotoStorage.ReadResult] =
         IO.raiseError[PhotoStorage.ReadResult](new AssertionError("Unexpected read"))
@@ -329,6 +332,8 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
 
   private def buildPublicationStorage(refs: Refs, stored: Deferred[IO, Unit], release: Deferred[IO, Unit]) =
     new PhotoStorage[IO]:
+      override def readThumbnail(location: ThumbnailLocation, version: String :| Not[Blank]): IO[ThumbnailStorage.ReadResult] =
+        IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected thumbnail read"))
       override def discoverOriginals(value: PhotoSource): IO[PhotoStorage.DiscoveryResult] =
         val originals = Vector(OriginalPhotoLocation(value, filename = "one.jpg"))
         refs.scans.update(_ :+ value).as(PhotoStorage.DiscoveryResult.Complete(originals = originals, unsupportedCount = 0))

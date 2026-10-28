@@ -8,8 +8,8 @@ import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
 import org.http4s.{MediaType, Method, Request, Status, Uri}
 import org.typelevel.ci.CIString
-import photography.domain.album.{ThumbnailBytesConstraint, ThumbnailLocation}
-import photography.usecases.ThumbnailDelivery
+import photography.domain.album.{EncodedThumbnail, ThumbnailBytesConstraint, ThumbnailLocation}
+import photography.ports.ThumbnailStorage
 import java.util.UUID
 
 final class ThumbnailApiSeamIntegrationTest extends CatsEffectSuite:
@@ -19,7 +19,7 @@ final class ThumbnailApiSeamIntegrationTest extends CatsEffectSuite:
   private val uri                           = Uri.unsafeFromString(s"/thumbnails/${location.value}/$version.jpg")
 
   test("should translate versioned delivery into immutable JPEG responses and honor conditional GET and HEAD"):
-    val app        = ThumbnailApi.make(buildDelivery(ThumbnailDelivery.GetResult.Found(bytes).pure[IO])).routes.orNotFound
+    val app        = ThumbnailApi.make(buildStorage(ThumbnailStorage.ReadResult.Read(bytes).pure[IO])).routes.orNotFound
     val conditions = Vector("*" -> Status.NotModified, s"""W/"$version"""" -> Status.NotModified, """"different"""" -> Status.Ok)
 
     for
@@ -45,7 +45,7 @@ final class ThumbnailApiSeamIntegrationTest extends CatsEffectSuite:
       }
 
   test("should reject traversal and malformed paths without invoking delivery and translate missing and failed reads"):
-    val forbidden = buildDelivery(IO.raiseError[ThumbnailDelivery.GetResult](new AssertionError("Unexpected delivery")))
+    val forbidden = buildStorage(IO.raiseError[ThumbnailStorage.ReadResult](new AssertionError("Unexpected read")))
     val paths     = Vector(
       "/thumbnails/../original.jpg",
       s"/thumbnails/${location.value}/../original.jpg",
@@ -55,7 +55,7 @@ final class ThumbnailApiSeamIntegrationTest extends CatsEffectSuite:
       s"/thumbnails/${location.value}/bad.jpg",
       "/unrelated"
     )
-    val failures = Vector(ThumbnailDelivery.GetResult.NotFound -> Status.NotFound, ThumbnailDelivery.GetResult.Failed -> Status.InternalServerError)
+    val failures = Vector(ThumbnailStorage.ReadResult.NotFound -> Status.NotFound, ThumbnailStorage.ReadResult.Failed -> Status.InternalServerError)
 
     paths.traverse_(path =>
       ThumbnailApi.make(forbidden).routes.orNotFound.run(Request[IO](uri = Uri.unsafeFromString(path))).map(r =>
@@ -63,14 +63,18 @@ final class ThumbnailApiSeamIntegrationTest extends CatsEffectSuite:
       )
     ) >>
       failures.traverse_ { case (result, expected) =>
-        val service = buildDelivery(result.pure[IO])
+        val service = buildStorage(result.pure[IO])
         ThumbnailApi.make(service).routes.orNotFound.run(Request[IO](uri = uri)).map(r => assertEquals(r.status, expected))
       }
 
-  private def buildDelivery(response: IO[ThumbnailDelivery.GetResult]) =
-    new ThumbnailDelivery[IO]:
-      override def get(id: ThumbnailLocation, requestedVersion: String :| Not[Blank]) =
+  private def buildStorage(response: IO[ThumbnailStorage.ReadResult]) =
+    new ThumbnailStorage[IO]:
+      override def readThumbnail(id: ThumbnailLocation, requestedVersion: String :| Not[Blank]) =
         IO {
           assertEquals(id, location)
           assertEquals(requestedVersion, version)
         } >> response
+      override def storeThumbnail(id: ThumbnailLocation, image: EncodedThumbnail): IO[ThumbnailStorage.StoreResult] =
+        IO.raiseError[ThumbnailStorage.StoreResult](new AssertionError("Unexpected write"))
+      override def removeThumbnail(id: ThumbnailLocation): IO[ThumbnailStorage.RemoveResult] =
+        IO.raiseError[ThumbnailStorage.RemoveResult](new AssertionError("Unexpected removal"))
