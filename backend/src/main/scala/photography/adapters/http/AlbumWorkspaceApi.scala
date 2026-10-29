@@ -12,13 +12,14 @@ import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.usecases.{AlbumManager, AlbumWorkspaceManager, ChapterManager}
-import photography.usecases.AlbumManager.GetAlbumResult
-import photography.usecases.AlbumWorkspaceManager.GetResult
-import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
-import photography.usecases.{ChapterPhotoImport, PhotoManager, PhotoWriteRecovery}
-import photography.usecases.AlbumWorkspaceManager.{ChapterPhotos, ChapterResult}
-import photography.usecases.ChapterPhotoImport.Scheduling
+import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
+import photography.usecases.chapter.ChapterManager
+import photography.usecases.album.AlbumManager.GetAlbumResult
+import photography.usecases.album.AlbumWorkspaceManager.GetResult
+import photography.usecases.chapter.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.photo.{ChapterPhotoImport, PhotoManager, PhotoWriteRecovery}
+import photography.usecases.album.AlbumWorkspaceManager.{ChapterPhotos, ChapterResult}
+import photography.usecases.photo.ChapterPhotoImport.Scheduling
 
 import java.time.{DateTimeException, LocalDate}
 import java.time.temporal.ChronoUnit

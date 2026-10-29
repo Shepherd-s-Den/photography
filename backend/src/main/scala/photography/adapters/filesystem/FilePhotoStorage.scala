@@ -10,8 +10,8 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import org.typelevel.log4cats.Logger
 import photography.domain.album.*
-import photography.ports.{PhotoStorage, ThumbnailStorage}
-import photography.ports.PhotoStorage.*
+import photography.ports.photo.{PhotoStorage, ThumbnailStorage}
+import photography.ports.photo.PhotoStorage.*
 import photography.syntax.SyncSyntax.*
 import java.awt.image.BufferedImage
 import java.io.{ByteArrayInputStream, IOException}

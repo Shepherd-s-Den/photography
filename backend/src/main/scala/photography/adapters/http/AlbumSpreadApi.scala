@@ -9,8 +9,8 @@ import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.{HttpRoutes, MessageBodyFailure, Request}
 import photography.domain.album.{AlbumId, ChapterId}
 import photography.domain.layout.{SpreadId, SpreadTemplateId}
-import photography.usecases.SpreadManager
-import photography.usecases.SpreadManager.{AddResult, ChangeTemplateResult, Conflict as SpreadConflict, DeleteResult, Direction, MoveResult}
+import photography.usecases.spread.SpreadManager
+import photography.usecases.spread.SpreadManager.{AddResult, ChangeTemplateResult, Conflict as SpreadConflict, DeleteResult, Direction, MoveResult}
 
 import java.util.UUID
 
@@ -29,9 +29,9 @@ object AlbumSpreadApi:
           move(AlbumId(album), SpreadId(spread), request)
         case request @ PUT -> Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) / "template" :?
             ConfirmPlacements(maybeConfirm) =>
-          changeTemplate(AlbumId(album), SpreadId(spread), maybeConfirm, request)
+          changeTemplate(AlbumId(album), SpreadId(spread), maybeConfirm = maybeConfirm, request)
         case DELETE -> Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) :? ConfirmPlacements(maybeConfirm) =>
-          delete(AlbumId(album), SpreadId(spread), maybeConfirm)
+          delete(AlbumId(album), SpreadId(spread), maybeConfirm = maybeConfirm)
       }
 
     private def add(album: AlbumId, chapter: ChapterId, request: Request[F]) =
@@ -57,27 +57,37 @@ object AlbumSpreadApi:
             case MoveResult.SpreadNotFound     => notFound("spread_not_found")
             case MoveResult.Failed             => serviceFailure
 
-    private def changeTemplate(album: AlbumId, spread: SpreadId, maybeConfirm: Option[Boolean], request: Request[F]) =
-      decode(request, templateDecoder).flatMap:
-        case Left(message)   => BadRequest(Map("message" -> message))
-        case Right(template) =>
-          spreads.changeTemplate(album, spread, template, confirmPlacements = maybeConfirm.contains(true)).flatMap:
+    private def changeTemplate(album: AlbumId, spread: SpreadId, maybeConfirm: Option[String], request: Request[F]) =
+      decode(request, templateDecoder).map(_.flatMap(template => parseConfirmation(maybeValue = maybeConfirm).map((template, _)))).flatMap:
+        case Left(message)              => BadRequest(Map("message" -> message))
+        case Right((template, confirm)) =>
+          spreads.changeTemplate(album, spread, template, confirmPlacements = confirm).flatMap:
             case ChangeTemplateResult.Changed(id, layout) =>
               Ok(Json.obj("id" -> Json.fromString(id.value.toString), "templateId" -> Json.fromString(layout.value.toString)))
-            case ChangeTemplateResult.Occupied(placements) => Conflict(occupied(placements))
+            case ChangeTemplateResult.Occupied(placements) => Conflict(encodeOccupied(placements))
             case ChangeTemplateResult.Rejected(conflict)   => BadRequest(Map("message" -> explain(conflict)))
             case ChangeTemplateResult.AlbumNotFound        => albumNotFound
             case ChangeTemplateResult.SpreadNotFound       => notFound("spread_not_found")
             case ChangeTemplateResult.Failed               => serviceFailure
 
-    private def delete(album: AlbumId, spread: SpreadId, maybeConfirm: Option[Boolean]) =
-      spreads.delete(album, spread, confirmPlacements = maybeConfirm.contains(true)).flatMap:
-        case DeleteResult.Deleted              => NoContent()
-        case DeleteResult.Occupied(placements) => Conflict(occupied(placements))
-        case DeleteResult.Rejected(conflict)   => BadRequest(Map("message" -> explain(conflict)))
-        case DeleteResult.AlbumNotFound        => albumNotFound
-        case DeleteResult.SpreadNotFound       => notFound("spread_not_found")
-        case DeleteResult.Failed               => serviceFailure
+    private def delete(album: AlbumId, spread: SpreadId, maybeConfirm: Option[String]) =
+      parseConfirmation(maybeValue = maybeConfirm) match
+        case Left(message)  => BadRequest(Map("message" -> message))
+        case Right(confirm) =>
+          spreads.delete(album, spread, confirmPlacements = confirm).flatMap:
+            case DeleteResult.Deleted              => NoContent()
+            case DeleteResult.Occupied(placements) => Conflict(encodeOccupied(placements))
+            case DeleteResult.Rejected(conflict)   => BadRequest(Map("message" -> explain(conflict)))
+            case DeleteResult.AlbumNotFound        => albumNotFound
+            case DeleteResult.SpreadNotFound       => notFound("spread_not_found")
+            case DeleteResult.Failed               => serviceFailure
+
+    private def parseConfirmation(maybeValue: Option[String]) =
+      maybeValue.traverse {
+        case "true"  => true.asRight[String]
+        case "false" => false.asRight[String]
+        case _       => "confirmPlacements must be true or false".asLeft[Boolean]
+      }.map(_.contains(true))
 
     private def decode[A](request: Request[F], decoder: Decoder[A]) =
       request.as[Json].map(value => decoder.decodeJson(value).leftMap(_.message))
@@ -95,12 +105,12 @@ object AlbumSpreadApi:
       .emap(parseDirection)
       .prepare(_.downField("direction"))
 
-    private def parseDirection(value: String): Either[String, Direction] = value match
+    private def parseDirection(value: String) = value match
       case "earlier" => Direction.Earlier.asRight[String]
       case "later"   => Direction.Later.asRight[String]
       case _         => "Choose earlier or later".asLeft[Direction]
 
-    private def occupied(placements: Int) =
+    private def encodeOccupied(placements: Int) =
       Json.obj("code" -> Json.fromString("spread_occupied"), "placements" -> Json.fromInt(placements))
 
     private def explain(conflict: SpreadConflict) = conflict match
@@ -116,7 +126,7 @@ object AlbumSpreadApi:
     private def notFound(code: String) = NotFound(Map("code" -> code))
     private def serviceFailure         = InternalServerError(Map("code" -> "service_failure"))
 
-    private object ConfirmPlacements extends OptionalQueryParamDecoderMatcher[Boolean]("confirmPlacements")
+    private object ConfirmPlacements extends OptionalQueryParamDecoderMatcher[String]("confirmPlacements")
 
     private object CanonicalId:
       def unapply(value: String): Option[UUID] =

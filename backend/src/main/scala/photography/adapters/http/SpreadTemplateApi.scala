@@ -7,8 +7,9 @@ import org.http4s.HttpRoutes
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.layout.{SlotBox, SpreadTemplate}
-import photography.usecases.SpreadTemplateManager
-import photography.usecases.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult, ListPhotosOnlyTemplatesResult}
+import photography.usecases.spread.SpreadTemplateManager
+import photography.usecases.spread.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
+import photography.usecases.spread.SpreadTemplateManager.ListPhotosOnlyTemplatesResult
 
 trait SpreadTemplateApi[F[_]]:
   def routes: HttpRoutes[F]
@@ -37,13 +38,13 @@ object SpreadTemplateApi:
       val (kind, box) = slot
       (kind, box.x: Double, box.y: Double, box.width: Double, box.height: Double)
 
-    private def withText(photos: Vector[SlotBox], text: SlotBox) = photos.map(box => "photo" -> box) :+ ("text" -> text)
-
     private given Encoder[SpreadTemplate.AlbumStart] = Encoder.forProduct3("id", "name", "slots"): template =>
-      (template.id.value.toString, template.name: String, withText(template.photoSlots, template.textSlot))
+      val slots = template.photoSlots.map(box => "photo" -> box) :+ ("text" -> template.textSlot)
+      (template.id.value.toString, template.name: String, slots)
 
     private given Encoder[SpreadTemplate.ChapterStart] = Encoder.forProduct3("id", "name", "slots"): template =>
-      (template.id.value.toString, template.name: String, withText(template.photoSlots, template.textSlot))
+      val slots = template.photoSlots.map(box => "photo" -> box) :+ ("text" -> template.textSlot)
+      (template.id.value.toString, template.name: String, slots)
 
     private given Encoder[SpreadTemplate.PhotosOnly] = Encoder.forProduct3("id", "name", "slots"): template =>
       (template.id.value.toString, template.name: String, template.photoSlots.toList.toVector.map(box => "photo" -> box))

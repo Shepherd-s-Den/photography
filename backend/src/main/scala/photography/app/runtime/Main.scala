@@ -12,11 +12,11 @@ import org.typelevel.doobie.implicits.*
 import photography.adapters.http.{AlbumApi, AlbumSpreadApi, AlbumWorkspaceApi, HealthRoutes, SpreadTemplateApi, StaticSite}
 import photography.adapters.filesystem.FileThumbnailStorage
 import photography.adapters.http.{AlbumPhotoEventsApi, ThumbnailApi}
-import photography.adapters.sqlite.SqlitePhotoRepository
+import photography.adapters.sqlite.photo.SqlitePhotoRepository
 import photography.app.config.{AppConfig, HttpServerConfig}
 import photography.capabilities.{Clock, IdGenerator, Transaction}
-import photography.usecases.PhotoWriteRecovery
-import photography.ports.ThumbnailStorage
+import photography.usecases.photo.PhotoWriteRecovery
+import photography.ports.photo.ThumbnailStorage
 import scala.concurrent.duration.*
 
 object Main extends IOApp.Simple:

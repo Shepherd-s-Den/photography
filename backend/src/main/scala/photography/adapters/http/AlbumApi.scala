@@ -9,8 +9,8 @@ import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, AlbumYearConstraint}
 import io.github.iltotore.iron.constraint.all.*
-import photography.usecases.AlbumManager
-import photography.usecases.AlbumManager.*
+import photography.usecases.album.AlbumManager
+import photography.usecases.album.AlbumManager.*
 
 trait AlbumApi[F[_]]:
   def routes: HttpRoutes[F]
