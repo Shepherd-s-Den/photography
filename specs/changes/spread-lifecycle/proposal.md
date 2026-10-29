@@ -88,34 +88,34 @@ Concurrency: each action runs under one backend instance's chapter-mutation lock
 
 ### Adding and ordering
 
-- Add inserts the default layout immediately after the selected opening or photo spread.
+- Add inserts the default layout after the selected opening or photo spread.
 - Add selects the inserted spread.
-- Add is available at 64 interior spreads.
-- Add is unavailable at 65 interior spreads, with a visible capacity reason.
-- Add on the Album opening is unavailable; its reason is a hover and accessible hint, not visible text.
+- Add is unavailable on the Album opening; its reason is a hover and accessible hint.
+- Add is unavailable at 65 interior spreads; its reason is visible.
 - Move earlier or later swaps with the chapter neighbour.
-- Disabled move controls state their reason on hover and to assistive technology.
+- Disabled moves state their reason on hover and to assistive technology.
 - No spread action changes chapter blocks, opening positions or Home's last position.
 
 ### Templates
 
-- Selectors offer only the spread's context: 68 photo, 4 Synopsis or 27 chapter-opening layouts.
+- Selectors offer only the spread's context (68 photo, 4 Synopsis, 27 chapter opening).
 - Cover has no template selector.
-- Categories are one per photo-slot count from 1 to 9, plus 10+.
+- Categories are one per photo-slot count 1–9 and 10+.
 - Text slots are excluded from the count.
 - Empty categories are hidden.
 - There is no All category.
 - Template change keeps the spread's identity, chapter and position.
 - Template change highlights the applied template.
 - Changing an occupied spread's template warns and requires confirmation.
-- Confirmed template changes keep placements matched by photo-slot order and release the rest.
+- Confirmed template changes keep placements matched by photo-slot order.
+- Confirmed template changes release unmatched placements.
 
 ### Deletion
 
-- Deleting a spread without placements removes it immediately.
+- Deleting an empty spread removes it immediately.
 - Deleting an occupied spread warns with its placement count.
 - Confirmed deletion removes the spread and its placements.
-- Released photos remain in the chapter's collection as unplaced.
+- Released photos remain in the chapter collection as unplaced.
 - Inventory counts update after a deletion.
 - Deleting the selected spread selects its chapter opening.
 
@@ -123,10 +123,8 @@ Concurrency: each action runs under one backend instance's chapter-mutation lock
 
 - Unconfirmed occupied requests return `409` and change nothing.
 - Stale or foreign spread IDs return `404 spread_not_found`.
-- Context mismatch returns `400` with readable feedback.
-- Opening move or delete returns `400` with readable feedback.
-- Capacity violations return `400` with readable feedback.
-- Both warnings support keyboard use.
+- Context mismatch, opening move or delete, and capacity violations return `400` with readable feedback.
+- Warnings support keyboard use.
 - Cancel leaves the spread unchanged.
 - Cancel returns focus to its control.
 - Service failures keep the workspace usable.
@@ -134,14 +132,13 @@ Concurrency: each action runs under one backend instance's chapter-mutation lock
 
 ### Layout
 
-- The template selector sits above the canvas in the right-hand column.
-- The spread navigator sits below the canvas in the right-hand column.
-- Template and navigator names are hover hints and accessible labels, not visible captions.
+- The template selector sits above the canvas, in the right-hand column.
+- The spread navigator sits below the canvas, in the right-hand column.
+- Template and navigator names are hover hints and accessible labels.
 - The action toolbar is centered.
 - Every toolbar control has a hover hint.
 - Movement controls stay visible.
-- Metadata is one centered block of exactly two lines.
-- Metadata columns, in order: Chapter spread, Album spread, Location, Country (Countries when several), Period.
+- Metadata is one centered block of two lines: Chapter spread, Album spread, Location, Country (Countries when several), Period.
 - Positions are 1-based.
 - Positions count openings and exclude Cover.
 - Positions update after each action.
@@ -152,37 +149,18 @@ Concurrency: each action runs under one backend instance's chapter-mutation lock
 
 ## Doc Sync
 
-- `specs/design.md` — Album workflow: template selector sits above the canvas in the right-hand column.
-- `specs/design.md` — Album workflow: spread navigator sits below the canvas in the right-hand column.
-- `specs/design.md` — Album workflow: template and navigator names are hover hints and accessible labels, not captions.
-- `specs/design.md` — Album workflow: action toolbar is centered.
-- `specs/design.md` — Album workflow: every toolbar control has a hover hint.
-- `specs/design.md` — Album workflow: metadata is one centered block of two lines.
-- `specs/design.md` — Album workflow: the workspace heading shows the saved album title.
-- `specs/design.md` — Album workflow: vacation periods display `dd/mm - dd/mm`.
-- `specs/design.md` — Album workflow: editing keeps full dates.
-- `specs/design.md` — Album composition: photo spreads can be added within their chapter.
-- `specs/design.md` — Album composition: photo spreads can be moved within their chapter.
-- `specs/design.md` — Album composition: photo spreads can be deleted.
-- `specs/design.md` — Album composition: photo spreads can be re-templated after creation.
-- `specs/design.md` — Album composition: chapter deletion remains unavailable.
-- `specs/design.md` — Album composition: chapter reordering remains unavailable.
-- `specs/design.md` — Album composition: occupied template changes match placements by photo-slot order.
-- `specs/design.md` — Album composition: retained placements reset their transforms on template change.
-- `specs/design.md` — Album composition: retained placements keep their caption corner on template change.
-- `specs/design.md` — Album composition: template change assigns new slot IDs.
-- `specs/design.md` — Album composition: unmatched photos return to the unplaced pool on template change.
-- `specs/design.md` — Album composition: add the photo-spread state diagram from this proposal.
-- `specs/design.md` — Album composition: add the confirmation sequence diagram from this proposal.
-- `specs/design.md` — Templates and covers: context catalogs (68 photo, 4 Synopsis, 27 opening layouts).
-- `specs/design.md` — Templates and covers: photo-slot categories are 1–9 and 10+.
+- `specs/design.md` — Album workflow: prune statements this change makes stale (navigator placement, heading, period format, metadata captions).
+- `specs/design.md` — Album composition: photo spreads can be added, moved, re-templated and deleted within their chapter.
+- `specs/design.md` — Album composition: chapter deletion and reordering remain unavailable.
+- `specs/design.md` — Album composition: occupied template changes and deletes require confirmation.
+- `specs/design.md` — Album composition: template change matches placements by photo-slot order, keeps photo and caption corner, resets transforms, releases unmatched photos and assigns new slot IDs.
+- `specs/design.md` — Album composition: spread state and confirmation sequence diagrams from this proposal.
+- `specs/design.md` — Templates and covers: context-scoped catalogs of 68 photo, 4 Synopsis and 27 chapter-opening layouts.
 - `specs/design.md` — Templates and covers: naming grammar (`P`, `L`, `Text`, `+`, `/`, `x`; never `1 x`).
 - `specs/contracts.md` — Contract inventory: seeded photo layouts beside the existing four and 27.
-- `specs/contracts.md` — Contract inventory: pointer to the OpenAPI spread action routes and template listings.
-- `specs/http-api.openapi.json` — Paths: spread action routes.
-- `specs/http-api.openapi.json` — Paths: photo-only and chapter-start template listings.
-- `specs/http-api.openapi.json` — Schemas: `templateId` on workspace spreads.
-- `specs/http-api.openapi.json` — Schemas: the `spread_occupied` response.
+- `specs/contracts.md` — Contract inventory: pointer to the OpenAPI spread routes and template listings.
+- `specs/http-api.openapi.json` — Paths: spread action routes and photo and chapter-start template listings.
+- `specs/http-api.openapi.json` — Schemas: `templateId` on workspace spreads and the `spread_occupied` response.
 
 ## Out of Scope
 
