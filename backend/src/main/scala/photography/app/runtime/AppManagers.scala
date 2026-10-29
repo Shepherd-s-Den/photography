@@ -7,6 +7,7 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
 import photography.adapters.sqlite.SqlitePhotoPlacementRepository
+import photography.adapters.sqlite.SqliteAlbumCompositionRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
@@ -40,7 +41,8 @@ object AppManagers:
         override def resolve[A](program: ConnectionIO[A]): F[A] = program.transact(sqlite)
       val templateRepository = SqliteSpreadTemplateRepository.make[F](sqlite)
       val templates          = SpreadTemplateManager.make(templateRepository)
-      val albumRepository    = SqliteAlbumRepository.make[F](sqlite)
+      val albumComposition   = SqliteAlbumCompositionRepository.make
+      val albumRepository    = SqliteAlbumRepository.make[F](sqlite, albumComposition)
       val chapterRepository  = SqliteChapterRepository.make
       val countries          = SqliteCountryRepository.make[F](sqlite)
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)
