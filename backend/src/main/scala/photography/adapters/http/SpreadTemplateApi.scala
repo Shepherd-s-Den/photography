@@ -8,7 +8,8 @@ import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.layout.{SlotBox, SpreadTemplate}
 import photography.usecases.SpreadTemplateManager
-import photography.usecases.SpreadTemplateManager.ListAlbumStartTemplatesResult
+import photography.usecases.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
+import photography.usecases.SpreadTemplateManager.ListPhotosOnlyTemplatesResult
 
 trait SpreadTemplateApi[F[_]]:
   def routes: HttpRoutes[F]
@@ -24,6 +25,14 @@ object SpreadTemplateApi:
         templates.listAlbumStartTemplates.flatMap:
           case listed: ListAlbumStartTemplatesResult.Listed => Ok(listed)
           case ListAlbumStartTemplatesResult.Failed         => InternalServerError(Map("code" -> "service_failure"))
+      case GET -> Root / "api" / "templates" / "chapter-start" =>
+        templates.listChapterStartTemplates.flatMap:
+          case listed: ListChapterStartTemplatesResult.Listed => Ok(listed)
+          case ListChapterStartTemplatesResult.Failed         => InternalServerError(Map("code" -> "service_failure"))
+      case GET -> Root / "api" / "templates" / "photos-only" =>
+        templates.listPhotosOnlyTemplates.flatMap:
+          case listed: ListPhotosOnlyTemplatesResult.Listed => Ok(listed)
+          case ListPhotosOnlyTemplatesResult.Failed         => InternalServerError(Map("code" -> "service_failure"))
 
     private given Encoder[(String, SlotBox)] = Encoder.forProduct5("kind", "x", "y", "width", "height"): slot =>
       val (kind, box) = slot
@@ -33,4 +42,15 @@ object SpreadTemplateApi:
       val slots = template.photoSlots.map(box => "photo" -> box) :+ ("text" -> template.textSlot)
       (template.id.value.toString, template.name: String, slots)
 
-    private given Encoder[ListAlbumStartTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)
+    private given Encoder[SpreadTemplate.ChapterStart] = Encoder.forProduct3("id", "name", "slots"): template =>
+      val slots = template.photoSlots.map(box => "photo" -> box) :+ ("text" -> template.textSlot)
+      (template.id.value.toString, template.name: String, slots)
+
+    private given Encoder[SpreadTemplate.PhotosOnly] = Encoder.forProduct3("id", "name", "slots"): template =>
+      (template.id.value.toString, template.name: String, template.photoSlots.toList.toVector.map(box => "photo" -> box))
+
+    private given albumStartListing: Encoder[ListAlbumStartTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)
+
+    private given chapterStartListing: Encoder[ListChapterStartTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)
+
+    private given photosOnlyListing: Encoder[ListPhotosOnlyTemplatesResult.Listed] = Encoder.forProduct1("templates")(_.templates.toList)

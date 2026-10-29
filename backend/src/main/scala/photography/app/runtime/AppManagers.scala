@@ -10,10 +10,14 @@ import photography.adapters.sqlite.SqlitePhotoPlacementRepository
 import photography.adapters.sqlite.SqliteAlbumCompositionRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
+import photography.adapters.sqlite.{SqliteAlbumCompositionRepository, SqliteSpreadRepository}
 import photography.domain.album.*
+import photography.domain.layout.SpreadTemplateId
+import java.util.UUID
 import photography.ports.{PhotoRepository, ThumbnailStorage}
 import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
 import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, SpreadTemplateManager}
+import photography.usecases.SpreadManager
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 import photography.ports.PhotoThumbnailGenerator.GenerationResult
 
@@ -22,7 +26,8 @@ final case class AppManagers[F[_]](
     chapters: ChapterManager[F],
     templates: SpreadTemplateManager[F],
     workspaces: AlbumWorkspaceManager[F],
-    photoEvents: AlbumPhotoEvents[F]
+    photoEvents: AlbumPhotoEvents[F],
+    spreads: SpreadManager[F]
 )
 
 object AppManagers:
@@ -57,6 +62,11 @@ object AppManagers:
       val planning = ChapterPlanning.make(templates)
       Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
         ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
-          val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
-          val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
-          AppManagers(albums, chapters, templates, workspaces, events)
+          val chapters         = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
+          val workspaces       = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
+          val composition      = SqliteAlbumCompositionRepository.make
+          val spreadRepository = SqliteSpreadRepository.make
+          val spreads          = SpreadManager.make(templates, composition, spreadRepository, defaultPhotoLayout)
+          AppManagers(albums, chapters, templates, workspaces, events, spreads)
+
+  private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))
