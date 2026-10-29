@@ -11,8 +11,8 @@ import org.http4s.headers.`Content-Type`
 import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
 import photography.domain.album.{AlbumId, ChapterId}
 import photography.domain.layout.{SpreadId, SpreadTemplateId}
-import photography.usecases.SpreadManager
-import photography.usecases.SpreadManager.*
+import photography.usecases.spread.SpreadManager
+import photography.usecases.spread.SpreadManager.*
 
 import java.nio.charset.StandardCharsets
 import java.util.UUID

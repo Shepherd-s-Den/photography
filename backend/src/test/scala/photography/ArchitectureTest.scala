@@ -1,6 +1,5 @@
 package photography
 
-import cats.syntax.all.*
 import com.tngtech.archunit.core.importer.{ClassFileImporter, ImportOption}
 import com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
@@ -19,7 +18,7 @@ class ArchitectureTest extends FunSuite:
   test("should keep layers pointing inward and adapters isolated from each other"):
     assertNotEquals(testCodeLocation, classOf[Album].getProtectionDomain.getCodeSource.getLocation.toURI.toString)
     val doobieTargets = classes.iterator.asScala
-      .filter(_.getPackageName === "photography.adapters.sqlite")
+      .filter(_.getPackageName.startsWith("photography.adapters.sqlite"))
       .flatMap(_.getDirectDependenciesFromSelf.asScala.map(_.getTargetClass))
       .filter(_.getName.startsWith("org.typelevel.doobie.")).toVector
 

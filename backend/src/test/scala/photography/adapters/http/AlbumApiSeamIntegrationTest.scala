@@ -10,8 +10,8 @@ import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
 import org.http4s.headers.`Content-Type`
 import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, Chapter}
 import photography.domain.layout.*
-import photography.usecases.AlbumManager
-import photography.usecases.AlbumManager.*
+import photography.usecases.album.AlbumManager
+import photography.usecases.album.AlbumManager.*
 
 import java.time.Instant
 import java.util.UUID

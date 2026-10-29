@@ -10,8 +10,8 @@ import munit.CatsEffectSuite
 import org.http4s.{MediaType, Method, Request, Status, Uri}
 import org.http4s.circe.CirceEntityCodec.*
 import photography.domain.layout.*
-import photography.usecases.SpreadTemplateManager
-import photography.usecases.SpreadTemplateManager.ListAlbumStartTemplatesResult
+import photography.usecases.spread.SpreadTemplateManager
+import photography.usecases.spread.SpreadTemplateManager.ListAlbumStartTemplatesResult
 
 import java.util.UUID
 

@@ -3,7 +3,7 @@ package photography.app.config
 import cats.effect.IO
 import com.comcast.ip4s.{Host, Port}
 import io.github.iltotore.iron.pureconfig.given
-import photography.usecases.AlbumPageSize
+import photography.usecases.album.AlbumPageSize
 import photography.domain.album.{PhotoSource, ThumbnailQuality}
 import pureconfig.ConfigReader
 import pureconfig.ConfigSource
