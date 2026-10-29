@@ -7,10 +7,9 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
 import photography.adapters.sqlite.SqlitePhotoPlacementRepository
-import photography.adapters.sqlite.SqliteAlbumCompositionRepository
-import photography.adapters.sqlite.SqliteSpreadRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
+import photography.adapters.sqlite.{SqliteAlbumCompositionRepository, SqliteSpreadRepository}
 import photography.domain.album.*
 import photography.domain.layout.SpreadTemplateId
 import java.util.UUID
@@ -46,7 +45,6 @@ object AppManagers:
         override def resolve[A](program: ConnectionIO[A]): F[A] = program.transact(sqlite)
       val templateRepository = SqliteSpreadTemplateRepository.make[F](sqlite)
       val templates          = SpreadTemplateManager.make(templateRepository)
-      val albumComposition   = SqliteAlbumCompositionRepository.make
       val albumRepository    = SqliteAlbumRepository.make[F](sqlite)
       val chapterRepository  = SqliteChapterRepository.make
       val countries          = SqliteCountryRepository.make[F](sqlite)
@@ -64,8 +62,9 @@ object AppManagers:
         ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
           val chapters         = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
           val workspaces       = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
+          val composition      = SqliteAlbumCompositionRepository.make
           val spreadRepository = SqliteSpreadRepository.make
-          val spreads          = SpreadManager.make(templates, albumComposition, spreadRepository, defaultPhotoLayout)
+          val spreads          = SpreadManager.make(templates, composition, spreadRepository, defaultPhotoLayout)
           AppManagers(albums, chapters, templates, workspaces, events, spreads)
 
   private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))
