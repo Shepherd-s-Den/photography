@@ -9,7 +9,7 @@ import munit.CatsEffectSuite
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.domain.album.*
-import photography.ports.photo.ThumbnailStorage.*
+import photography.ports.ThumbnailStorage.*
 import java.nio.file.{Files, Path}
 import java.security.MessageDigest
 import java.util.{HexFormat, UUID}

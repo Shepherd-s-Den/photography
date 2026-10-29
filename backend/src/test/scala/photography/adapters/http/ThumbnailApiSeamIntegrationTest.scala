@@ -9,7 +9,7 @@ import munit.CatsEffectSuite
 import org.http4s.{MediaType, Method, Request, Status, Uri}
 import org.typelevel.ci.CIString
 import photography.domain.album.{EncodedThumbnail, ThumbnailBytesConstraint, ThumbnailLocation}
-import photography.ports.photo.ThumbnailStorage
+import photography.ports.ThumbnailStorage
 import java.util.UUID
 
 final class ThumbnailApiSeamIntegrationTest extends CatsEffectSuite:

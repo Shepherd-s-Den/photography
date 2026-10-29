@@ -37,7 +37,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 ### Backend organization
 
-Use cases and driven ports are grouped by responsibility under `album`, `chapter`, `photo` and `spread`; editor state lives under `usecases/editing`. SQLite repositories mirror those groups, with connection management, migrations and shared codecs at the SQLite root. Image decoding and thumbnail encoding belong to the `imageio` adapter. Test packages mirror their production owner: application contracts have component tests, while adapters have seam tests against their real external boundary.
+Image decoding and thumbnail encoding belong to the `imageio` adapter. Application contracts have component tests; adapters have seam tests against their real external boundary.
 
 ## Documentation style
 

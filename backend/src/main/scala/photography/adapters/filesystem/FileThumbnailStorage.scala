@@ -7,8 +7,8 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import org.typelevel.log4cats.Logger
 import photography.domain.album.*
-import photography.ports.photo.ThumbnailStorage
-import photography.ports.photo.ThumbnailStorage.*
+import photography.ports.ThumbnailStorage
+import photography.ports.ThumbnailStorage.*
 import photography.syntax.SyncSyntax.*
 import java.nio.channels.FileChannel
 import java.nio.file.{Files, NoSuchFileException, Path, StandardCopyOption, StandardOpenOption}

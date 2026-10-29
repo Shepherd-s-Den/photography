@@ -8,8 +8,8 @@ import org.http4s.{HttpRoutes, ServerSentEvent}
 import org.http4s.dsl.Http4sDsl
 import org.http4s.circe.CirceEntityCodec.*
 import photography.domain.album.AlbumId
-import photography.usecases.photo.AlbumPhotoEvents
-import photography.usecases.photo.AlbumPhotoEvents.{Event, SubscribeResult}
+import photography.usecases.AlbumPhotoEvents
+import photography.usecases.AlbumPhotoEvents.{Event, SubscribeResult}
 import java.util.UUID
 import scala.concurrent.duration.*
 

@@ -9,8 +9,8 @@ import org.http4s.dsl.impl.OptionalQueryParamDecoderMatcher
 import org.http4s.{HttpRoutes, MessageBodyFailure, Request}
 import photography.domain.album.{AlbumId, ChapterId}
 import photography.domain.layout.{SpreadId, SpreadTemplateId}
-import photography.usecases.spread.SpreadManager
-import photography.usecases.spread.SpreadManager.{AddResult, ChangeTemplateResult, Conflict as SpreadConflict, DeleteResult, Direction, MoveResult}
+import photography.usecases.SpreadManager
+import photography.usecases.SpreadManager.{AddResult, ChangeTemplateResult, Conflict as SpreadConflict, DeleteResult, Direction, MoveResult}
 
 import java.util.UUID
 

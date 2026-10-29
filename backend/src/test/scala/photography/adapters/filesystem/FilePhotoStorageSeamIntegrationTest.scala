@@ -11,8 +11,8 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.ImageIOTestResources
 import photography.domain.album.*
-import photography.ports.photo.ThumbnailStorage
-import photography.ports.photo.PhotoStorage.*
+import photography.ports.ThumbnailStorage
+import photography.ports.PhotoStorage.*
 import java.awt.image.BufferedImage
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream}
 import java.nio.{ByteBuffer, ByteOrder}

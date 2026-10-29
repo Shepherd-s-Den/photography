@@ -9,8 +9,8 @@ import io.github.iltotore.iron.*
 import com.twelvemonkeys.image.{ImageUtil, ResampleOp}
 import org.typelevel.log4cats.Logger
 import photography.domain.album.*
-import photography.ports.photo.PhotoThumbnailGenerator
-import photography.ports.photo.PhotoThumbnailGenerator.GenerationResult
+import photography.ports.PhotoThumbnailGenerator
+import photography.ports.PhotoThumbnailGenerator.GenerationResult
 import photography.syntax.SyncSyntax.*
 import java.awt.image.BufferedImage
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, IOException}

@@ -5,23 +5,23 @@ import cats.effect.std.Mutex
 import org.typelevel.doobie.{ConnectionIO, Transactor}
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
-import photography.adapters.sqlite.album.{SqliteAlbumRepository, SqliteCountryRepository}
-import photography.adapters.sqlite.chapter.SqliteChapterRepository
-import photography.adapters.sqlite.spread.SqliteSpreadRepository
-import photography.adapters.sqlite.spread.SqliteSpreadTemplateRepository
-import photography.adapters.sqlite.photo.SqlitePhotoPlacementRepository
+import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteCountryRepository}
+import photography.adapters.sqlite.SqliteChapterRepository
+import photography.adapters.sqlite.SqliteSpreadRepository
+import photography.adapters.sqlite.SqliteSpreadTemplateRepository
+import photography.adapters.sqlite.SqlitePhotoPlacementRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.domain.layout.SpreadTemplateId
-import photography.ports.photo.{PhotoRepository, ThumbnailStorage}
-import photography.usecases.album.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager}
-import photography.usecases.chapter.ChapterManager
-import photography.usecases.photo.ChapterPhotoImport
-import photography.usecases.photo.{AlbumPhotoEvents, PhotoInventory}
-import photography.usecases.chapter.ChapterPlanning
-import photography.usecases.spread.{SpreadManager, SpreadTemplateManager}
+import photography.ports.{PhotoRepository, ThumbnailStorage}
+import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager}
+import photography.usecases.ChapterManager
+import photography.usecases.ChapterPhotoImport
+import photography.usecases.{AlbumPhotoEvents, PhotoInventory}
+import photography.usecases.ChapterPlanning
+import photography.usecases.{SpreadManager, SpreadTemplateManager}
 
 import java.util.UUID
 
@@ -67,5 +67,4 @@ object AppManagers:
           val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
           AppManagers(albums, chapters, templates, workspaces, events, spreads)
 
-  // Seeded by V3 from the photo catalog entry 8-4x2.
   private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))

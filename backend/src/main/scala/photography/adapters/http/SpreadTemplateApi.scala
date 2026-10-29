@@ -7,9 +7,9 @@ import org.http4s.HttpRoutes
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.layout.{SlotBox, SpreadTemplate}
-import photography.usecases.spread.SpreadTemplateManager
-import photography.usecases.spread.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
-import photography.usecases.spread.SpreadTemplateManager.ListPhotosOnlyTemplatesResult
+import photography.usecases.SpreadTemplateManager
+import photography.usecases.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
+import photography.usecases.SpreadTemplateManager.ListPhotosOnlyTemplatesResult
 
 trait SpreadTemplateApi[F[_]]:
   def routes: HttpRoutes[F]

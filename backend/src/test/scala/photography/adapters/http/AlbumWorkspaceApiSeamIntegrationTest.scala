@@ -13,13 +13,13 @@ import org.http4s.headers.`Cache-Control`
 import org.http4s.circe.jsonDecoder
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
-import photography.usecases.chapter.ChapterManager
-import photography.usecases.album.AlbumManager.*
-import photography.usecases.album.AlbumWorkspaceManager.GetResult
-import photography.usecases.chapter.ChapterManager.{CreateResult, Period, UpdateResult}
-import photography.usecases.photo.ChapterPhotoImport.{ExecutionOutcome, Scheduling, Status as ImportStatus}
-import photography.usecases.photo.{PhotoInventory, PhotoManager, PhotoWriteRecovery}
+import photography.usecases.{AlbumManager, AlbumWorkspaceManager}
+import photography.usecases.ChapterManager
+import photography.usecases.AlbumManager.*
+import photography.usecases.AlbumWorkspaceManager.GetResult
+import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.ChapterPhotoImport.{ExecutionOutcome, Scheduling, Status as ImportStatus}
+import photography.usecases.{PhotoInventory, PhotoManager, PhotoWriteRecovery}
 
 import java.nio.file.Path
 import java.time.{Instant, LocalDate, LocalDateTime}

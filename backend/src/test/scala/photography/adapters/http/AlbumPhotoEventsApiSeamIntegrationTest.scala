@@ -8,8 +8,8 @@ import munit.CatsEffectSuite
 import org.http4s.{MediaType, Request, ServerSentEvent, Status, Uri}
 import org.typelevel.ci.CIString
 import photography.domain.album.{AlbumId, ChapterId}
-import photography.usecases.photo.AlbumPhotoEvents
-import photography.usecases.photo.AlbumPhotoEvents.{Event, SubscribeResult}
+import photography.usecases.AlbumPhotoEvents
+import photography.usecases.AlbumPhotoEvents.{Event, SubscribeResult}
 import java.util.UUID
 
 final class AlbumPhotoEventsApiSeamIntegrationTest extends CatsEffectSuite:
