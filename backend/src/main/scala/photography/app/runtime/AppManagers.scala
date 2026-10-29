@@ -7,6 +7,7 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
 import photography.adapters.sqlite.SqlitePhotoPlacementRepository
+import photography.adapters.sqlite.SqliteAlbumCompositionRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.domain.album.*
@@ -15,7 +16,6 @@ import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager,
 import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, SpreadTemplateManager}
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 import photography.ports.PhotoThumbnailGenerator.GenerationResult
-import photography.adapters.sqlite.SqliteAlbumCompositionRepository
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
