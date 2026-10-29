@@ -117,10 +117,13 @@
       "get": {
         "operationId": "getAlbumWorkspace",
         "summary": "Read the complete chapter workspace",
-        "description": "Separate from album metadata. Returns the album opening followed by chronological chapter blocks (first day, last day, chapter ID), with Home last. Each block starts with its opening followed by photo spreads in persisted order. Countries is the complete selectable reference catalog, not only the album's represented countries. Empty collections are []; incomplete persisted composition fails rather than returning partial data.",
+        "description": "Separate from album metadata. Returns the album opening followed by chronological chapter blocks (first day, last day, chapter ID), with Home last. Each block starts with its opening followed by photo spreads in persisted order. Countries is the complete selectable reference catalog. photoInventories contains exactly one inventory for each chapter ID, including empty chapters; clients derive Synopsis/Cover from these same collections. Reads never initiate import. Inventory/composition failures return 500, not partial or empty-success data.",
         "responses": {
           "200": {
             "description": "Complete year-bearing workspace",
+            "headers": {
+              "Cache-Control": { "schema": { "const": "no-store" } }
+            },
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/Workspace" }
@@ -137,7 +140,7 @@
       "post": {
         "operationId": "createChapter",
         "summary": "Create a vacation or Home chapter",
-        "description": "Atomically saves metadata, country associations, default opening geometry and supplied chronological order. Home is unique and spans the album year. Vacation names are trimmed, nonblank and cannot be Home. Countries must identify distinct catalog entries. Source folders are unique within an album. The 65-interior-spread limit includes all openings and photo spreads but excludes Cover; creation at 64 adds its opening. Invalid input or conflicts return 400 and failed writes leave persisted state unchanged.",
+        "description": "Atomically saves metadata, country associations, default opening geometry and supplied chronological order. Home is unique and spans the album year. Vacation names are trimmed, nonblank and cannot be Home. Countries must identify distinct catalog entries. Source folders are unique within an album. The 65-interior-spread limit includes all openings and photo spreads but excludes Cover; creation at 64 adds its opening. Invalid input/conflicts return 400. After commit, schedules asynchronous photo processing without waiting for directory/image work; scheduling failed still returns 201 with the saved identity. Retry through photo Refresh, not repeated creation.",
         "requestBody": {
           "required": true,
           "content": {
@@ -191,7 +194,7 @@
       "put": {
         "operationId": "updateChapter",
         "summary": "Update an owned chapter's metadata",
-        "description": "The saved chapter type selects the details shape: vacation requires name, countries, start, end and sourceFolder; Home requires countries and sourceFolder and retains its year-derived period. No kind field is required or used to change type. Other fields are ignored. Atomically updates metadata, country associations and chronological positions while preserving chapter identity, description, templates, spread/slot IDs and geometry. Conflicts or validation failures return 400 without changing persisted state.",
+        "description": "The saved chapter type selects the details shape: vacation requires name, countries, start, end and sourceFolder; Home requires countries and sourceFolder and retains its year-derived period. No kind field is required or used to change type. Other fields are ignored. Atomically updates metadata, country associations and chronological positions while preserving chapter identity, description, templates, spread/slot IDs and geometry. A changed folder atomically clears previous photo/placement references and schedules processing after commit; unchanged folders return not-requested. Scheduling failed still returns 200 with the saved identity and offers Refresh-only retry. Conflicts/validation failures return 400 without changing persisted state.",
         "requestBody": {
           "required": true,
           "content": {
@@ -223,6 +226,153 @@
                 }
               }
             }
+          },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/chapters/{chapterId}/photos": {
+      "parameters": [{ "$ref": "#/components/parameters/PhotoChapterId" }],
+      "get": {
+        "operationId": "getChapterPhotos",
+        "summary": "Read complete photos, authoritative counts and runtime processing feedback",
+        "description": "Existing empty chapters return empty photos and zero counts. Reads do not scan originals or initiate generation. Photos are ordered by camera-local capture time ascending, undated last, then case-insensitive/exact filename and chapter ID. Source/storage paths are not exposed.",
+        "responses": {
+          "200": {
+            "description": "Current chapter inventory",
+            "headers": {
+              "Cache-Control": { "schema": { "const": "no-store" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PhotoInventory" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/ChapterNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/chapters/{chapterId}/photos/refresh": {
+      "parameters": [{ "$ref": "#/components/parameters/PhotoChapterId" }],
+      "post": {
+        "operationId": "refreshChapterPhotos",
+        "summary": "Schedule chapter photo reconciliation",
+        "description": "No request body. Reconciles immediate-folder JPEG additions, content-hash edits, removals and changed quality asynchronously. Overlapping requests coalesce. Scheduling is distinct from processing completion; a failed launch/read returns 500. Synopsis/Cover clients invoke this operation for each chapter.",
+        "responses": {
+          "202": {
+            "description": "Scheduled or coalesced with current work",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["scheduling"],
+                  "properties": {
+                    "scheduling": { "enum": ["queued", "coalesced"] }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/ChapterNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/photo-events": {
+      "parameters": [{ "$ref": "#/components/parameters/WorkspaceAlbumId" }],
+      "get": {
+        "operationId": "subscribeAlbumPhotoEvents",
+        "summary": "Subscribe to chapter inventory and processing invalidations",
+        "description": "Validates album existence before streaming. Register before subscribed (data: {}), then emit inventory-changed (data: {chapterId}) after committed photo or processing changes. Heartbeat comments arrive every 15 seconds. One stream per open browser workspace; subscribe before initial/reconnect workspace GET, buffer invalidations during catch-up, then reread affected chapters. Slow subscribers use bounded coalescing and never block processing. Opening/reconnecting never initiates import; no image bytes travel over SSE.",
+        "responses": {
+          "200": {
+            "description": "Named Server-Sent Events with JSON data",
+            "headers": {
+              "Cache-Control": { "schema": { "const": "no-store" } },
+              "X-Accel-Buffering": { "schema": { "const": "no" } }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" },
+                "example": "event: subscribed\ndata: {}\n\nevent: inventory-changed\ndata: {\"chapterId\":\"6518a51c-bc7a-4015-b899-245c73a2103e\"}\n\n: heartbeat\n\n"
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/AlbumNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/thumbnails/{location}/{version}.jpg": {
+      "parameters": [
+        {
+          "name": "location",
+          "in": "path",
+          "required": true,
+          "description": "Lowercase canonical UUID naming an exclusive managed publication, not a photo lookup.",
+          "schema": { "type": "string", "format": "uuid" }
+        },
+        {
+          "name": "version",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        },
+        {
+          "name": "If-None-Match",
+          "in": "header",
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "operationId": "getThumbnail",
+        "summary": "Read a supplied immutable managed-thumbnail URL",
+        "description": "Serves only the managed thumbnail root, without a photo-metadata lookup or generation. Original files are never delivered. Malformed/traversal, missing-file and mismatched-version requests return 404.",
+        "responses": {
+          "200": {
+            "description": "One JPEG within its selected preset; globally at most 2048px longest edge and 300,000 bytes",
+            "headers": {
+              "Cache-Control": {
+                "schema": { "const": "private, max-age=31536000, immutable" }
+              },
+              "ETag": {
+                "schema": { "type": "string" },
+                "description": "Quoted content-version hash"
+              }
+            },
+            "content": {
+              "image/jpeg": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "304": { "$ref": "#/components/responses/ThumbnailNotModified" },
+          "404": {
+            "description": "Managed thumbnail not found; no regeneration"
+          },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      },
+      "head": {
+        "operationId": "headThumbnail",
+        "summary": "Read managed-thumbnail headers without a response body",
+        "responses": {
+          "200": {
+            "description": "JPEG headers; no response body",
+            "headers": {
+              "Content-Type": { "schema": { "const": "image/jpeg" } },
+              "Cache-Control": {
+                "schema": { "const": "private, max-age=31536000, immutable" }
+              },
+              "ETag": { "schema": { "type": "string" } }
+            }
+          },
+          "304": { "$ref": "#/components/responses/ThumbnailNotModified" },
+          "404": {
+            "description": "Malformed URL or managed thumbnail not found"
           },
           "500": { "$ref": "#/components/responses/ServiceFailure" }
         }
@@ -261,6 +411,13 @@
   },
   "components": {
     "parameters": {
+      "PhotoChapterId": {
+        "name": "chapterId",
+        "in": "path",
+        "required": true,
+        "description": "Lowercase canonical UUID. Malformed or missing chapter targets return chapter_not_found.",
+        "schema": { "type": "string", "format": "uuid" }
+      },
       "WorkspaceAlbumId": {
         "name": "id",
         "in": "path",
@@ -286,16 +443,43 @@
     },
     "responses": {
       "ChapterIdentity": {
-        "description": "Persisted chapter identity",
+        "description": "Persisted chapter identity and independent postcommit scheduling result; failed scheduling preserves the save",
         "content": {
           "application/json": {
             "schema": {
               "type": "object",
-              "required": ["id"],
-              "properties": { "id": { "type": "string", "format": "uuid" } },
+              "required": ["id", "scheduling"],
+              "properties": {
+                "id": { "type": "string", "format": "uuid" },
+                "scheduling": {
+                  "enum": ["queued", "coalesced", "not-requested", "failed"]
+                }
+              },
               "additionalProperties": false
             }
           }
+        }
+      },
+      "ChapterNotFound": {
+        "description": "Malformed chapter ID or chapter not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["code"],
+              "properties": { "code": { "const": "chapter_not_found" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "ThumbnailNotModified": {
+        "description": "Matching content version; no response body",
+        "headers": {
+          "Cache-Control": {
+            "schema": { "const": "private, max-age=31536000, immutable" }
+          },
+          "ETag": { "schema": { "type": "string" } }
         }
       },
       "AlbumSummary": {
@@ -399,7 +583,14 @@
       },
       "Workspace": {
         "type": "object",
-        "required": ["year", "photoRoot", "chapters", "spreads", "countries"],
+        "required": [
+          "year",
+          "photoRoot",
+          "chapters",
+          "spreads",
+          "countries",
+          "photoInventories"
+        ],
         "properties": {
           "year": { "$ref": "#/components/schemas/AlbumYear" },
           "photoRoot": {
@@ -421,6 +612,120 @@
             "type": "array",
             "minItems": 1,
             "items": { "$ref": "#/components/schemas/Country" }
+          },
+          "photoInventories": {
+            "type": "object",
+            "description": "Exactly one entry per chapter ID, including empty chapters; no foreign or missing keys.",
+            "propertyNames": { "type": "string", "format": "uuid" },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PhotoInventory"
+            }
+          }
+        }
+      },
+      "PhotoInventory": {
+        "type": "object",
+        "required": ["photos", "counts", "processing"],
+        "properties": {
+          "photos": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Photo" },
+            "description": "Complete photos with unique identities in chronological order."
+          },
+          "counts": {
+            "type": "object",
+            "required": ["unplaced", "total"],
+            "description": "total equals photos.length; unplaced is derived from authoritative placements and never exceeds total.",
+            "properties": {
+              "unplaced": { "type": "integer", "minimum": 0 },
+              "total": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "processing": { "$ref": "#/components/schemas/PhotoProcessing" }
+        }
+      },
+      "Photo": {
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "capturedLocal",
+          "width",
+          "height",
+          "caption",
+          "thumbnail"
+        ],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "filename": { "type": "string", "minLength": 1 },
+          "capturedLocal": {
+            "type": ["string", "null"],
+            "description": "Camera-local EXIF date/time, without timezone. Missing/invalid dates are null; never filesystem time.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d{1,9})?)?$"
+          },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 },
+          "caption": { "type": ["string", "null"] },
+          "thumbnail": {
+            "type": "object",
+            "required": ["url", "width", "height"],
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Supplied versioned application URL. Use unchanged for lazy loading/cache reuse; never add cache-busting parameters.",
+                "pattern": "^/thumbnails/[0-9a-f-]{36}/[0-9a-f]{64}\\.jpg$"
+              },
+              "width": { "type": "integer", "minimum": 1, "maximum": 2048 },
+              "height": { "type": "integer", "minimum": 1, "maximum": 2048 }
+            }
+          }
+        }
+      },
+      "PhotoProcessing": {
+        "type": "object",
+        "required": ["state", "unsupportedCount", "skippedCount", "issues"],
+        "description": "Transient chapter-local feedback resets to idle on restart, independently of saved photos. completed may include unsupported/undecodable/unstable skips; directory/read/encoding/storage/database/cleanup/scheduling failures are explicit.",
+        "properties": {
+          "state": {
+            "enum": ["idle", "queued", "running", "completed", "failed"]
+          },
+          "unsupportedCount": { "type": "integer", "minimum": 0 },
+          "skippedCount": { "type": "integer", "minimum": 0 },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["stage", "code", "filename"],
+              "properties": {
+                "stage": {
+                  "enum": [
+                    "discovery",
+                    "read",
+                    "generation",
+                    "storage",
+                    "persistence",
+                    "cleanup",
+                    "scheduling"
+                  ]
+                },
+                "code": {
+                  "enum": [
+                    "unreadable_source",
+                    "undecodable",
+                    "unstable",
+                    "encoding_failed",
+                    "storage_failed",
+                    "persistence_failed",
+                    "cleanup_failed",
+                    "scheduling_failed"
+                  ]
+                },
+                "filename": {
+                  "type": ["string", "null"],
+                  "description": "Immediate source filename, or null for a chapter-wide issue. Codes never expose internal paths or exception details."
+                }
+              }
+            }
           }
         }
       },
