@@ -167,6 +167,10 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       currentTime: Instant = createdAt
   ) =
     val spreads = new SpreadTemplateManager[IO]:
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
+        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
+      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult] =
+        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = listResult.pure[IO]
       override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] =
         SpreadTemplateManager.ListChapterStartTemplatesResult.Failed.pure[IO]

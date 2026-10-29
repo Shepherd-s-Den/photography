@@ -13,11 +13,13 @@ import photography.domain.layout.*
 import photography.ports.SpreadTemplateRepository.*
 
 import java.nio.file.{Files, Path}
+import java.util.UUID
 
 final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]               = Slf4jLogger.getLogger[IO]
-  private val defaultTemplateName        = "2×2 L + Synopsis R"
-  private val defaultChapterTemplateName = "Text + 2P + 2L"
+  private val defaultTemplateName        = "2 x (L/L) + Text"
+  private val defaultChapterTemplateName = "Text + 2 x P + (L/L)"
+  private val defaultPhotoLayout         = "00000000-0000-0000-0000-000000000113"
 
   test(s"should preserve ordered synopsis-right templates with $defaultTemplateName first"):
     buildTransactor.use: xa =>
@@ -112,6 +114,61 @@ final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffect
           result <- repository.listAlbumStartTemplates
         yield assertEquals(result, expectedFailure)
     }
+
+  test("should load the 68 photo layouts with the seeded 8-4x2 default and only photo slots"):
+    buildTransactor.use: xa =>
+      val repository = SqliteSpreadTemplateRepository.make[IO](xa)
+      repository.listPhotosOnlyTemplates.map:
+        case ListPhotosOnlyTemplatesResult.Listed(templates) =>
+          val identities = templates.toList.map(_.id.value.toString)
+          val defaults   = templates.toList.filter(_.id.value.toString === defaultPhotoLayout)
+
+          assertEquals(templates.size, 68)
+          assertEquals(identities, identities.sorted)
+          assertEquals(identities.distinct.size, 68)
+          assertEquals(templates.head.id.value.toString, "00000000-0000-0000-0000-000000000101")
+          assertEquals(defaults.map(_.name: String), List("4 x (L/L)"))
+          assertEquals(defaults.map(_.photoSlots.size), List(8))
+          assert(templates.toList.forall(template => template.photoSlots.size >= 1 && template.photoSlots.size <= 24))
+        case result => fail(s"Expected seeded photo layouts, obtained $result")
+
+  test("should resolve each catalog kind by template identity and report unknown identities"):
+    buildTransactor.use: xa =>
+      val repository = SqliteSpreadTemplateRepository.make[IO](xa)
+      val unknown    = "00000000-0000-0000-0000-00000000ffff"
+
+      for
+        album   <- repository.findTemplate(SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000001")))
+        chapter <- repository.findTemplate(SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000005")))
+        photo   <- repository.findTemplate(SpreadTemplateId(UUID.fromString(defaultPhotoLayout)))
+        missing <- repository.findTemplate(SpreadTemplateId(UUID.fromString(unknown)))
+      yield
+        assertEquals(kindOf(album), "album_start")
+        assertEquals(kindOf(chapter), "chapter_start")
+        assertEquals(kindOf(photo), "photos_only")
+        assertEquals(missing, FindTemplateResult.NotFound)
+
+  test("should reject malformed photo layout catalogs explicitly"):
+    Vector(
+      "UPDATE spread_template_slot SET kind = 'text' WHERE template_id IN (SELECT id FROM spread_template WHERE kind = 'photos_only')",
+      "DELETE FROM spread_template_slot WHERE template_id IN (SELECT id FROM spread_template WHERE kind = 'photos_only')"
+    ).traverse_ { corruption =>
+      buildTransactor.use: xa =>
+        val repository = SqliteSpreadTemplateRepository.make[IO](xa)
+        val corrupt    = sql"PRAGMA ignore_check_constraints = ON".update.run >>
+          Fragment.const(corruption).update.run >> sql"PRAGMA ignore_check_constraints = OFF".update.run
+
+        for
+          _      <- corrupt.transact(xa)
+          result <- repository.listPhotosOnlyTemplates
+        yield assertEquals(result, ListPhotosOnlyTemplatesResult.Failed(Failure.DatabaseFailure))
+    }
+
+  private def kindOf(result: FindTemplateResult) = result match
+    case FindTemplateResult.Found(_: SpreadTemplate.AlbumStart)   => "album_start"
+    case FindTemplateResult.Found(_: SpreadTemplate.ChapterStart) => "chapter_start"
+    case FindTemplateResult.Found(_: SpreadTemplate.PhotosOnly)   => "photos_only"
+    case other                                                    => s"unexpected $other"
 
   private def buildTransactor =
     val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "template-", ".sqlite"))

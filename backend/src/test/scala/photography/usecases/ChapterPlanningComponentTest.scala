@@ -43,6 +43,10 @@ final class ChapterPlanningComponentTest extends FunSuite:
     )
   private val planning =
     val templates = new SpreadTemplateManager[IO]:
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
+        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
+      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult] =
+        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]     = ListAlbumStartTemplatesResult.Failed.pure[IO]
       override def listChapterStartTemplates: IO[ListChapterStartTemplatesResult] = ListChapterStartTemplatesResult.Failed.pure[IO]
     ChapterPlanning.make(templates)

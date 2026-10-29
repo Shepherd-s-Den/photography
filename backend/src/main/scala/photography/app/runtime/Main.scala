@@ -9,7 +9,7 @@ import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.doobie.ConnectionIO
 import org.typelevel.doobie.implicits.*
-import photography.adapters.http.{AlbumApi, AlbumWorkspaceApi, HealthRoutes, SpreadTemplateApi, StaticSite}
+import photography.adapters.http.{AlbumApi, AlbumSpreadApi, AlbumWorkspaceApi, HealthRoutes, SpreadTemplateApi, StaticSite}
 import photography.adapters.filesystem.FileThumbnailStorage
 import photography.adapters.http.{AlbumPhotoEventsApi, ThumbnailApi}
 import photography.adapters.sqlite.SqlitePhotoRepository
@@ -57,7 +57,8 @@ object Main extends IOApp.Simple:
     val workspace    = AlbumWorkspaceApi.make(managers.workspaces, managers.albums, managers.chapters).routes
     val thumbnailApi = ThumbnailApi.make(thumbnails).routes
     val events       = AlbumPhotoEventsApi.make(managers.photoEvents).routes
-    val api = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> events <+> thumbnailApi <+> SpreadTemplateApi.make(managers.templates).routes
+    val api = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> events <+> thumbnailApi <+> SpreadTemplateApi.make(managers.templates).routes <+>
+      AlbumSpreadApi.make(managers.spreads).routes
     StaticSite.make(api, assetRoot = "frontend").map(_.app)
 
   private def buildHttpServer(config: HttpServerConfig, app: HttpApp[IO]) =

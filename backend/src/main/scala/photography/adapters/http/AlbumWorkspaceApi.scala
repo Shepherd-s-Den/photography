@@ -288,10 +288,11 @@ object AlbumWorkspaceApi:
       val slots = photos.map(slot => encodeSlot(slot.id.value, kind = "photo", slot.box)) ++
         maybeText.toList.toVector.map(slot => encodeSlot(slot.id.value, kind = "text", slot.box))
       Json.obj(
-        "id"      -> Json.fromString(spread.id.value.toString),
-        "chapter" -> maybeChapter.fold(Json.Null)(chapter => Json.fromString(chapter.value.toString)),
-        "kind"    -> Json.fromString(kind),
-        "slots"   -> Json.arr(slots*)
+        "id"         -> Json.fromString(spread.id.value.toString),
+        "chapter"    -> maybeChapter.fold(Json.Null)(chapter => Json.fromString(chapter.value.toString)),
+        "kind"       -> Json.fromString(kind),
+        "templateId" -> Json.fromString(spread.template.value.toString),
+        "slots"      -> Json.arr(slots*)
       )
 
     private given Encoder[GetResult.Found] = Encoder.instance: found =>

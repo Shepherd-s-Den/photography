@@ -49,11 +49,59 @@ final class SpreadTemplateManagerComponentTest extends CatsEffectSuite:
       assertEquals(chapters, ListChapterStartTemplatesResult.Failed)
     }
 
+  test("should preserve the ordered photo layout catalog and resolve templates by identity"):
+    val photoId = SpreadTemplateId(new UUID(0L, 30L))
+    val photo   = SpreadTemplate.PhotosOnly(photoId, name = "Single", photoSlots = NonEmptyList.one(box))
+    val manager = buildManager(
+      SpreadTemplateRepository.ListAlbumStartTemplatesResult.Failed(Failure.DatabaseFailure),
+      SpreadTemplateRepository.ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure),
+      photos = SpreadTemplateRepository.ListPhotosOnlyTemplatesResult.Listed(NonEmptyList.one(photo)),
+      lookup = SpreadTemplateRepository.FindTemplateResult.Found(photo)
+    )
+
+    (manager.listPhotosOnlyTemplates, manager.findTemplate(photoId)).tupled.map { case (listed, found) =>
+      assertEquals(listed, SpreadTemplateManager.ListPhotosOnlyTemplatesResult.Listed(NonEmptyList.one(photo)))
+      assertEquals(found, SpreadTemplateManager.FindTemplateResult.Found(photo))
+    }
+
+  test("should report unavailable photo layouts and unknown template identities explicitly"):
+    val photoId = SpreadTemplateId(new UUID(0L, 31L))
+    val failed  = SpreadTemplateRepository.Failure.DatabaseFailure
+    val manager = buildManager(
+      SpreadTemplateRepository.ListAlbumStartTemplatesResult.Failed(failed),
+      SpreadTemplateRepository.ListChapterStartTemplatesResult.Failed(failed),
+      photos = SpreadTemplateRepository.ListPhotosOnlyTemplatesResult.Failed(failed),
+      lookup = SpreadTemplateRepository.FindTemplateResult.NotFound
+    )
+
+    (manager.listPhotosOnlyTemplates, manager.findTemplate(photoId)).tupled.map { case (listed, found) =>
+      assertEquals(listed, SpreadTemplateManager.ListPhotosOnlyTemplatesResult.Failed)
+      assertEquals(found, SpreadTemplateManager.FindTemplateResult.NotFound)
+    }
+
+  test("should report template lookup database failures explicitly"):
+    val failed  = SpreadTemplateRepository.Failure.DatabaseFailure
+    val manager = buildManager(
+      SpreadTemplateRepository.ListAlbumStartTemplatesResult.Failed(failed),
+      SpreadTemplateRepository.ListChapterStartTemplatesResult.Failed(failed),
+      lookup = SpreadTemplateRepository.FindTemplateResult.Failed(failed)
+    )
+
+    manager.findTemplate(SpreadTemplateId(new UUID(0L, 32L))).map(found => assertEquals(found, SpreadTemplateManager.FindTemplateResult.Failed))
+
+  // scalafix:off DisableSyntax.defaultArgs
   private def buildManager(
       albums: SpreadTemplateRepository.ListAlbumStartTemplatesResult,
-      chapters: SpreadTemplateRepository.ListChapterStartTemplatesResult
+      chapters: SpreadTemplateRepository.ListChapterStartTemplatesResult,
+      photos: SpreadTemplateRepository.ListPhotosOnlyTemplatesResult = SpreadTemplateRepository.ListPhotosOnlyTemplatesResult.Failed(
+        SpreadTemplateRepository.Failure.DatabaseFailure
+      ),
+      lookup: SpreadTemplateRepository.FindTemplateResult = SpreadTemplateRepository.FindTemplateResult.NotFound
   ) =
     val repository = new SpreadTemplateRepository[IO]:
       override def listAlbumStartTemplates: IO[SpreadTemplateRepository.ListAlbumStartTemplatesResult]     = albums.pure[IO]
       override def listChapterStartTemplates: IO[SpreadTemplateRepository.ListChapterStartTemplatesResult] = chapters.pure[IO]
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateRepository.ListPhotosOnlyTemplatesResult]     = photos.pure[IO]
+      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateRepository.FindTemplateResult]     = lookup.pure[IO]
     SpreadTemplateManager.make(repository)
+  // scalafix:on DisableSyntax.defaultArgs

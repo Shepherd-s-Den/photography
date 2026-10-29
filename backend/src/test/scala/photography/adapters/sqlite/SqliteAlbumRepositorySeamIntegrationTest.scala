@@ -111,7 +111,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(removed, GetResult.NotFound)
         assertEquals(owned, 0L)
-        assertEquals(templates, 31L)
+        assertEquals(templates, 99L)
 
   test("should roll back every album-owned row when a late cover write fails"):
     buildTransactor.use: xa =>
@@ -425,7 +425,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assertEquals(expectedAlbum.collectCountries, Vector(expectedCountry, japan))
         assertEquals(deleted, DeleteResult.Deleted)
         assertEquals(owned, 0L)
-        assertEquals(shared, (249L, 1L, 33L, 1L))
+        assertEquals(shared, (249L, 1L, 101L, 1L))
 
   private def buildTransactor =
     val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "album-", ".sqlite"))

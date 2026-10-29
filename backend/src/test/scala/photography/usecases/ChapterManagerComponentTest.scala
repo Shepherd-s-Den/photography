@@ -596,6 +596,10 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         case ChapterRepository.Update(parent, chapter, destination, name, countries, period, sourceFolder, order) =>
           refs.updates.update(_ :+ (parent, chapter, name, countries, period, sourceFolder, order)) >> writeUpdate(destination).as(updateWrite)
     val catalog = new SpreadTemplateManager[IO]:
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
+        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
+      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult] =
+        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
       override def listAlbumStartTemplates: IO[SpreadTemplateManager.ListAlbumStartTemplatesResult] =
         IO.raiseError[SpreadTemplateManager.ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
       override def listChapterStartTemplates: IO[ListChapterStartTemplatesResult] = templates.pure[IO]
