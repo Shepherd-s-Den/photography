@@ -15,6 +15,7 @@ import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager,
 import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, SpreadTemplateManager}
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 import photography.ports.PhotoThumbnailGenerator.GenerationResult
+import photography.adapters.sqlite.SqliteAlbumCompositionRepository
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
@@ -40,7 +41,8 @@ object AppManagers:
         override def resolve[A](program: ConnectionIO[A]): F[A] = program.transact(sqlite)
       val templateRepository = SqliteSpreadTemplateRepository.make[F](sqlite)
       val templates          = SpreadTemplateManager.make(templateRepository)
-      val albumRepository    = SqliteAlbumRepository.make[F](sqlite)
+      val albumComposition   = SqliteAlbumCompositionRepository.make
+      val albumRepository    = SqliteAlbumRepository.make[F](sqlite, albumComposition)
       val chapterRepository  = SqliteChapterRepository.make
       val countries          = SqliteCountryRepository.make[F](sqlite)
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)

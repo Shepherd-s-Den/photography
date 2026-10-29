@@ -1,5 +1,11 @@
 package photography.adapters.sqlite
 
+import photography.adapters.sqlite.FlywayMigrator
+import photography.adapters.sqlite.SqliteConnection
+import photography.adapters.sqlite.SqliteAlbumRepository
+import photography.adapters.sqlite.SqlitePhotoRepository
+import photography.adapters.sqlite.SqliteSpreadTemplateRepository
+
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.std.Mutex
@@ -16,9 +22,14 @@ import photography.adapters.filesystem.FileThumbnailStorage
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.ports.{AlbumRepository, ChapterRepository, PhotoRepository, SpreadTemplateRepository}
+import photography.ports.AlbumRepository
+import photography.ports.ChapterRepository
+import photography.ports.PhotoRepository
+import photography.ports.SpreadTemplateRepository
 import photography.syntax.SyncSyntax.*
-import photography.usecases.{ChapterManager, ChapterPhotoImport, ChapterPlanning, PhotoWriteRecovery, SpreadTemplateManager}
+import photography.usecases.{ChapterManager, ChapterPlanning}
+import photography.usecases.{ChapterPhotoImport, PhotoWriteRecovery}
+import photography.usecases.SpreadTemplateManager
 import photography.usecases.ChapterPhotoImport.{ExecutionOutcome, Request, Scheduling, Status}
 
 import java.nio.file.{Files, Path}
@@ -82,7 +93,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should persist complete openings and supplied order, isolate shared destinations and preserve description and composition on metadata edits"):
     buildTransactor.use: xa =>
-      val albums                   = SqliteAlbumRepository.make[IO](xa)
+      val albums                   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
       val chapters                 = SqliteChapterRepository.make
       val newName: DestinationName = "Changed"
       val newCountries             = NonEmptyList.of(otherCountry, country)
@@ -148,7 +159,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       "CREATE TRIGGER fail_write BEFORE UPDATE OF position ON chapter WHEN NEW.position = 0 BEGIN SELECT RAISE(ABORT, 'order failure'); END"
     ).traverse_ { trigger =>
       buildTransactor.use: xa =>
-        val albums   = SqliteAlbumRepository.make[IO](xa)
+        val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
         val chapters = SqliteChapterRepository.make
 
         for
@@ -195,7 +206,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should report missing ownership and roll back metadata when the final ordering write fails"):
     buildTransactor.use: xa =>
-      val albums                       = SqliteAlbumRepository.make[IO](xa)
+      val albums                       = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
       val chapters                     = SqliteChapterRepository.make
       val missing                      = AlbumId(new UUID(2L, 2L))
       val revisedName: DestinationName = "Changed"
@@ -260,7 +271,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val slots = sql"SELECT id, x, y, width, height FROM spread_photo_slot ORDER BY id".query[(String, Double, Double, Double, Double)].to[Vector]
         val coverSlots = sql"SELECT id, side FROM cover_slot ORDER BY id".query[(String, String)].to[Vector]
         val change     = buildConnection(path).use: xa =>
-          val albums             = SqliteAlbumRepository.make[IO](xa)
+          val albums             = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
           val templateRepository = SqliteSpreadTemplateRepository.make[IO](xa)
           val templates          = SpreadTemplateManager.make(templateRepository)
           val calls              = Ref.unsafe[IO, Int](0)
@@ -441,7 +452,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       case SpreadTemplateRepository.ListAlbumStartTemplatesResult.Listed(values) =>
         val (album, cover) = buildAlbum(values.head)
         for
-          saved <- SqliteAlbumRepository.make[IO](xa).create(album, cover)
+          saved <- SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make).create(album, cover)
           _     <- IO(assertEquals(saved, AlbumRepository.CreateResult.Created))
           _     <- insertCountries.update.run.transact(xa)
         yield ()
