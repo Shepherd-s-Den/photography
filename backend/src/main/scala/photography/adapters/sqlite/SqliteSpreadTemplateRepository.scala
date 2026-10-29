@@ -35,51 +35,11 @@ object SqliteSpreadTemplateRepository:
         case Left(error) =>
           Logger[F].error(error)("Could not list chapter opening templates").as(ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
 
-    override def listPhotosOnlyTemplates: F[SpreadTemplateRepository.ListPhotosOnlyTemplatesResult] =
-      loadPhotoLayouts.transact(transactor).attempt.flatMap:
-        case Right(templates) => ListPhotosOnlyTemplatesResult.Listed(templates).pure[F]
-        case Left(error)      =>
-          Logger[F].error(error)("Could not list photo spread templates").as(ListPhotosOnlyTemplatesResult.Failed(Failure.DatabaseFailure))
+    override def listPhotosOnlyTemplates: F[ListPhotosOnlyTemplatesResult] =
+      new UnsupportedOperationException("Photo template listing is deferred to the adapter slice").raiseError[F, ListPhotosOnlyTemplatesResult]
 
-    override def findTemplate(id: SpreadTemplateId): F[SpreadTemplateRepository.FindTemplateResult] =
-      loadTemplate(id.value).transact(transactor).attempt.flatMap:
-        case Right(Some(template)) => FindTemplateResult.Found(template).pure[F]
-        case Right(None)           => FindTemplateResult.NotFound.pure[F]
-        case Left(error)           => Logger[F].error(error)("Could not find spread template").as(FindTemplateResult.Failed(Failure.DatabaseFailure))
-
-    private def loadPhotoLayouts =
-      val select = sql"SELECT id, name FROM spread_template WHERE kind = 'photos_only' ORDER BY id"
-      for
-        rows      <- select.query[(UUID, SpreadTemplateName)].to[List]
-        templates <- rows.traverse { case (id, name) => loadPhotoTemplate(id, name) }
-        nonEmpty  <- NonEmptyList.fromList(templates).toRight(new IllegalArgumentException("No photos_only templates")).liftTo[ConnectionIO]
-      yield nonEmpty
-
-    private def loadPhotoTemplate(id: UUID, name: SpreadTemplateName) =
-      loadPhotoSlots(id).map(photos => SpreadTemplate.PhotosOnly(SpreadTemplateId(id), name, photoSlots = photos))
-
-    private def loadTemplate(id: UUID) =
-      sql"SELECT kind, name FROM spread_template WHERE id = $id".query[(String, SpreadTemplateName)].option.flatMap:
-        case None                        => Option.empty[SpreadTemplate].pure[ConnectionIO]
-        case Some(("photos_only", name)) =>
-          loadPhotoSlots(id).map(photos => (SpreadTemplate.PhotosOnly(SpreadTemplateId(id), name, photoSlots = photos): SpreadTemplate).some)
-        case Some(("album_start", name)) =>
-          loadSlots(id).map { case (photos, text) =>
-            (SpreadTemplate.AlbumStart(SpreadTemplateId(id), name, photoSlots = photos, text): SpreadTemplate).some
-          }
-        case Some(("chapter_start", name)) =>
-          loadSlots(id).map { case (photos, text) =>
-            (SpreadTemplate.ChapterStart(SpreadTemplateId(id), name, photoSlots = photos, text): SpreadTemplate).some
-          }
-        case Some((kind, _)) => new IllegalArgumentException(s"Unknown spread template kind $kind").raiseError[ConnectionIO, Option[SpreadTemplate]]
-
-    private def loadPhotoSlots(id: UUID) =
-      val select = sql"SELECT kind, x, y, width, height FROM spread_template_slot WHERE template_id = $id ORDER BY id"
-      select.query[(String, SlotBox)].to[List].flatMap: rows =>
-        val photos   = rows.collect { case ("photo", box) => box }
-        val complete = photos.nonEmpty && photos.size === rows.size
-        NonEmptyList.fromList(photos).filter(_ => complete)
-          .toRight(new IllegalArgumentException(s"Invalid photo slots for template $id")).liftTo[ConnectionIO]
+    override def findTemplate(id: SpreadTemplateId): F[FindTemplateResult] =
+      new UnsupportedOperationException("Template lookup is deferred to the adapter slice").raiseError[F, FindTemplateResult]
 
     private def loadOpenings(kind: String) =
       val select = sql"SELECT id, name FROM spread_template WHERE kind = $kind ORDER BY id"

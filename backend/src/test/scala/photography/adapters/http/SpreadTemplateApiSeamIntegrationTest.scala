@@ -45,57 +45,13 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
       assertEquals(unavailable.status -> failureBody, Status.InternalServerError -> expectedFailure)
       assertEquals(unavailable.contentType.map(_.mediaType), MediaType.application.json.some)
 
-  test("should list photo layouts and chapter openings with ordered geometry and report catalog failures"):
-    val photoLayout   = SpreadTemplate.PhotosOnly(SpreadTemplateId(new UUID(0L, 30L)), name = "Single".refineUnsafe, NonEmptyList.one(photoBox))
-    val chapterLayout = SpreadTemplate.ChapterStart(SpreadTemplateId(new UUID(0L, 31L)), name = "Opening".refineUnsafe, Vector(photoBox), synopsisBox)
-    val catalogs      = buildCatalogApi(
-      SpreadTemplateManager.ListPhotosOnlyTemplatesResult.Listed(NonEmptyList.one(photoLayout)),
-      SpreadTemplateManager.ListChapterStartTemplatesResult.Listed(NonEmptyList.one(chapterLayout))
-    )
-    val unavailable =
-      buildCatalogApi(SpreadTemplateManager.ListPhotosOnlyTemplatesResult.Failed, SpreadTemplateManager.ListChapterStartTemplatesResult.Failed)
-    val photosRequest    = Request[IO](Method.GET, Uri.unsafeFromString("/api/templates/photos-only"))
-    val chapterRequest   = Request[IO](Method.GET, Uri.unsafeFromString("/api/templates/chapter-start"))
-    val expectedPhoto    = """{"kind":"photo","x":0.0,"y":0.0,"width":21.0,"height":28.0}"""
-    val expectedText     = """{"kind":"text","x":21.0,"y":0.0,"width":21.0,"height":28.0}"""
-    val expectedPhotos   = parse(s"""{"templates":[{"id":"${photoLayout.id.value}","name":"Single","slots":[$expectedPhoto]}]}""")
-    val expectedChapters = parse(s"""{"templates":[{"id":"${chapterLayout.id.value}","name":"Opening","slots":[$expectedPhoto,$expectedText]}]}""")
-
-    for
-      photos            <- catalogs.run(photosRequest)
-      photoBody         <- photos.as[Json]
-      chapters          <- catalogs.run(chapterRequest)
-      chapterBody       <- chapters.as[Json]
-      failed            <- unavailable.run(photosRequest)
-      failedBody        <- failed.as[Json]
-      failedChapters    <- unavailable.run(chapterRequest)
-      failedChapterBody <- failedChapters.as[Json]
-    yield
-      assertEquals(photos.status   -> photoBody, Status.Ok                   -> expectedPhotos.fold(error => fail(error.message), identity))
-      assertEquals(chapters.status -> chapterBody, Status.Ok                 -> expectedChapters.fold(error => fail(error.message), identity))
-      assertEquals(failed.status   -> failedBody, Status.InternalServerError -> Json.obj("code" -> Json.fromString("service_failure")))
-      assertEquals(failedChapters.status -> failedChapterBody, Status.InternalServerError -> Json.obj("code" -> Json.fromString("service_failure")))
-
-  private def buildCatalogApi(
-      photos: SpreadTemplateManager.ListPhotosOnlyTemplatesResult,
-      chapters: SpreadTemplateManager.ListChapterStartTemplatesResult
-  ) =
-    val templates = new SpreadTemplateManager[IO]:
-      override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult] =
-        IO.raiseError[ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
-      override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] = chapters.pure[IO]
-      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult]     = photos.pure[IO]
-      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult]     =
-        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
-    SpreadTemplateApi.make(templates).routes.orNotFound
-
   private def buildSpreadTemplateApi(result: ListAlbumStartTemplatesResult) =
     val templates = new SpreadTemplateManager[IO]:
-      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
-        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
-      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult] =
-        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = result.pure[IO]
       override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] =
         SpreadTemplateManager.ListChapterStartTemplatesResult.Failed.pure[IO]
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
+        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo template listing"))
+      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult] =
+        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
     SpreadTemplateApi.make(templates).routes.orNotFound

@@ -13,8 +13,7 @@ import org.http4s.headers.`Cache-Control`
 import org.http4s.circe.jsonDecoder
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.usecases.{AlbumManager, AlbumWorkspaceManager}
-import photography.usecases.ChapterManager
+import photography.usecases.{AlbumManager, AlbumWorkspaceManager, ChapterManager}
 import photography.usecases.AlbumManager.*
 import photography.usecases.AlbumWorkspaceManager.GetResult
 import photography.usecases.ChapterManager.{CreateResult, Period, UpdateResult}
@@ -70,12 +69,12 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       "chapters":[{"id":"${chapter.id.value}","kind":"vacation","name":"Coast","countries":["${country.id.value}"],
         "start":"2024-02-29","end":"2024-03-01","sourceFolder":"/photos/coast","description":"Sea air"}],
       "spreads":[
-        {"id":"${album.opening.id.value}","chapter":null,"kind":"album_start","templateId":"${template.value}","slots":[
+        {"id":"${album.opening.id.value}","chapter":null,"kind":"album_start","slots":[
           {"id":"${text.id.value}","kind":"text","x":10.0,"y":20.0,"width":30.0,"height":40.0}]},
-        {"id":"${chapter.opening.id.value}","chapter":"${chapter.id.value}","kind":"chapter_start","templateId":"${template.value}","slots":[
+        {"id":"${chapter.opening.id.value}","chapter":"${chapter.id.value}","kind":"chapter_start","slots":[
           {"id":"${photo.id.value}","kind":"photo","x":10.0,"y":20.0,"width":30.0,"height":40.0},
           {"id":"${text.id.value}","kind":"text","x":10.0,"y":20.0,"width":30.0,"height":40.0}]},
-        {"id":"${new UUID(0L, 5L)}","chapter":"${chapter.id.value}","kind":"photos_only","templateId":"${template.value}","slots":[
+        {"id":"${new UUID(0L, 5L)}","chapter":"${chapter.id.value}","kind":"photos_only","slots":[
           {"id":"${photo.id.value}","kind":"photo","x":10.0,"y":20.0,"width":30.0,"height":40.0}]}],
       "countries":[{"id":"${country.id.value}","name":"Romania","code":"RO"},{"id":"${otherCountry.id.value}","name":"Japan","code":"JP"}],
       "photoInventories":{}}""")
