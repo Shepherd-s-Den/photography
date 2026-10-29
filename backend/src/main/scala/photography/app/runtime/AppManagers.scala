@@ -19,7 +19,6 @@ import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager,
 import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, SpreadTemplateManager}
 import photography.usecases.SpreadManager
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
-import photography.ports.PhotoThumbnailGenerator.GenerationResult
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
@@ -54,11 +53,8 @@ object AppManagers:
       val placements         = SqlitePhotoPlacementRepository.make
       val inventory          = PhotoInventory.make[F, ConnectionIO](photoRepository, placements, chapterRepository)
       val storage            = FilePhotoStorage.make(thumbnails)
-      val selectedQuality    = quality
-      val generator          = new ImageIoPhotoThumbnailGenerator[F]:
-        override val quality: ThumbnailQuality                            = selectedQuality
-        override def generate(content: PhotoContent): F[GenerationResult] =
-          Async[F].raiseError(new UnsupportedOperationException("ImageIO generation is deferred to the adapter slice"))
+      val generator          = ImageIoPhotoThumbnailGenerator.make[F](quality)
+
       val planning = ChapterPlanning.make(templates)
       Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
         ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
