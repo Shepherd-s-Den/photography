@@ -47,7 +47,8 @@ object AppManagers:
       val inventory          = PhotoInventory.make[F, ConnectionIO](photoRepository, placements, chapterRepository)
       val storage            = FilePhotoStorage.make(thumbnails)
       val generator          = ImageIoPhotoThumbnailGenerator.make[F](quality)
-      val planning           = ChapterPlanning.make(templates)
+
+      val planning = ChapterPlanning.make(templates)
       Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
         ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
           val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
