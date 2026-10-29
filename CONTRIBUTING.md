@@ -35,10 +35,6 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 | `specs/` | Living product design, contracts, testing, and operational context. |
 | `ci/specs/` | Living documentation for the CI pipeline. |
 
-### Backend organization
-
-Image decoding and thumbnail encoding belong to the `imageio` adapter. Application contracts have component tests; adapters have seam tests against their real external boundary.
-
 ## Documentation style
 
 - Keep documentation short, technical, and concise. Maximize signal and avoid restating facts owned elsewhere.

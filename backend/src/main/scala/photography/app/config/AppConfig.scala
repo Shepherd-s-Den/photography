@@ -27,7 +27,6 @@ final case class AlbumsConfig(pageSize: AlbumPageSize, photoRoot: PhotoSource) d
 final case class ThumbnailsConfig(root: Path, quality: ThumbnailQuality)
 
 object ThumbnailsConfig:
-  // Configuration reader composition is smoke-tested through AppConfig.make.
   // $COVERAGE-OFF$
   given ConfigReader[ThumbnailsConfig] =
     ConfigReader.forProduct2("root", "quality")(ThumbnailsConfig.apply)(using

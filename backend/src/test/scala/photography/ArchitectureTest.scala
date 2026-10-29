@@ -11,7 +11,6 @@ import scala.jdk.CollectionConverters.*
 
 class ArchitectureTest extends FunSuite:
 
-  // sbt 2 uses content-addressed jars without a test suffix, so identify the test container by its actual code source.
   private val testCodeLocation                 = classOf[ArchitectureTest].getProtectionDomain.getCodeSource.getLocation.toURI.toString
   private val excludeTestClasses: ImportOption = location => !location.contains(testCodeLocation)
 

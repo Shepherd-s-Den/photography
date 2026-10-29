@@ -11,8 +11,8 @@ import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.ports.SpreadRepository
-import photography.ports.SpreadRepository.Located
+import photography.ports.{AlbumCompositionRepository, SpreadRepository}
+import photography.ports.AlbumCompositionRepository.Located
 import photography.usecases.SpreadManager.*
 import photography.usecases.SpreadTemplateManager.FindTemplateResult
 
@@ -452,27 +452,22 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
       override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
         IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
       override def findTemplate(id: SpreadTemplateId): IO[FindTemplateResult] = maybeTemplateResult.getOrElse(resolveCatalog(id)).pure[IO]
-    val writes     = maybeWriteError.fold(IO.unit)(error => IO.raiseError[Unit](error))
-    val repository = new SpreadRepository[IO]:
-      override def exists(value: AlbumId): IO[Boolean] =
+    val composition = new AlbumCompositionRepository[IO]:
+      override def hasAlbum(value: AlbumId): IO[Boolean] =
         maybeReadError.fold(maybeAlbum.exists(_.id.value === value.value).pure[IO])(error => IO.raiseError[Boolean](error))
-      override def countInterior(value: AlbumId): IO[Int] =
+      override def countInteriorSpreads(value: AlbumId): IO[Int] =
         maybeAlbum.filter(_.id.value === value.value).fold(0)(_.collectSpreads.length).pure[IO]
-      override def findOrder(value: AlbumId, chapterId: ChapterId): IO[Option[NonEmptyList[SpreadId]]] =
+      override def findChapterOrder(value: AlbumId, chapterId: ChapterId): IO[Option[NonEmptyList[SpreadId]]] =
         maybeAlbum.filter(_.id.value === value.value).flatMap(_.chapters.find(_.id.value === chapterId.value))
           .map(chapter => NonEmptyList(chapter.opening.id, tail = chapter.spreads.map(_.id).toList)).pure[IO]
-      override def find(value: AlbumId, id: SpreadId): IO[Option[Located]] =
+      override def findSpread(value: AlbumId, id: SpreadId): IO[Option[Located]] =
         maybeAlbum.filter(_.id.value === value.value).flatMap: album =>
           val located = Vector[Located](Located.AlbumOpening(album.opening)) ++ album.chapters.flatMap: chapter =>
             Vector[Located](Located.ChapterOpening(chapter.id, chapter.opening)) ++ chapter.spreads.map(Located.Photo(chapter.id, _))
           located.find(_.spread.id.value === id.value)
         .pure[IO]
-      override def readOpening(value: AlbumId): IO[Spread.AlbumStart] =
-        IO.raiseError[Spread.AlbumStart](new AssertionError("Unexpected aggregate opening read"))
-      override def readChapter(value: ChapterId): IO[(Spread.ChapterStart, Vector[Spread.PhotosOnly])] =
-        IO.raiseError[(Spread.ChapterStart, Vector[Spread.PhotosOnly])](new AssertionError("Unexpected aggregate chapter read"))
-      override def insertOpening(value: AlbumId, spread: Spread.AlbumStart): IO[Unit] =
-        IO.raiseError[Unit](new AssertionError("Unexpected initial opening write"))
+    val writes     = maybeWriteError.fold(IO.unit)(error => IO.raiseError[Unit](error))
+    val repository = new SpreadRepository[IO]:
       override def insert(chapterId: ChapterId, spread: Spread.PhotosOnly): IO[Unit] =
         refs.inserts.update(_ :+ (chapterId, spread)) >> writes
       override def replace(spread: Spread): IO[Unit]                                      = refs.replacements.update(_ :+ spread) >> writes
@@ -484,7 +479,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
       given transaction: Transaction[IO, IO] with
         override def run[A](program: IO[A]): IO[A]     = program
         override def resolve[A](program: IO[A]): IO[A] = program
-      SpreadManager.make(templates, repository, defaultLayout)
+      SpreadManager.make(templates, composition, repository, defaultLayout)
   // scalafix:on DisableSyntax.defaultArgs
 
   private def resolveCatalog(id: SpreadTemplateId) =

@@ -10,8 +10,8 @@ import org.typelevel.log4cats.Logger
 import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.{AlbumId, ChapterId, InteriorSpreadCapacity}
 import photography.domain.layout.*
-import photography.ports.SpreadRepository
-import photography.ports.SpreadRepository.Located
+import photography.ports.{AlbumCompositionRepository, SpreadRepository}
+import photography.ports.AlbumCompositionRepository.Located
 import photography.syntax.EitherSyntax.*
 import photography.syntax.EitherSyntax.Pure.*
 import photography.usecases.SpreadManager.*
@@ -26,13 +26,15 @@ trait SpreadManager[F[_]]:
 object SpreadManager:
   def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       templates: SpreadTemplateManager[F],
+      composition: AlbumCompositionRepository[Db],
       spreads: SpreadRepository[Db],
       defaultPhotoLayout: SpreadTemplateId
   )(using Transaction[Db, F]): SpreadManager[F] =
-    new LiveSpreadManager(templates, spreads, defaultPhotoLayout)
+    new LiveSpreadManager(templates, composition, spreads, defaultPhotoLayout)
 
   final private class LiveSpreadManager[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       templates: SpreadTemplateManager[F],
+      composition: AlbumCompositionRepository[Db],
       spreads: SpreadRepository[Db],
       defaultPhotoLayout: SpreadTemplateId
   )(using Transaction[Db, F]) extends SpreadManager[F]:
@@ -43,12 +45,12 @@ object SpreadManager:
             buildPhotoSpread(layout).flatMap: fresh =>
               val mutation =
                 for
-                  _        <- spreads.exists(album).map(Either.cond(_, (), AddResult.AlbumNotFound: AddResult)).eitherT
-                  order    <- spreads.findOrder(album, chapter).orFail(ifEmpty = AddResult.ChapterNotFound: AddResult)
-                  target   <- spreads.find(album, after).orFail(ifEmpty = AddResult.SpreadNotFound: AddResult)
+                  _        <- composition.hasAlbum(album).map(Either.cond(_, (), AddResult.AlbumNotFound: AddResult)).eitherT
+                  order    <- composition.findChapterOrder(album, chapter).orFail(ifEmpty = AddResult.ChapterNotFound: AddResult)
+                  target   <- composition.findSpread(album, after).orFail(ifEmpty = AddResult.SpreadNotFound: AddResult)
                   _        <- (!isAlbumOpening(target)).ensure[Db, AddResult](ifFalse = AddResult.Rejected(Conflict.AddTarget))
                   inserted <- insertAfter(order = order, after, fresh.id).orFail[Db, AddResult](ifEmpty = AddResult.SpreadNotFound)
-                  count    <- spreads.countInterior(album).lift[AddResult]
+                  count    <- composition.countInteriorSpreads(album).lift[AddResult]
                   _        <- (!InteriorSpreadCapacity.isReached(count)).ensure[Db, AddResult](ifFalse = AddResult.Rejected(Conflict.AtCapacity))
                   _        <- (spreads.insert(chapter, fresh) >> spreads.reorder(chapter, order = inserted)).lift[AddResult]
                 yield AddResult.Added(fresh.id): AddResult
@@ -58,10 +60,10 @@ object SpreadManager:
     override def move(album: AlbumId, spread: SpreadId, direction: Direction): F[MoveResult] =
       val mutation =
         for
-          _       <- spreads.exists(album).map(Either.cond(_, (), MoveResult.AlbumNotFound: MoveResult)).eitherT
-          target  <- spreads.find(album, spread).orFail(ifEmpty = MoveResult.SpreadNotFound: MoveResult)
+          _       <- composition.hasAlbum(album).map(Either.cond(_, (), MoveResult.AlbumNotFound: MoveResult)).eitherT
+          target  <- composition.findSpread(album, spread).orFail(ifEmpty = MoveResult.SpreadNotFound: MoveResult)
           photo   <- findPhoto(target).orFail[Db, MoveResult](ifEmpty = MoveResult.Rejected(Conflict.OpeningMove))
-          order   <- spreads.findOrder(album, photo.chapter).orFail(ifEmpty = MoveResult.SpreadNotFound: MoveResult)
+          order   <- composition.findChapterOrder(album, photo.chapter).orFail(ifEmpty = MoveResult.SpreadNotFound: MoveResult)
           swapped <- swapNeighbour(order = order, spread, direction).orFail[Db, MoveResult](ifEmpty = MoveResult.Rejected(Conflict.NoNeighbour))
           _       <- spreads.reorder(photo.chapter, order = swapped).lift[MoveResult]
         yield MoveResult.Moved(spread): MoveResult
@@ -79,8 +81,8 @@ object SpreadManager:
             buildReplacement(layout).flatMap: replace =>
               val mutation =
                 for
-                  _      <- spreads.exists(album).map(Either.cond(_, (), ChangeTemplateResult.AlbumNotFound: ChangeTemplateResult)).eitherT
-                  target <- spreads.find(album, spread).orFail(ifEmpty = ChangeTemplateResult.SpreadNotFound: ChangeTemplateResult)
+                  _      <- composition.hasAlbum(album).map(Either.cond(_, (), ChangeTemplateResult.AlbumNotFound: ChangeTemplateResult)).eitherT
+                  target <- composition.findSpread(album, spread).orFail(ifEmpty = ChangeTemplateResult.SpreadNotFound: ChangeTemplateResult)
                   fresh  <- replace(target.spread).orFail[Db, ChangeTemplateResult](ifEmpty = ChangeTemplateResult.Rejected(Conflict.ContextMismatch))
                   count = target.spread.placements.size
                   _ <- checkConfirmation(count = count, confirmed = confirmPlacements).leftMap(ChangeTemplateResult.Occupied(_)).eitherT[Db]
@@ -93,12 +95,12 @@ object SpreadManager:
     override def delete(album: AlbumId, spread: SpreadId, confirmPlacements: Boolean): F[DeleteResult] =
       val mutation =
         for
-          _      <- spreads.exists(album).map(Either.cond(_, (), DeleteResult.AlbumNotFound: DeleteResult)).eitherT
-          target <- spreads.find(album, spread).orFail(ifEmpty = DeleteResult.SpreadNotFound: DeleteResult)
+          _      <- composition.hasAlbum(album).map(Either.cond(_, (), DeleteResult.AlbumNotFound: DeleteResult)).eitherT
+          target <- composition.findSpread(album, spread).orFail(ifEmpty = DeleteResult.SpreadNotFound: DeleteResult)
           photo  <- findPhoto(target).orFail[Db, DeleteResult](ifEmpty = DeleteResult.Rejected(Conflict.OpeningDelete))
           count = photo.value.placements.size
           _     <- checkConfirmation(count = count, confirmed = confirmPlacements).leftMap(DeleteResult.Occupied(_): DeleteResult).eitherT[Db]
-          order <- spreads.findOrder(album, photo.chapter).orFail(ifEmpty = DeleteResult.SpreadNotFound: DeleteResult)
+          order <- composition.findChapterOrder(album, photo.chapter).orFail(ifEmpty = DeleteResult.SpreadNotFound: DeleteResult)
           remaining = removeFromOrder(order = order, spread)
           _ <- (spreads.remove(spread) >> spreads.reorder(photo.chapter, order = remaining)).lift[DeleteResult]
         yield DeleteResult.Deleted: DeleteResult
