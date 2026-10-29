@@ -35,6 +35,12 @@ object SqliteSpreadTemplateRepository:
         case Left(error) =>
           Logger[F].error(error)("Could not list chapter opening templates").as(ListChapterStartTemplatesResult.Failed(Failure.DatabaseFailure))
 
+    override def listPhotosOnlyTemplates: F[ListPhotosOnlyTemplatesResult] =
+      new UnsupportedOperationException("Photo template listing is deferred to the adapter slice").raiseError[F, ListPhotosOnlyTemplatesResult]
+
+    override def findTemplate(id: SpreadTemplateId): F[FindTemplateResult] =
+      new UnsupportedOperationException("Template lookup is deferred to the adapter slice").raiseError[F, FindTemplateResult]
+
     private def loadOpenings(kind: String) =
       val select = sql"SELECT id, name FROM spread_template WHERE kind = $kind ORDER BY id"
       for

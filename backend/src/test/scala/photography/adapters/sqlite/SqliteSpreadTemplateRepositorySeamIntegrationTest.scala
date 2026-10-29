@@ -16,8 +16,8 @@ import java.nio.file.{Files, Path}
 
 final class SqliteSpreadTemplateRepositorySeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]               = Slf4jLogger.getLogger[IO]
-  private val defaultTemplateName        = "2×2 L + Synopsis R"
-  private val defaultChapterTemplateName = "Text + 2P + 2L"
+  private val defaultTemplateName        = "2 x (L/L) + Text"
+  private val defaultChapterTemplateName = "Text + 2 x P + (L/L)"
 
   test(s"should preserve ordered synopsis-right templates with $defaultTemplateName first"):
     buildTransactor.use: xa =>

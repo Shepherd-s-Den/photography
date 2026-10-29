@@ -281,7 +281,6 @@ object SqliteAlbumRepository:
       case CaptionCorner.BottomRight => "bottom_right"
     }
 
-  // doobie RC13 reads ordinary tuples; their decoded values widen to these named row views at the consuming calls.
   private type SpreadRow = (
       id: UUID,
       template: UUID,

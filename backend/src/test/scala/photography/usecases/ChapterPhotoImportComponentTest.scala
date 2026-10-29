@@ -1,5 +1,7 @@
 package photography.usecases
 
+import photography.ports.PhotoThumbnailGenerator
+
 import cats.data.Kleisli
 import cats.Id
 import cats.effect.{Deferred, IO, Outcome, Ref}

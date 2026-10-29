@@ -50,4 +50,8 @@ final class SpreadTemplateApiSeamIntegrationTest extends CatsEffectSuite:
       override def listAlbumStartTemplates: IO[ListAlbumStartTemplatesResult]                           = result.pure[IO]
       override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] =
         SpreadTemplateManager.ListChapterStartTemplatesResult.Failed.pure[IO]
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
+        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo template listing"))
+      override def findTemplate(id: SpreadTemplateId): IO[SpreadTemplateManager.FindTemplateResult] =
+        IO.raiseError[SpreadTemplateManager.FindTemplateResult](new AssertionError("Unexpected template lookup"))
     SpreadTemplateApi.make(templates).routes.orNotFound

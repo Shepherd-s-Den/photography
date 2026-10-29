@@ -1,5 +1,7 @@
 package photography.usecases
 
+import photography.ports.PhotoThumbnailGenerator
+
 import cats.MonadThrow
 import cats.effect.Async
 import cats.syntax.all.*

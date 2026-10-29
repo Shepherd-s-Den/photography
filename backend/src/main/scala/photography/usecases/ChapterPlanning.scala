@@ -1,5 +1,7 @@
 package photography.usecases
 
+import photography.usecases.SpreadTemplateManager
+
 import cats.Monad
 import cats.data.NonEmptyList
 import cats.syntax.all.*
@@ -39,7 +41,9 @@ object ChapterPlanning:
         folder: PhotoSource
     ): CreationResult =
       val resolved      = resolvePeriod(year, period)
-      val maybeConflict = if spreadCount >= 65 then ChapterConflict.AtCapacity.some else findMetadataConflict(year, chapters, name, resolved, folder)
+      val maybeConflict =
+        if InteriorSpreadCapacity.isReached(spreadCount) then ChapterConflict.AtCapacity.some
+        else findMetadataConflict(year, chapters = chapters, name, resolved, folder)
       maybeConflict.fold[CreationResult](CreationResult.Planned(resolved))(CreationResult.Rejected(_))
 
     override def planUpdate(

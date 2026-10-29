@@ -1,5 +1,7 @@
 package photography.usecases
 
+import photography.ports.PhotoThumbnailGenerator
+
 import cats.{Eq, MonadThrow}
 import cats.effect.{Async, Fiber, Ref, Resource}
 import cats.effect.std.{Mutex, Supervisor}

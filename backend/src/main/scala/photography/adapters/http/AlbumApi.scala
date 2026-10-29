@@ -70,7 +70,6 @@ object AlbumApi:
 
     private object Page:
       def unapply(query: Query): Option[Int] =
-        // multiParams drops valueless repetitions, so enforce cardinality before decoding.
         query.pairs.collect { case ("page", value) => value } match
           case Vector()            => 1.some
           case Vector(Some(value)) => QueryParamDecoder[Int].decode(QueryParameterValue(value)).toOption

@@ -20,7 +20,8 @@ import photography.domain.album.*
 import photography.ports.PhotoRepository.*
 import photography.ports.{PhotoStorage, ThumbnailStorage}
 import photography.syntax.SyncSyntax.*
-import photography.usecases.{PhotoManager, PhotoThumbnailGenerator, PhotoWriteRecovery}
+import photography.usecases.{PhotoManager, PhotoWriteRecovery}
+import photography.ports.PhotoThumbnailGenerator
 import java.nio.file.{Files, Path}
 import java.time.LocalDateTime
 import java.util.UUID
