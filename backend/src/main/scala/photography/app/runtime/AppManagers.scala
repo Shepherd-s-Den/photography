@@ -15,13 +15,18 @@ import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager,
 import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, SpreadTemplateManager}
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 import photography.ports.PhotoThumbnailGenerator.GenerationResult
+import photography.adapters.sqlite.{SqliteAlbumCompositionRepository, SqliteSpreadRepository}
+import photography.domain.layout.SpreadTemplateId
+import photography.usecases.SpreadManager
+import java.util.UUID
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
     chapters: ChapterManager[F],
     templates: SpreadTemplateManager[F],
     workspaces: AlbumWorkspaceManager[F],
-    photoEvents: AlbumPhotoEvents[F]
+    photoEvents: AlbumPhotoEvents[F],
+    spreads: SpreadManager[F]
 )
 
 object AppManagers:
@@ -52,9 +57,14 @@ object AppManagers:
         override val quality: ThumbnailQuality                            = selectedQuality
         override def generate(content: PhotoContent): F[GenerationResult] =
           Async[F].raiseError(new UnsupportedOperationException("ImageIO generation is deferred to the adapter slice"))
-      val planning = ChapterPlanning.make(templates)
+      val planning         = ChapterPlanning.make(templates)
+      val composition      = SqliteAlbumCompositionRepository.make
+      val spreadRepository = SqliteSpreadRepository.make
+      val spreads          = SpreadManager.make(templates, composition, spreadRepository, defaultPhotoLayout)
       Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
         ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
           val chapters   = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
           val workspaces = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
-          AppManagers(albums, chapters, templates, workspaces, events)
+          AppManagers(albums, chapters, templates, workspaces, events, spreads)
+
+  private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))
