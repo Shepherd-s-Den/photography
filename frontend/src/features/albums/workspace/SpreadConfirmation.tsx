@@ -36,7 +36,9 @@ export function SpreadConfirmation(props: {
       <h2>{props.deleting ? "Delete occupied spread?" : "Change occupied spread template?"}</h2>
       <p id="spread-confirmation-details">
         This spread contains {props.placements} placements.{" "}
-        {props.deleting ? "Deleting releases all its photos." : "Changing the template resets matched photos and releases photos that no longer fit."}{" "}
+        {props.deleting
+          ? "Deleting releases all its photos."
+          : "Changing the template fits photos into the new slots where possible and returns photos that do not fit to selection."}{" "}
         Photos remain in the chapter collection.
       </p>
       <Show when={props.error}>{(message) => <p role="alert">{message()}</p>}</Show>

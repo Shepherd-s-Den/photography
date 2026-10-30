@@ -1,5 +1,6 @@
 import type { ChapterDetails, SpreadContext, SpreadTemplate, Workspace } from "./Workspace";
 import type { ChapterSave, PhotoInventory } from "./Photo";
+import type { PlacementClient } from "./Placement";
 
 export const minimumAlbumYear = 1900;
 export const maximumAlbumYear = 2100;
@@ -23,7 +24,7 @@ export interface AlbumPage {
   readonly totalPages: number;
 }
 
-export interface AlbumClient {
+export interface AlbumClient extends PlacementClient {
   readonly list: (page: number) => Promise<AlbumPage>;
   readonly create: (year: number) => Promise<AlbumSummary>;
   readonly rename: (id: string, title: string) => Promise<AlbumSummary>;

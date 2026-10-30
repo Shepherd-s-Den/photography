@@ -1,0 +1,121 @@
+.photo-slot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #dfebec;
+}
+.photo-slot-surface {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  touch-action: none;
+}
+.photo-slot-surface:disabled {
+  opacity: 1;
+}
+.photo-slot-surface img {
+  position: absolute;
+  max-width: none;
+  pointer-events: none;
+}
+.photo-slot-actions {
+  position: absolute;
+  right: 4px;
+  top: 4px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.photo-slot:hover .photo-slot-actions,
+.photo-slot:focus-within .photo-slot-actions,
+.photo-slot-moving .photo-slot-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+button.photo-slot-action {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  border: 0;
+  padding: 3px;
+  background: #0009;
+  color: white;
+  border-radius: 3px;
+}
+button.photo-slot-action:hover,
+button.photo-slot-action:focus-visible {
+  background: #000c;
+}
+button.photo-slot-action[aria-pressed="true"] {
+  background: #197b84;
+}
+.photo-slot-action svg {
+  pointer-events: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.photo-slot-actions button[draggable="true"] {
+  cursor: grab;
+}
+.photo-slot-actions button[draggable="true"]:active {
+  cursor: grabbing;
+}
+.photo-drag-feedback {
+  position: absolute;
+  inset: auto 4px 4px;
+  padding: 4px;
+  color: white;
+  background: #000c;
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.3;
+  pointer-events: none;
+}
+.cover-canvas .cover-back,
+.cover-canvas .cover-front {
+  position: relative;
+}
+.cover-photo {
+  position: absolute;
+  inset: 0;
+}
+.cover-back > span,
+.cover-front > span {
+  z-index: 1;
+  pointer-events: none;
+}
+@media (hover: none) {
+  .photo-slot-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+.photo-thumbnails button {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.photo-thumbnails button img {
+  position: static;
+  width: 100%;
+  height: 100%;
+}

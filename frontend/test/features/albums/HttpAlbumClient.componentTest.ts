@@ -111,6 +111,7 @@ describe("same-origin album HTTP client", () => {
   it("should read chapter inventories with cancellation and schedule Refresh without a request body", async () => {
     const inventory = {
       photos: [],
+      placedPhotoIds: [],
       counts: { unplaced: 0, total: 0 },
       processing: { state: "failed", unsupportedCount: 2, skippedCount: 1, issues: [{ stage: "cleanup", code: "cleanup_failed", filename: null }] },
     };

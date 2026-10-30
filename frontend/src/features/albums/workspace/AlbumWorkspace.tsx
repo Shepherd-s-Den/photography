@@ -1,5 +1,5 @@
-import { Show, createMemo, createSignal, onCleanup, untrack } from "solid-js";
-import { SpreadOccupiedError, type Album, type AlbumClient } from "../model/Album";
+import { Show, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js";
+import { AlbumRequestError, SpreadOccupiedError, type Album, type AlbumClient } from "../model/Album";
 import { describeFailure } from "../model/Presentation";
 import type { Chapter, Workspace } from "../model/Workspace";
 import type { ChapterSave, Scheduling } from "../model/Photo";
@@ -13,6 +13,9 @@ import { findDeletionSelection, findReaderNavigation, findSelection, findSpreadN
 import "./workspace.css";
 import { TemplateSelector } from "./TemplateSelector";
 import { SpreadConfirmation } from "./SpreadConfirmation";
+import { createPlacementSession } from "./PlacementSession";
+import type { PhotoChoice } from "./PhotoDrag";
+import type { CanvasPhotos } from "./Canvas";
 
 type SpreadAction = { opener: HTMLButtonElement; spreadId: string } & (
   | { kind: "add"; chapterId: string }
@@ -25,7 +28,18 @@ type SpreadDestination = { kind: "part"; part: string | null } | { kind: "index"
 export function AlbumWorkspace(props: {
   album: Pick<Album, "id" | "title" | "synopsis">;
   workspace: Workspace;
-  client: Pick<AlbumClient, "createChapter" | "updateChapter" | "templates" | "addSpread" | "moveSpread" | "changeSpreadTemplate" | "deleteSpread">;
+  client: Pick<
+    AlbumClient,
+    | "createChapter"
+    | "updateChapter"
+    | "templates"
+    | "addSpread"
+    | "moveSpread"
+    | "changeSpreadTemplate"
+    | "deleteSpread"
+    | "readPlacements"
+    | "editPlacements"
+  >;
   onRefresh: () => Promise<void>;
   onSaved: (result: ChapterSave) => Promise<void>;
   workspaceError: unknown;
@@ -45,8 +59,18 @@ export function AlbumWorkspace(props: {
   const [spreadPending, setSpreadPending] = createSignal(false);
   const [spreadError, setSpreadError] = createSignal<string>();
   const [failedAction, setFailedAction] = createSignal<SpreadAction>();
+  const [spreadUncertain, setSpreadUncertain] = createSignal(false);
   const [confirmation, setConfirmation] = createSignal<{ action: SpreadAction; placements: number }>();
   const [reloadTarget, setReloadTarget] = createSignal<{ destination: SpreadDestination; opener: HTMLButtonElement }>();
+  const [choice, setChoice] = createSignal<PhotoChoice>();
+  const [reader, setReader] = createSignal(false);
+  const placement = createPlacementSession(
+    untrack(() => props.client),
+    async () => {
+      await props.onRefresh();
+      if (props.workspaceError !== undefined) throw new Error("Workspace refresh failed");
+    },
+  );
   const selection = createMemo(() => findSelection(props.workspace.spreads, part()));
   const selectedSpread = createMemo(() => {
     const selected = selection();
@@ -73,6 +97,28 @@ export function AlbumWorkspace(props: {
   );
   const navigation = createMemo(() => findReaderNavigation(props.workspace.spreads, selection()));
   const spreadNavigation = createMemo(() => findSpreadNavigation(props.workspace.spreads, selection()));
+  const placementTarget = createMemo(() => (part() === "cover" ? "cover" : JSON.stringify(selectedSpread())));
+  createEffect(() => {
+    placementTarget();
+    untrack(() => {
+      setChoice(undefined);
+      const spread = selectedSpread();
+      if (part() === "cover") void placement.load(props.album.id, { kind: "cover" });
+      else if (spread !== undefined) void placement.load(props.album.id, { kind: "spread", id: spread.id });
+      else placement.clear();
+    });
+  });
+  const editing = createMemo<CanvasPhotos>(() => ({
+    session: placement,
+    photos: Object.values(props.workspace.photoInventories).flatMap((inventory) => inventory.photos),
+    choice: choice(),
+    onChoose: setChoice,
+    unavailable: spreadPending() ? "Saving spread. Please wait." : refreshing() ? "Refreshing saved workspace. Please wait." : undefined,
+    reader: reader(),
+  }));
+  const navigationReason = createMemo(() =>
+    spreadUncertain() ? "Reload the saved workspace before choosing another spread action." : placement.navigationReason(),
+  );
   const refreshReason = createMemo(() =>
     spreadPending()
       ? "Saving spread. Please wait."
@@ -82,22 +128,37 @@ export function AlbumWorkspace(props: {
           ? "Reload the saved workspace before editing chapters."
           : undefined,
   );
-  const creationReason = createMemo(() => refreshReason() ?? getChapterCapacityReason(props.workspace.spreads.length));
+  const creationReason = createMemo(() => refreshReason() ?? navigationReason() ?? getChapterCapacityReason(props.workspace.spreads.length));
   let workspaceElement: HTMLElement;
   let refreshGeneration = 0;
   let active = true;
+  const workspacePath = window.location.pathname;
 
   function syncHistory() {
+    if (navigationReason() !== undefined) {
+      const url = new URL(window.location.href);
+      url.pathname = workspacePath;
+      const current = part();
+      if (current === null) url.searchParams.delete("part");
+      else url.searchParams.set("part", current);
+      window.history.replaceState(null, "", url);
+      return;
+    }
     const next = readPart();
     setPart(next);
     if (next !== "cover") setInterior(next);
   }
   window.addEventListener("popstate", syncHistory);
+  const preventDiscard = (event: BeforeUnloadEvent) => {
+    if (navigationReason() !== undefined) event.preventDefault();
+  };
+  window.addEventListener("beforeunload", preventDiscard);
   document.addEventListener("keydown", navigateSpread);
   onCleanup(() => {
     active = false;
     refreshGeneration++;
     window.removeEventListener("popstate", syncHistory);
+    window.removeEventListener("beforeunload", preventDiscard);
     document.removeEventListener("keydown", navigateSpread);
   });
 
@@ -112,6 +173,7 @@ export function AlbumWorkspace(props: {
   }
 
   function select(next: string | null) {
+    if (navigationReason() !== undefined) return;
     const url = new URL(window.location.href);
     if (next === null) url.searchParams.delete("part");
     else url.searchParams.set("part", next);
@@ -175,6 +237,8 @@ export function AlbumWorkspace(props: {
   }
 
   async function mutateSpread(action: SpreadAction, confirmPlacements = false) {
+    /* v8 ignore next -- Spread controls are disabled while photo state is unresolved. */
+    if (navigationReason() !== undefined) return;
     setSpreadPending(true);
     setSpreadError(undefined);
     setFailedAction(undefined);
@@ -199,6 +263,11 @@ export function AlbumWorkspace(props: {
       else {
         setSpreadError(describeFailure(failure));
         setFailedAction(action);
+        if (!(failure instanceof AlbumRequestError) || failure.status >= 500) {
+          setSpreadUncertain(true);
+          setConfirmation(undefined);
+          setSpreadError("Spread outcome is uncertain. Reload saved workspace before choosing the action again.");
+        }
       }
     } finally {
       if (active) {
@@ -221,7 +290,13 @@ export function AlbumWorkspace(props: {
         <div class="workspace-album-heading">
           <h1>{props.album.title}</h1>
           <span aria-hidden="true">|</span>
-          <a class="back-link" href="/">
+          <a
+            class="back-link"
+            href="/"
+            onClick={(event) => {
+              if (navigationReason() !== undefined) event.preventDefault();
+            }}
+          >
             Back to album catalog
           </a>
         </div>
@@ -231,6 +306,8 @@ export function AlbumWorkspace(props: {
             <button
               type="button"
               aria-pressed={part() !== "cover"}
+              disabled={navigationReason() !== undefined}
+              aria-describedby={navigationReason() === undefined ? undefined : "photo-navigation-reason"}
               onClick={() => {
                 select(interior());
               }}
@@ -240,6 +317,8 @@ export function AlbumWorkspace(props: {
             <button
               type="button"
               aria-pressed={part() === "cover"}
+              disabled={navigationReason() !== undefined}
+              aria-describedby={navigationReason() === undefined ? undefined : "photo-navigation-reason"}
               onClick={() => {
                 select("cover");
               }}
@@ -251,6 +330,43 @@ export function AlbumWorkspace(props: {
       </header>
       <Show when={refreshing()}>
         <p role="status">Refreshing saved workspace…</p>
+      </Show>
+      <Show when={placement.error()}>
+        {(message) => (
+          <p role="alert">
+            {message()}{" "}
+            <button
+              type="button"
+              onClick={() => {
+                void placement.retry();
+              }}
+            >
+              Retry photos
+            </button>
+          </p>
+        )}
+      </Show>
+      <Show when={navigationReason()}>
+        {(message) => (
+          <p id="photo-navigation-reason" role="status">
+            {message()}
+          </p>
+        )}
+      </Show>
+      <Show when={choice()}>
+        {(selected) => (
+          <p role="status">
+            {selected().kind === "photo" ? "Photo selected. Choose a destination slot." : "Move selected. Choose a destination slot to move or swap."}{" "}
+            <button
+              type="button"
+              onClick={() => {
+                setChoice(undefined);
+              }}
+            >
+              Cancel photo choice
+            </button>
+          </p>
+        )}
       </Show>
       <Show when={props.workspaceError !== undefined}>
         <div role="alert">
@@ -280,12 +396,22 @@ export function AlbumWorkspace(props: {
                 void reloadSpread();
                 return;
               }
+              if (spreadUncertain()) {
+                void refresh().then(() => {
+                  if (props.workspaceError === undefined) {
+                    setSpreadUncertain(false);
+                    setFailedAction(undefined);
+                    setSpreadError(undefined);
+                  }
+                });
+                return;
+              }
               const action = failedAction();
               /* v8 ignore next -- Failure feedback retains its failed action. */
               if (action !== undefined) void mutateSpread(action);
             }}
           >
-            {reloadTarget() === undefined ? "Retry spread action" : "Retry workspace"}
+            {spreadUncertain() ? "Reload saved workspace" : reloadTarget() === undefined ? "Retry spread action" : "Retry workspace"}
           </button>
         </p>
       </Show>
@@ -300,6 +426,8 @@ export function AlbumWorkspace(props: {
           void props.onPhotoRefresh(photoChapters().map((owner) => owner.id));
         }}
         onRetryInventory={props.onInventoryRetry}
+        onChoosePhoto={(photoId) => setChoice({ kind: "photo", photoId })}
+        unavailable={refreshReason() ?? placement.unavailable() ?? navigationReason()}
         onRetryRefresh={(id) => {
           void props.onPhotoRefresh([id]);
         }}
@@ -311,7 +439,7 @@ export function AlbumWorkspace(props: {
                 context={spread().kind}
                 appliedTemplateId={spread().templateId}
                 load={props.client.templates}
-                unavailable={refreshReason()}
+                unavailable={refreshReason() ?? navigationReason()}
                 onChange={(templateId, opener) => {
                   if (templateId !== spread().templateId) void mutateSpread({ kind: "template", spreadId: spread().id, templateId, opener });
                 }}
@@ -337,7 +465,10 @@ export function AlbumWorkspace(props: {
                 aspectRatio={part() === "cover" ? coverAspectRatio : spreadAspectRatio}
                 label={readerLabel()}
                 entryMount={readerEntry()}
-                unavailable={selection().kind === "invalid" ? "Choose an available album part to enter reader mode." : refreshReason()}
+                unavailable={
+                  selection().kind === "invalid" ? "Choose an available album part to enter reader mode." : (refreshReason() ?? navigationReason())
+                }
+                onActive={setReader}
                 canPrevious={navigation().previous !== undefined}
                 canNext={navigation().next !== undefined}
                 onNavigate={(direction) => {
@@ -347,7 +478,7 @@ export function AlbumWorkspace(props: {
                 }}
               >
                 <Show when={part() === "cover"}>
-                  <CoverCanvas title={props.album.title} year={props.workspace.year} />
+                  <CoverCanvas title={props.album.title} year={props.workspace.year} editing={editing()} />
                 </Show>
                 <Show when={selectedSpread()}>
                   {(spread) => (
@@ -356,6 +487,7 @@ export function AlbumWorkspace(props: {
                       title={chapter()?.name ?? props.album.title}
                       text={chapter()?.description ?? props.album.synopsis}
                       label={label()}
+                      editing={editing()}
                     />
                   )}
                 </Show>
@@ -368,7 +500,7 @@ export function AlbumWorkspace(props: {
                         chapter={owner()}
                         position={position()}
                         countries={props.workspace.countries}
-                        unavailable={refreshReason()}
+                        unavailable={refreshReason() ?? navigationReason()}
                         onEdit={(opener) => {
                           setDialog({ chapter: owner(), opener });
                         }}
@@ -386,7 +518,7 @@ export function AlbumWorkspace(props: {
               spreads={props.workspace.spreads}
               part={part()}
               creationReason={creationReason()}
-              unavailable={refreshReason()}
+              unavailable={refreshReason() ?? navigationReason()}
               onSelect={select}
               onCreate={(opener) => setDialog({ chapter: undefined, opener })}
               onAdd={(chapterId, spreadId, opener) => {

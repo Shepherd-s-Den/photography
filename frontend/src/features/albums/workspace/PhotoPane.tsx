@@ -2,6 +2,7 @@ import { For, Show, createMemo, createSignal, onCleanup, onMount, type JSX } fro
 import type { PhotoInventory, Scheduling } from "../model/Photo";
 import { derivePhotoRows, derivePhotos, limitPhotoWidth } from "./PhotoLayout";
 import "./photos.css";
+import { photoDragFeedback, startPhotoDrag } from "./PhotoDrag";
 
 export function PhotoPane(props: {
   label: string;
@@ -13,6 +14,8 @@ export function PhotoPane(props: {
   onRefresh: () => void;
   onRetryInventory: (id: string) => void;
   onRetryRefresh: (id: string) => void;
+  onChoosePhoto?: (id: string) => void;
+  unavailable?: string | undefined;
   children: JSX.Element;
 }) {
   const [collapsed, setCollapsed] = createSignal(false);
@@ -20,6 +23,7 @@ export function PhotoPane(props: {
   const [availableWidth, setAvailableWidth] = createSignal(1000);
   const [contentWidth, setContentWidth] = createSignal(308);
   const [resizing, setResizing] = createSignal(false);
+  const [dragError, setDragError] = createSignal(false);
   const width = createMemo(() => limitPhotoWidth(chosenWidth(), availableWidth()));
   const selection = createMemo(() =>
     derivePhotos(
@@ -257,26 +261,69 @@ export function PhotoPane(props: {
             <For each={keys()}>
               {(key) => (
                 <Show when={geometry().get(key)}>
-                  {(item) => (
-                    <img
-                      src={item().photo.photo.thumbnail.url}
-                      alt={item().photo.photo.filename}
-                      loading="lazy"
-                      decoding="async"
-                      width={item().photo.photo.thumbnail.width}
-                      height={item().photo.photo.thumbnail.height}
-                      style={{
-                        width: `${String(item().width)}px`,
-                        height: `${String(item().height)}px`,
-                        left: `${String(item().left)}px`,
-                        top: `${String(item().top)}px`,
-                      }}
-                    />
-                  )}
+                  {(item) => {
+                    let image!: HTMLImageElement;
+                    return (
+                      <button
+                        type="button"
+                        aria-label={`Choose ${item().photo.photo.filename}`}
+                        draggable={props.unavailable === undefined ? "true" : "false"}
+                        disabled={props.unavailable !== undefined}
+                        aria-describedby={props.unavailable === undefined ? undefined : "photo-placement-unavailable"}
+                        onClick={() => {
+                          setDragError(false);
+                          props.onChoosePhoto?.(item().photo.photo.id);
+                        }}
+                        onDragStart={(event) => {
+                          setDragError(
+                            !startPhotoDrag(
+                              event,
+                              { kind: "photo", photoId: item().photo.photo.id },
+                              {
+                                image,
+                                frame: event.currentTarget,
+                                mirrored: false,
+                              },
+                            ),
+                          );
+                        }}
+                        style={{
+                          width: `${String(item().width)}px`,
+                          height: `${String(item().height)}px`,
+                          left: `${String(item().left)}px`,
+                          top: `${String(item().top)}px`,
+                        }}
+                      >
+                        <img
+                          ref={(element) => {
+                            image = element;
+                          }}
+                          src={item().photo.photo.thumbnail.url}
+                          alt={item().photo.photo.filename}
+                          loading="lazy"
+                          decoding="async"
+                          draggable={false}
+                          style={{ width: `${String(item().width)}px`, height: `${String(item().height)}px` }}
+                          width={item().photo.photo.thumbnail.width}
+                          height={item().photo.photo.thumbnail.height}
+                        />
+                      </button>
+                    );
+                  }}
                 </Show>
               )}
             </For>
           </div>
+          <Show when={dragError()}>
+            <p role="alert">{photoDragFeedback}</p>
+          </Show>
+          <Show when={props.unavailable}>
+            {(reason) => (
+              <p id="photo-placement-unavailable" role="status">
+                {reason()}
+              </p>
+            )}
+          </Show>
         </section>
         <button
           ref={(element) => {

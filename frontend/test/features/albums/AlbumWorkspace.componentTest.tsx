@@ -5,9 +5,11 @@ import { AlbumOpen } from "../../../src/features/albums/open/AlbumOpen";
 import { AlbumRequestError, SpreadOccupiedError, type AlbumClient } from "../../../src/features/albums/model/Album";
 import type { Chapter, Workspace } from "../../../src/features/albums/model/Workspace";
 import type { AlbumPhotoEvents, PhotoEvent, PhotoInventory } from "../../../src/features/albums/model/Photo";
+import type { PlacementContext, PlacementSnapshot, SpreadPlacement, SpreadSnapshot } from "../../../src/features/albums/model/Placement";
 
 const album = { id: "album", year: 2026, title: "Saved free-form album title", createdAt: "2026-10-25T12:00:00Z", synopsis: "Saved album synopsis" };
 const inventory: PhotoInventory = {
+  placedPhotoIds: [],
   photos: [],
   counts: { unplaced: 0, total: 0 },
   processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] },
@@ -100,6 +102,182 @@ describe("album workspace browser boundary", () => {
     }
   });
 
+  it("places selected canonical photos, announces keyboard choices and immediately reloads retained placements after a template change", async () => {
+    const photo = {
+      id: "mountain",
+      filename: "Mountain.jpg",
+      capturedLocal: null,
+      width: 400,
+      height: 200,
+      caption: null,
+      thumbnail: { url: "/mountain.jpg", width: 400, height: 200 },
+    };
+    const photos = { ...inventory, photos: [photo], counts: { unplaced: 1, total: 1 } };
+    const available = { ...workspace, photoInventories: { vacation: photos } };
+    const used = { ...available, photoInventories: { vacation: { ...photos, placedPhotoIds: [photo.id], counts: { unplaced: 0, total: 1 } } } };
+    const placement: SpreadPlacement = {
+      kind: "spread",
+      captionCorner: "top_left",
+      id: "placed",
+      photoId: photo.id,
+      slotId: photoSlot.id,
+      transform: { x: 0, y: 0, zoom: 1, mirrored: false },
+    };
+    const changed = {
+      ...used,
+      spreads: [{ ...opening, templateId: "new", slots: [{ ...photoSlot, id: "new-slot" }, textSlot] }, ...used.spreads.slice(1)],
+    };
+    const client = buildClient({
+      workspace: vi.fn().mockResolvedValueOnce(available).mockResolvedValueOnce(used).mockResolvedValue(changed),
+      readPlacements: vi
+        .fn()
+        .mockResolvedValueOnce({ kind: "spread", id: opening.id, placements: [] } satisfies SpreadSnapshot)
+        .mockResolvedValue({ kind: "spread", id: opening.id, placements: [{ ...placement, slotId: "new-slot" }] } satisfies SpreadSnapshot),
+      editPlacements: vi.fn().mockResolvedValue({ kind: "spread", id: opening.id, placements: [placement] } satisfies SpreadSnapshot),
+      templates: vi.fn().mockResolvedValue([
+        { id: "layout", name: "Applied", slots: [photoSlot, textSlot] },
+        { id: "new", name: "New layout", slots: [photoSlot, textSlot] },
+      ]),
+      changeSpreadTemplate: vi.fn().mockResolvedValue(undefined),
+    });
+    render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Choose Mountain.jpg" }));
+    fireEvent.click(screen.getByRole("button", { name: "Photo slot 1: empty" }));
+    await screen.findByRole("button", { name: "Photo slot 1: Mountain.jpg" });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Choose Mountain.jpg" })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Move photo from Photo slot 1" })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Move photo from Photo slot 1" }));
+    expect(screen.getByText("Move selected. Choose a destination slot to move or swap.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel photo choice" }));
+    fireEvent.click(screen.getByRole("button", { name: "New layout" }));
+    await waitFor(() => {
+      expect(client.readPlacements).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByRole("button", { name: "Photo slot 1: Mountain.jpg" })).toBeInTheDocument();
+    const expectedContext = { kind: "spread", id: opening.id };
+    const expectedEdit = { operation: "place", photoId: photo.id, slotId: photoSlot.id };
+    expect(client.editPlacements).toHaveBeenCalledWith(album.id, expectedContext, expectedEdit);
+  });
+
+  it("shows failed placement reads and retries through the authoritative read boundary", async () => {
+    const client = buildClient({
+      readPlacements: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("offline"))
+        .mockResolvedValue({ kind: "spread", id: opening.id, placements: [] } satisfies SpreadSnapshot),
+    });
+    render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry photos" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Retry photos" })).not.toBeInTheDocument();
+    });
+
+    expect(client.readPlacements).toHaveBeenCalledTimes(2);
+    expect(client.editPlacements).not.toHaveBeenCalled();
+  });
+
+  it.each([null, "vacation"])("preserves unresolved photo state against navigation and page departure from %s", async (part) => {
+    window.history.replaceState(null, "", part === null ? "/albums/album" : `/albums/album?part=${part}`);
+    const client = buildClient({ readPlacements: vi.fn().mockRejectedValue(new Error("offline")) });
+    render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+    await screen.findByRole("button", { name: "Retry photos" });
+    const before = window.location.search;
+
+    window.history.replaceState(null, "", "/?part=cover");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    const departure = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(departure);
+    fireEvent.click(screen.getByRole("link", { name: "Back to album catalog" }));
+
+    expect(window.location.search).toBe(before);
+    expect(window.location.pathname).toBe("/albums/album");
+    expect(departure.defaultPrevented).toBe(true);
+    expect(screen.getByRole("button", { name: "Cover" })).toHaveAccessibleDescription("Reload saved photos before leaving.");
+  });
+
+  it("reloads authoritative workspace after a vanished spread and keeps available-part navigation usable", async () => {
+    window.history.replaceState(null, "", "?part=vacation-photo");
+    const missing = new AlbumRequestError(404, "This spread could not be found");
+    const remaining = { ...workspace, spreads: workspace.spreads.filter((spread) => spread.id !== vacationPhoto.id) };
+    const client = buildClient({
+      readPlacements: vi
+        .fn()
+        .mockRejectedValueOnce(missing)
+        .mockRejectedValueOnce(missing)
+        .mockResolvedValue({ kind: "spread", id: opening.id, placements: [] } satisfies SpreadSnapshot),
+      workspace: vi.fn().mockResolvedValueOnce(workspace).mockResolvedValue(remaining),
+    });
+    render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry photos" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Go to Synopsis" }));
+    await waitFor(() => {
+      expect(window.location.search).toBe("");
+    });
+
+    expect(client.workspace).toHaveBeenCalledTimes(2);
+    expect(client.editPlacements).not.toHaveBeenCalled();
+  });
+
+  it("reports an acknowledged placement whose workspace refresh failed and retries reads without replaying it", async () => {
+    const photo = {
+      id: "mountain",
+      filename: "Mountain.jpg",
+      capturedLocal: null,
+      width: 400,
+      height: 200,
+      caption: null,
+      thumbnail: { url: "/mountain.jpg", width: 400, height: 200 },
+    };
+    const available = { ...workspace, photoInventories: { vacation: { ...inventory, photos: [photo], counts: { unplaced: 1, total: 1 } } } };
+    const client = buildClient({
+      workspace: vi.fn().mockResolvedValueOnce(available).mockRejectedValueOnce(new Error("offline")).mockResolvedValue(available),
+    });
+    render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+    const choose = await screen.findByRole("button", { name: "Choose Mountain.jpg" });
+    const departure = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(departure);
+    fireEvent.click(screen.getByRole("link", { name: "Back to album catalog" }));
+    fireEvent.click(choose);
+    fireEvent.click(screen.getByRole("button", { name: "Photo slot 1: empty" }));
+    await screen.findByText("Photos saved, but the collection could not be refreshed. Retry reads only.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry photos" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Retry photos" })).not.toBeInTheDocument();
+    });
+
+    expect(departure.defaultPrevented).toBe(false);
+    expect(client.editPlacements).toHaveBeenCalledTimes(1);
+    expect(client.workspace).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([new Error("connection lost"), new AlbumRequestError(500, "server failure")])(
+    "reconciles an uncertain spread outcome without replaying %s",
+    async (failure) => {
+      const client = buildClient({
+        addSpread: vi.fn().mockRejectedValue(failure),
+        workspace: vi.fn().mockResolvedValueOnce(workspace).mockRejectedValueOnce(new Error("offline")).mockResolvedValue(workspace),
+      });
+      render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+      fireEvent.click(await screen.findByRole("link", { name: "Kyoto" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add spread" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Reload saved workspace" }));
+      await screen.findByText("Saved workspace could not be refreshed. Displayed photos may be out of date.");
+      fireEvent.click(screen.getByRole("button", { name: "Reload saved workspace" }));
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Reload saved workspace" })).not.toBeInTheDocument();
+      });
+
+      expect(client.addSpread).toHaveBeenCalledTimes(1);
+      expect(client.workspace).toHaveBeenCalledTimes(3);
+    },
+  );
+
   it("should add after selection, reload authoritative geometry and retain the deleted spread's album position", async () => {
     const inserted = { id: "inserted", templateId: "layout", chapter: vacation.id, kind: "photos_only" as const, slots: [photoSlot] };
     const added = { ...workspace, spreads: [opening, vacationOpening, inserted, ...workspace.spreads.slice(2)] };
@@ -163,7 +341,7 @@ describe("album workspace browser boundary", () => {
         .fn<(...args: (string | boolean)[]) => Promise<void>>()
         .mockRejectedValueOnce(new SpreadOccupiedError(7))
         .mockRejectedValueOnce(new SpreadOccupiedError(7))
-        .mockRejectedValueOnce(new AlbumRequestError(500, "Try again"))
+        .mockRejectedValueOnce(new AlbumRequestError(400, "Try again"))
         .mockResolvedValue(undefined);
       const client = buildClient({
         workspace:
@@ -426,9 +604,9 @@ describe("album workspace browser boundary", () => {
     const links = within(organization).getAllByRole("link");
     const expectedLinks = ["Synopsis", "Kyoto", "Kyoto · Photo spread 1", "Home"];
 
-    expect(screen.getByRole("img", { name: "Synopsis composition" })).toHaveAttribute("viewBox", "0 0 2381.102 765.354");
-    expect(screen.getByRole("img", { name: "Synopsis composition" })).toHaveTextContent(album.synopsis);
-    expect(screen.getByRole("img", { name: "Synopsis composition" })).toHaveTextContent(album.title);
+    expect(screen.getByRole("img", { name: "Synopsis template geometry" })).toHaveAttribute("viewBox", "0 0 2381.102 765.354");
+    expect(screen.getByRole("group", { name: "Synopsis composition" })).toHaveTextContent(album.synopsis);
+    expect(screen.getByRole("group", { name: "Synopsis composition" })).toHaveTextContent(album.title);
     expect(controls.getAllByRole("button").map((button) => button.textContent)).toEqual(["", "Spreads", "Cover"]);
     expect(screen.queryByText("Photo")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reader mode" })).toBeEnabled();
@@ -437,8 +615,8 @@ describe("album workspace browser boundary", () => {
     fireEvent.click(screen.getByRole("link", { name: "Kyoto" }));
 
     expect(screen.getByRole("heading", { name: "Kyoto" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Kyoto composition" })).toHaveTextContent(vacation.description);
-    expect(screen.getByRole("img", { name: "Kyoto composition" })).toHaveTextContent(vacation.name);
+    expect(screen.getByRole("group", { name: "Kyoto composition" })).toHaveTextContent(vacation.description);
+    expect(screen.getByRole("group", { name: "Kyoto composition" })).toHaveTextContent(vacation.name);
     expect(screen.queryByRole("button", { name: /Change chapter/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit chapter details" })).toBeInTheDocument();
     expect(screen.getByText("Country", { exact: true })).toBeInTheDocument();
@@ -451,8 +629,8 @@ describe("album workspace browser boundary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cover" }));
 
     expect(screen.queryByRole("navigation", { name: "Album organization" })).not.toBeInTheDocument();
-    expect(screen.getByRole("img", { name: /Cover: back on the left; front on the right/ })).toHaveAccessibleName(/Saved free-form album title/);
-    expect(screen.getByText("by Cosmin, Mara & Iacob")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /Cover: back on the left; front on the right/ })).toHaveAccessibleName(/Saved free-form album title/);
+    expect(screen.getByText("by Cosmin, Mara & Iacob · 2026")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Spreads" }));
 
@@ -668,7 +846,7 @@ describe("album workspace browser boundary", () => {
     };
     expect(client.createChapter).toHaveBeenCalledWith(album.id, expectedDetails);
     expect(window.location.search).toBe("?part=missed");
-    expect(screen.getByRole("img", { name: "Rome composition" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Rome composition" })).toBeInTheDocument();
     expect(screen.getByText("Countries", { exact: true })).toBeInTheDocument();
     expect(add).toHaveFocus();
   });
@@ -1016,6 +1194,24 @@ describe("album workspace browser boundary", () => {
 
 function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
   return {
+    readPlacements: vi
+      .fn()
+      .mockImplementation((_album: string, context: PlacementContext): Promise<PlacementSnapshot> =>
+        Promise.resolve(
+          context.kind === "cover"
+            ? { kind: "cover", placements: [], frontSlotId: "front", backSlotId: "back", spineOwner: "front" }
+            : { kind: "spread", id: context.id, placements: [] },
+        ),
+      ),
+    editPlacements: vi
+      .fn()
+      .mockImplementation((_album: string, context: PlacementContext): Promise<PlacementSnapshot> =>
+        Promise.resolve(
+          context.kind === "cover"
+            ? { kind: "cover", placements: [], frontSlotId: "front", backSlotId: "back", spineOwner: "front" }
+            : { kind: "spread", id: context.id, placements: [] },
+        ),
+      ),
     list: vi.fn(),
     create: vi.fn(),
     rename: vi.fn(),

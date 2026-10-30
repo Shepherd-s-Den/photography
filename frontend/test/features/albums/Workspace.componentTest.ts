@@ -440,7 +440,12 @@ describe("workspace wire representations", () => {
     spreads: [spread],
     countries: [{ id: "jp", name: "Japan", code: "JP" }],
     photoInventories: {
-      chapter: { photos: [], counts: { unplaced: 0, total: 0 }, processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] } },
+      chapter: {
+        photos: [],
+        placedPhotoIds: [],
+        counts: { unplaced: 0, total: 0 },
+        processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] },
+      },
     },
   };
 
@@ -503,7 +508,7 @@ describe("workspace wire representations", () => {
       skippedCount: 1,
       issues: [{ stage: "read", code: "undecodable", filename: "bad.jpg" }],
     };
-    const inventory = { photos: [photo], counts: { unplaced: 1, total: 1 }, processing };
+    const inventory = { photos: [photo], placedPhotoIds: [], counts: { unplaced: 1, total: 1 }, processing };
 
     it.each(["idle", "queued", "running", "completed", "failed"])(
       "should retain the complete %s inventory without altering its thumbnail URL",

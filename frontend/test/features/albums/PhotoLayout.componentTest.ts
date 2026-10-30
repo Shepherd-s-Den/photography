@@ -13,6 +13,7 @@ describe("canonical photo selection and chronological whole-image rows", () => {
     thumbnail: { url: "/thumbnails/key/version.jpg", width: 600, height: 400 },
   };
   const inventory: PhotoInventory = {
+    placedPhotoIds: [],
     photos: [photo],
     counts: { unplaced: 0, total: 1 },
     processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] },
@@ -89,5 +90,14 @@ describe("canonical photo selection and chronological whole-image rows", () => {
 
     expect(heights[1]).toBeCloseTo((heights[0] ?? 0) * (1.12 / 0.96));
     expect(boundedWidths).toEqual([200, 440, 628, 200]);
+  });
+
+  it("filters authoritative used identities but retains canonical collection metadata", () => {
+    const used = { ...inventory, placedPhotoIds: [photo.id] };
+
+    const selected = derivePhotos(["chapter", "missing"], { chapter: used });
+
+    expect(selected.photos).toEqual([]);
+    expect(used.photos).toEqual([photo]);
   });
 });
