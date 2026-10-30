@@ -499,10 +499,12 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     for
       manager       <- buildManager(refs)
       foreignResult <- manager.editPlacements(album.id, first.id, Edit.Place(first.photoSlots.head.id, foreignPhoto))
+      missingPhoto  <- manager.editPlacements(album.id, first.id, Edit.Place(first.photoSlots.head.id, PhotoId(buildUuid(index = 9999L))))
       outcomes      <- first.photoSlots.toList.parTraverse(slot => manager.editPlacements(album.id, first.id, Edit.Place(slot.id, photo)))
       used          <- manager.editPlacements(album.id, second.id, Edit.Place(second.photoSlots.head.id, photo))
     yield
       assertEquals(foreignResult, PlacementResult.Rejected(Failure.PhotoNotInCollection))
+      assertEquals(missingPhoto, PlacementResult.Rejected(Failure.PhotoNotInCollection))
       assertEquals(outcomes.count { case PlacementResult.Saved(_) => true; case _ => false }, 1)
       assertEquals(outcomes.count { case PlacementResult.Rejected(Failure.PhotoAlreadyUsed) => true; case _ => false }, 1)
       assertEquals(used, PlacementResult.Rejected(Failure.PhotoAlreadyUsed))
@@ -625,18 +627,20 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     val placements = new PhotoPlacementRepository[IO]:
       override def findPlacedPhotos(id: ChapterId): IO[PhotoPlacementRepository.FindResult] =
         IO.raiseError[PhotoPlacementRepository.FindResult](new AssertionError("Unexpected inventory"))
-      override def inspect(owner: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): IO[PhotoPlacementRepository.Inspection] =
+      override def inspect(owner: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): IO[PhotoPlacementRepository.InspectResult] =
         maybeInspectionError match
-          case Some(error) => IO.raiseError[PhotoPlacementRepository.Inspection](error)
+          case Some(error) => IO.raiseError[PhotoPlacementRepository.InspectResult](error)
           case None        => refs.replacements.get.map: replacements =>
               val all          = maybeAlbum.toList.flatMap(_.collectSpreads.toList)
               val current      = all.map(value => replacements.findLast(_.id.value === value.id.value).getOrElse(value))
               val photoChapter = if photo.value === buildUuid(index = 590L) then otherChapter.id else chapter.id
               val eligible     = owner.value === album.id.value && maybeChapter.forall(_.value === photoChapter.value)
-              PhotoPlacementRepository.Inspection(
-                inCollection = eligible,
-                placed = current.exists(_.placements.exists(_.photo.value === photo.value))
-              )
+              if photo.value === buildUuid(index = 9999L) then PhotoPlacementRepository.InspectResult.NotFound
+              else
+                PhotoPlacementRepository.InspectResult.Found(
+                  inCollection = eligible,
+                  placed = current.exists(_.placements.exists(_.photo.value === photo.value))
+                )
     Mutex[IO].map: mutex =>
       given coordination: Mutex[IO] = mutex
       given transaction: Transaction[IO, IO] with

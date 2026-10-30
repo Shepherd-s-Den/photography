@@ -5,7 +5,7 @@ import org.typelevel.doobie.implicits.*
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.domain.album.{AlbumId, ChapterId, PhotoId}
 import photography.ports.photo.PhotoPlacementRepository
-import photography.ports.photo.PhotoPlacementRepository.{FindResult, Inspection}
+import photography.ports.photo.PhotoPlacementRepository.{FindResult, InspectResult}
 import java.util.UUID
 
 object SqlitePhotoPlacementRepository:
@@ -18,10 +18,11 @@ object SqlitePhotoPlacementRepository:
         WHERE p.chapter_id = ${chapter.value}"""
         .query[UUID].to[Vector].map(ids => FindResult.Found(photos = ids.map(PhotoId(_)).toSet))
 
-    override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): ConnectionIO[Inspection] =
+    override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): ConnectionIO[InspectResult] =
       val chapterScope = maybeChapter.fold(Fragment.empty)(chapter => fr"AND c.id = ${chapter.value}")
-      val membership   =
-        sql"""SELECT 1 FROM photo p JOIN chapter c ON c.id = p.chapter_id
-                            WHERE p.id = ${photo.value} AND c.album_id = ${album.value}""" ++ chapterScope
-      val select = fr"SELECT EXISTS(" ++ membership ++ fr"), EXISTS(SELECT 1 FROM placement WHERE photo_id = ${photo.value})"
-      select.query[(Boolean, Boolean)].unique.map { case (member, placed) => Inspection(inCollection = member, placed = placed) }
+      val membership   = fr"c.album_id = ${album.value}" ++ chapterScope
+      val select       = fr"SELECT (" ++ membership ++
+        fr"""), EXISTS(SELECT 1 FROM placement WHERE photo_id = p.id)
+              FROM photo p JOIN chapter c ON c.id = p.chapter_id WHERE p.id = ${photo.value}"""
+      select.query[(Boolean, Boolean)].option.map:
+        _.fold[InspectResult](InspectResult.NotFound) { case (member, placed) => InspectResult.Found(inCollection = member, placed = placed) }

@@ -10,7 +10,7 @@ import org.typelevel.doobie.implicits.*
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.app.config.SqliteConfig
 import photography.domain.album.{AlbumId, ChapterId, PhotoId}
-import photography.ports.photo.PhotoPlacementRepository.{FindResult, Inspection}
+import photography.ports.photo.PhotoPlacementRepository.{FindResult, InspectResult}
 import photography.syntax.SyncSyntax.*
 import java.nio.file.{Files, Path}
 import java.util.UUID
@@ -28,12 +28,13 @@ final class SqlitePhotoPlacementRepositorySeamIntegrationTest extends CatsEffect
     val missingPhoto = PhotoId(new UUID(0L, 8L))
     val unknownAlbum = AlbumId(new UUID(0L, 999L))
     val inspections  = Vector(
-      (album, none[ChapterId], spread, Inspection(inCollection = true, placed = true)),
-      (album, chapter.some, cover, Inspection(inCollection = true, placed = true)),
-      (album, chapter.some, foreign, Inspection(inCollection = false, placed = true)),
-      (unknownAlbum, none[ChapterId], spread, Inspection(inCollection = false, placed = true)),
-      (album, chapter.some, unused, Inspection(inCollection = true, placed = false)),
-      (album, none[ChapterId], missingPhoto, Inspection(inCollection = false, placed = false))
+      (album, none[ChapterId], spread, InspectResult.Found(inCollection = true, placed = true)),
+      (album, chapter.some, cover, InspectResult.Found(inCollection = true, placed = true)),
+      (album, chapter.some, foreign, InspectResult.Found(inCollection = false, placed = true)),
+      (unknownAlbum, none[ChapterId], spread, InspectResult.Found(inCollection = false, placed = true)),
+      (album, chapter.some, unused, InspectResult.Found(inCollection = true, placed = false)),
+      (unknownAlbum, none[ChapterId], unused, InspectResult.Found(inCollection = false, placed = false)),
+      (album, none[ChapterId], missingPhoto, InspectResult.NotFound)
     )
     val database = Resource.make(Files.createTempFile(Path.of("target"), "placements-", ".sqlite").blocking[IO]): path =>
       Files.deleteIfExists(path).blocking[IO].void

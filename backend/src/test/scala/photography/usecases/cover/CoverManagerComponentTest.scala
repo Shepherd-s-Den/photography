@@ -99,14 +99,16 @@ class CoverManagerComponentTest extends CatsEffectSuite:
 
   test("should reject wrong-owner and used photos and serialize current cover placement decisions"):
     for
-      state      <- Ref.of[IO, Composition](empty)
-      manager    <- buildManager(state, usedElsewhere = Set(otherPhoto))
-      wrongOwner <- manager.edit(cover.album, Edit.Place(cover.front.id, foreign))
-      used       <- manager.edit(cover.album, Edit.Place(cover.front.id, otherPhoto))
-      outcomes   <- Vector(cover.front.id, cover.back.id).parTraverse(slot => manager.edit(cover.album, Edit.Place(slot, photo)))
-      saved      <- state.get
+      state        <- Ref.of[IO, Composition](empty)
+      manager      <- buildManager(state, usedElsewhere = Set(otherPhoto))
+      wrongOwner   <- manager.edit(cover.album, Edit.Place(cover.front.id, foreign))
+      missingPhoto <- manager.edit(cover.album, Edit.Place(cover.front.id, PhotoId(new UUID(0L, 999L))))
+      used         <- manager.edit(cover.album, Edit.Place(cover.front.id, otherPhoto))
+      outcomes     <- Vector(cover.front.id, cover.back.id).parTraverse(slot => manager.edit(cover.album, Edit.Place(slot, photo)))
+      saved        <- state.get
     yield
       assertEquals(wrongOwner, Result.Rejected(Failure.PhotoNotInCollection))
+      assertEquals(missingPhoto, Result.Rejected(Failure.PhotoNotInCollection))
       assertEquals(used, Result.Rejected(Failure.PhotoAlreadyUsed))
       assertEquals(outcomes.count { case Result.Saved(_) => true; case _ => false }, 1)
       assertEquals(outcomes.count { case Result.Rejected(Failure.PhotoAlreadyUsed) => true; case _ => false }, 1)
@@ -121,12 +123,14 @@ class CoverManagerComponentTest extends CatsEffectSuite:
       broken           <- buildManager(state, readFails = true)
       uninspectable    <- buildManager(state, inspectionFails = true)
       unwritable       <- buildManager(state, writeFails = true)
+      vanished         <- buildManager(state, replaceMissing = true)
       absentRead       <- manager.read(absent)
       absentEdit       <- manager.edit(absent, Edit.Place(cover.front.id, photo))
       failedRead       <- broken.read(cover.album)
       failedEdit       <- broken.edit(cover.album, Edit.Place(cover.front.id, photo))
       failedInspection <- uninspectable.edit(cover.album, Edit.Place(cover.front.id, photo))
       failedWrite      <- unwritable.edit(cover.album, Edit.Place(cover.front.id, photo))
+      vanishedWrite    <- vanished.edit(cover.album, Edit.Place(cover.front.id, photo))
       saved            <- state.get
     yield
       assertEquals(absentRead, ReadResult.CoverNotFound)
@@ -135,6 +139,7 @@ class CoverManagerComponentTest extends CatsEffectSuite:
       assertEquals(failedEdit, Result.Failed)
       assertEquals(failedInspection, Result.Failed)
       assertEquals(failedWrite, Result.Failed)
+      assertEquals(vanishedWrite, Result.CoverNotFound)
       assertEquals(saved, empty)
 
   // scalafix:off DisableSyntax.defaultArgs
@@ -143,26 +148,32 @@ class CoverManagerComponentTest extends CatsEffectSuite:
       usedElsewhere: Set[PhotoId] = Set.empty[PhotoId],
       readFails: Boolean = false,
       inspectionFails: Boolean = false,
-      writeFails: Boolean = false
+      writeFails: Boolean = false,
+      replaceMissing: Boolean = false
   ) =
     val repository = new CoverRepository[IO]:
-      override def read(album: AlbumId): IO[Option[Composition]] =
-        if readFails then IO.raiseError[Option[Composition]](new IllegalStateException("read failed"))
-        else state.get.map(value => Option.when(album.value === value.cover.album.value)(value))
-      override def replace(album: AlbumId, placements: Vector[CoverPlacement]): IO[Unit] =
-        if writeFails then IO.raiseError[Unit](new IllegalStateException("write failed"))
-        else state.update(_.copy(placements = placements))
+      override def read(album: AlbumId): IO[CoverRepository.ReadResult] =
+        if readFails then IO.raiseError[CoverRepository.ReadResult](new IllegalStateException("read failed"))
+        else
+          state.get.map: value =>
+            if album.value === value.cover.album.value then CoverRepository.ReadResult.Found(value)
+            else CoverRepository.ReadResult.NotFound
+      override def replace(album: AlbumId, placements: Vector[CoverPlacement]): IO[CoverRepository.ReplaceResult] =
+        if writeFails then IO.raiseError[CoverRepository.ReplaceResult](new IllegalStateException("write failed"))
+        else if replaceMissing then CoverRepository.ReplaceResult.NotFound.pure[IO]
+        else state.update(_.copy(placements = placements)).as(CoverRepository.ReplaceResult.Replaced)
     val photos = new PhotoPlacementRepository[IO]:
       override def findPlacedPhotos(chapter: ChapterId): IO[PhotoPlacementRepository.FindResult] =
         IO.raiseError[PhotoPlacementRepository.FindResult](new AssertionError("Unexpected chapter inventory"))
-      override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], requested: PhotoId): IO[PhotoPlacementRepository.Inspection] =
-        if inspectionFails then IO.raiseError[PhotoPlacementRepository.Inspection](new IllegalStateException("inspection failed"))
+      override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], requested: PhotoId): IO[PhotoPlacementRepository.InspectResult] =
+        if inspectionFails then IO.raiseError[PhotoPlacementRepository.InspectResult](new IllegalStateException("inspection failed"))
         else
           state.get.map: value =>
             assertEquals(album, cover.album)
             assertEquals(maybeChapter, none[ChapterId])
             val used = usedElsewhere.contains(requested) || value.placements.exists(_.photo.value === requested.value)
-            PhotoPlacementRepository.Inspection(inCollection = requested.value =!= foreign.value, placed = used)
+            if requested.value === new UUID(0L, 999L) then PhotoPlacementRepository.InspectResult.NotFound
+            else PhotoPlacementRepository.InspectResult.Found(inCollection = requested.value =!= foreign.value, placed = used)
     given IdGenerator[IO] with
       override def generateId: IO[UUID] = fresh.value.pure[IO]
     given Transaction[IO, IO] with

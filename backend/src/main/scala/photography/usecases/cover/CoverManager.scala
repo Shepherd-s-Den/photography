@@ -29,20 +29,25 @@ object CoverManager:
       photos: PhotoPlacementRepository[Db]
   )(using Transaction[Db, F]) extends CoverManager[F]:
     override def read(album: AlbumId): F[ReadResult] =
-      val read = covers.read(album).map(_.fold[ReadResult](ReadResult.CoverNotFound)(ReadResult.Found(_)))
+      val read = covers.read(album).map:
+        case CoverRepository.ReadResult.Found(value) => ReadResult.Found(value)
+        case CoverRepository.ReadResult.NotFound     => ReadResult.CoverNotFound
       coordinate(ReadResult.Failed)(Transaction[Db, F].run(read))
 
     override def edit(album: AlbumId, request: Edit): F[Result] =
       coordinate(Result.Failed):
         prepareEdit(request).flatMap: change =>
           val mutation = covers.read(album).flatMap:
-            case None          => Result.CoverNotFound.pure[Db]
-            case Some(current) =>
+            case CoverRepository.ReadResult.NotFound       => Result.CoverNotFound.pure[Db]
+            case CoverRepository.ReadResult.Found(current) =>
               checkPhoto(album, request).flatMap: permission =>
                 val slots = Set(current.cover.front.id, current.cover.back.id)
                 permission.flatMap(_ => change(slots, current.placements)) match
                   case Left(reason)  => Result.Rejected(reason).pure[Db]
-                  case Right(values) => covers.replace(album, placements = values).as(Result.Saved(current.copy(placements = values)): Result)
+                  case Right(values) =>
+                    covers.replace(album, placements = values).map[Result]:
+                      case CoverRepository.ReplaceResult.Replaced => Result.Saved(current.copy(placements = values))
+                      case CoverRepository.ReplaceResult.NotFound => Result.CoverNotFound
           Transaction[Db, F].run(mutation)
 
     private type Change = (Set[CoverSlotId], Vector[CoverPlacement]) => Either[Failure, Vector[CoverPlacement]]
@@ -67,10 +72,12 @@ object CoverManager:
 
     private def checkPhoto(album: AlbumId, request: Edit) = request match
       case Edit.Place(_, photo) =>
-        photos.inspect(album, maybeChapter = none[ChapterId], photo).map: inspection =>
-          if !inspection.inCollection then Failure.PhotoNotInCollection.asLeft[Unit]
-          else if inspection.placed then Failure.PhotoAlreadyUsed.asLeft[Unit]
-          else ().asRight[Failure]
+        photos.inspect(album, maybeChapter = none[ChapterId], photo).map:
+          case PhotoPlacementRepository.InspectResult.Found(inCollection, placed) =>
+            if !inCollection then Failure.PhotoNotInCollection.asLeft[Unit]
+            else if placed then Failure.PhotoAlreadyUsed.asLeft[Unit]
+            else ().asRight[Failure]
+          case PhotoPlacementRepository.InspectResult.NotFound => Failure.PhotoNotInCollection.asLeft[Unit]
       case _ => ().asRight[Failure].pure[Db]
 
     private def adjust(values: Vector[CoverPlacement], id: CoverPlacementId, transform: PhotoTransform) =

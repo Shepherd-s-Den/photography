@@ -168,10 +168,12 @@ object SpreadManager:
 
     private def checkPlacementPhoto(album: AlbumId, maybeChapter: Option[ChapterId], request: Edit) = request match
       case Edit.Place(_, photo) =>
-        placements.inspect(album, maybeChapter = maybeChapter, photo).map: inspection =>
-          if !inspection.inCollection then Failure.PhotoNotInCollection.asLeft[Unit]
-          else if inspection.placed then Failure.PhotoAlreadyUsed.asLeft[Unit]
-          else ().asRight[Failure]
+        placements.inspect(album, maybeChapter = maybeChapter, photo).map:
+          case PhotoPlacementRepository.InspectResult.Found(inCollection, placed) =>
+            if !inCollection then Failure.PhotoNotInCollection.asLeft[Unit]
+            else if placed then Failure.PhotoAlreadyUsed.asLeft[Unit]
+            else ().asRight[Failure]
+          case PhotoPlacementRepository.InspectResult.NotFound => Failure.PhotoNotInCollection.asLeft[Unit]
       case _ => ().asRight[Failure].pure[Db]
 
     private def findPlacementChapter(target: Located) = target match
