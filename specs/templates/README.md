@@ -25,6 +25,8 @@ Draw state diagrams for meaningful lifecycles and sequence diagrams for signific
 
 Use the owning template's relevant sections, omitting empty ones. Preserve one current explanation per concept; refine it rather than appending a feature history or creating another document to hold displaced detail.
 
+Give a specialist reference its own document only when it owns durable cross-feature guidance absent from code, contracts and existing checklists. Place a conditional pointer at the relevant workflow branch so only changes needing that guidance load it; keep the rule in the reference and the verification obligation in the checklist.
+
 ## Publication check
 
 Review the whole affected document, not only added lines. It passes when:

@@ -87,13 +87,19 @@ sequenceDiagram
   participant Storage
   participant Browser
   Editor->>Application: Save chapter or request Refresh
-  Application-->>Editor: Saved or scheduled result
+  opt Saving chapter details
+    Application->>Storage: Commit chapter
+  end
   Application->>Worker: Schedule chapter reconciliation
-  Worker->>Originals: Read current source photographs
-  loop Each complete photo
-    Worker->>Storage: Publish thumbnail and metadata safely
-    Worker-->>Browser: Invalidate chapter inventory
-    Browser->>Application: Read current inventory
+  par Report scheduling outcome
+    Application-->>Editor: Saved or scheduled result
+  and Reconcile in background
+    Worker->>Originals: Read current source photographs
+    loop Each complete photo
+      Worker->>Storage: Publish thumbnail and metadata safely
+      Worker-->>Browser: Invalidate chapter inventory
+      Browser->>Application: Read current inventory
+    end
   end
 ```
 
