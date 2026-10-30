@@ -18,7 +18,7 @@ flowchart TD
   All["Explicit all-component verification"] --> Backend & Frontend & Pipeline
 ```
 
-Backend, frontend and pipeline gates own independent build boundaries in pinned environments. Frontend changes select the frontend gate; documentation changes select no application component while retaining the shared checks.
+Backend, frontend and pipeline gates own independent build boundaries in pinned environments. Selection follows path ownership, not file type: frontend-owned changes select the frontend gate; standalone living-doc changes retain shared checks without selecting an application component.
 
 ## Verification boundary
 
