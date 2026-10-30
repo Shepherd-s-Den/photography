@@ -2,24 +2,28 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 
-## Strategy
+## Confidence model
 
-The backend gate compiles the Scala 3 source and enforces 100% statement and branch coverage for measured production code. Use `dagger call backend-check` as the enforcing gate.
+Tests follow responsibility boundaries. Most behavior is proved through domain and application components; adapters are proved against the real external representation or resource they translate. A smaller set of browser journeys checks that those boundaries compose into a usable editor.
 
-`backend/build.sbt` temporarily excludes the runtime and SQLite adapter packages plus specific currently untested domain ID/location classlikes. Remove those exclusions as behavior tests cover them.
+| Layer | What it establishes |
+| --- | --- |
+| Domain and application components | Business rules, state transitions and orchestration through public operations, substituting effectful collaborators. |
+| Adapter seams | Faithful translation and failure behavior against real HTTP, SQLite, files, image codecs or configuration. |
+| Browser components | User-observable interaction, reactive state, accessibility and focus through rendered controls. |
+| Local application journeys | Integration, visual hierarchy and native browser behavior that isolated components cannot establish. |
+| Architecture and build gates | Dependency direction, type safety and reproducible delivery across supported components. |
 
-The frontend gate runs its configured type, lint, format, boundary, test, coverage, and build checks.
+Transactional, concurrency and recovery guarantees need evidence where state is actually committed. Cross-resource photo publication also needs real storage and restart-oriented verification; mocked collaboration alone cannot establish those guarantees.
 
-Pipeline tests prove affected-component selection.
+## Nomenclature
 
-Database-seam integration tests initialize the schema before exercising database access.
+Name domain and application suites `<Boundary>ComponentTest` and adapter suites `<Adapter>SeamIntegrationTest`; TypeScript uses the corresponding `.componentTest` and `.seamIntegrationTest` suffixes. A seam test crosses the adapter's real external boundary; substituting a network call establishes component behavior instead.
 
-Add behavior-focused tests at domain, application, UI, and adapter boundaries as product behavior is introduced.
+Case descriptions start with `should` and name the observable guarantee in domain vocabulary. Keep runner-required prefixes, such as Python's `test_`, before that description.
 
-## Test names
+## Change validation
 
-Name domain and application component suites `<Boundary>ComponentTest`. Use them to verify behavior through the component's observable boundary.
+Project acceptance criteria into the owning suites and retain traceability with the change evidence. Exercise the complete local journey before archival, with isolated data and read-only access to original photographs.
 
-Name adapter suites `<Adapter>SeamIntegrationTest`. Exercise each adapter through its concrete seam: send HTTP requests through routes and inspect responses, or initialize a database schema before exercising SQLite access. Loading the real `application.conf` file is also a seam integration test.
-
-Every test case's descriptive name starts with `should` and describes the behavior it guarantees. Keep runner-required prefixes, such as Python's `test_`, before that phrase. Use the vocabulary exposed by the tested boundary.
+Coverage is an enforcing guardrail, not a substitute for boundary evidence or a reason to duplicate tests. Build configuration owns thresholds and exclusions; [Contributing](../CONTRIBUTING.md) owns conventions and gate commands, and [pipeline testing](../ci/specs/testing.md) owns verification infrastructure.

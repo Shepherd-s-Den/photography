@@ -4,11 +4,13 @@
 
 ## Contract inventory
 
-The GitHub Actions workflows call these public Dagger functions from `.dagger/src/index.ts`:
+| Surface | Authoritative source |
+| --- | --- |
+| Public Dagger functions and component gates | [Dagger module](../../.dagger/src/index.ts) |
+| Path-to-component ownership | [Selection policy](../../.dagger/src/selection.ts) |
+| Shared verification and outgoing-revision validation | [Verification entrypoint](../../scripts/verify) and [pre-push hook](../../.githooks/pre-push) |
+| Hosted invocation and toolchain pins | [GitHub workflows](../../.github/workflows/) |
 
-| Invocation | Caller | Arguments |
-| --- | --- | --- |
-| `changed` | Local affected-component inspection | `--base`, defaulting to the merge-base with `origin/main`. |
-| `verify` | `scripts/verify` (affected checks); `verify-main.yml` (all checks) | `--base`, or `--all`. |
+## Completion semantics
 
-The component gates are `backend-check`, `frontend-check`, and `pipeline-check`. The shared `bash scripts/verify <base-commit-or-ref>` entrypoint validates its base, checks changed Markdown from the merge-base to HEAD, installs and verifies the pipeline module, and runs affected Dagger checks against the supplied base. Pipeline-module type, lint, formatting and test checks run even for documentation-only changes. Each gate exits zero on success; a failure stops later gates.
+Successful verification means every required stage completed successfully. Selecting no application component still requires the shared Markdown and pipeline-module checks; an explicit all-component run bypasses selection, not the component gates.

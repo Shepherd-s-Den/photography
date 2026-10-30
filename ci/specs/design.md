@@ -2,20 +2,26 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 
-## Overview
+## Purpose
 
-The pipeline maps changed paths to independent backend, frontend, and pipeline checks. Documentation-only changes select no Dagger component; the shared verification entrypoint still checks Markdown and the pipeline module. `verify --all` runs every component check regardless of the diff.
+One verification path serves local pushes and pull requests. Shared checks always run; affected-component selection avoids rebuilding unrelated application components.
 
 ```mermaid
-flowchart LR
-  Changes --> Selection["None / some / all affected"]
-  Selection --> Backend & Frontend & Pipeline
+flowchart TD
+  Push["Local push"] --> Verify["Shared verification entrypoint"]
+  PR["Pull request"] --> Verify
+  Verify --> Shared["Markdown and pipeline-module checks"]
+  Shared --> Selection["Changed paths against a Git baseline"]
+  Selection --> Backend
+  Selection --> Frontend
+  Selection --> Pipeline
+  All["Explicit all-component verification"] --> Backend & Frontend & Pipeline
 ```
 
-## Component ownership
+Backend, frontend and pipeline gates own independent build boundaries in pinned environments. Frontend changes select the frontend gate; documentation changes select no application component while retaining the shared checks.
 
-- `backend/` changes run the backend gate in a pinned JDK and sbt container.
-- `frontend/` changes run the frontend gate in a pinned Node container.
-- `.dagger/`, `dagger.json`, `.mise.toml`, `.github/`, `.githooks/`, `scripts/`, and `.agents/skills/sdd/scripts/` changes select the pipeline gate.
-- The pipeline module owns path selection and containerized component checks.
-- `scripts/verify` owns the shared local/CI gate sequence; `.githooks/pre-push` owns validation of outgoing revisions and base selection.
+## Verification boundary
+
+Git ancestry defines the change under review. The pre-push hook verifies the actual outgoing checkout, while pull-request CI compares the candidate with its target branch. A failed stage stops verification rather than producing a partial success.
+
+The pipeline module owns path-selection policy and component execution. The shared entrypoint owns orchestration; the hook owns outgoing-revision safety. [Contracts](contracts.md) identifies their authoritative sources, and [operations](operational.md) explains how to invoke them.

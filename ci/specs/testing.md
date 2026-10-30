@@ -2,10 +2,21 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 
-## Strategy
+## Confidence model
 
-Vitest tests prove changed-path parsing and affected-component selection, including hooks, SDD scripts and toolchain configuration. The shared local/CI entrypoint always runs the Dagger module's host-side type, lint, format and test checks. Containerized backend and frontend gates verify the selected build hooks work in their pinned environments. The frontend hook installs its lockfile, runs type/lint/format/boundary checks and tests with full statement, branch, function, and line coverage, then builds the production app.
+Pipeline confidence has two independent parts: selecting the correct work and proving that work builds. Pure policy tests establish selection; execution against real tools establishes delivery.
 
-`scripts/test_verification.py` exercises the real pre-push hook and verification shell script in temporary Git repositories, substituting only npm and Dagger commands. It proves gate order and fail-fast behavior, Markdown rejection, remote/main base selection, outgoing-HEAD and clean-tree requirements, missing-base failures and deletion handling. The pipeline's local-setup check supplies Git, Bash, the hook, workflow and Markdown checker alongside the script suite.
+| Boundary | Strategy |
+| --- | --- |
+| Selection policy | Component tests prove changed-path interpretation and ownership independently of containers. |
+| Git and shell orchestration | Process-seam tests exercise real temporary repositories and scripts, substituting expensive build commands. |
+| Component delivery | Pinned containers run the actual backend, frontend and pipeline gates. |
+| Hosted integration | Pull-request CI and explicit all-component verification establish that the same entrypoints work outside local development. |
 
-`verify --all` exercises each component and is run by the manually dispatched main-branch workflow. A green selection test alone does not establish that the selected component builds.
+The host-side module checks validate the verification code itself. They run even when an application rebuild is unnecessary.
+
+## Nomenclature and scope
+
+Use the [application testing nomenclature](../../specs/testing.md#nomenclature) for component and seam suites. The boundary actually crossed determines the category, not whether the subject happens to launch another tool.
+
+Keep scenario inventories and execution results with their tests and change evidence. Passing selection tests does not establish a successful application build; conversely, an all-component build cannot prove that selective verification is sound.

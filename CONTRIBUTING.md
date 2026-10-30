@@ -37,6 +37,7 @@ Enable the local pre-push hook with `git config core.hooksPath .githooks`; it ru
 
 ## Documentation style
 
+- When writing or reviewing living docs, read the [living-doc quality policy and owning template](specs/templates/README.md). They govern strategic altitude, knowledge ownership and whole-document pruning.
 - Keep documentation short, technical, and concise. Maximize signal and avoid restating facts owned elsewhere.
 - Integrate new lessons into the rule that owns them. Refine or replace stale guidance instead of appending a chronology of discoveries.
 - Describe observable behavior and guarantees positively.

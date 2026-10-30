@@ -4,17 +4,29 @@
 
 ## Workflows
 
-- `build.yml` runs on every pull request. It calls `bash scripts/verify "origin/${GITHUB_BASE_REF}"` for changed Markdown, pipeline-module and affected-component checks.
-- `verify-main.yml` is manually dispatched from `main` and runs all component checks.
+Pull-request CI uses the shared verification entrypoint against the target branch. The manually dispatched main-branch workflow runs every component. [Workflow definitions](../../.github/workflows/) own triggers and toolchain pins.
 
-## Toolchain and credentials
-
-Dagger CLI 0.21.9 is installed by the workflows. The module uses pinned builder image tags and weekly Dependabot updates for sbt, npm, and GitHub Actions dependencies. Component checks require no application credentials.
+Install the pinned toolchain from [Contributing](../../CONTRIBUTING.md) and make Docker available. Component verification requires no application credentials.
 
 ## Local push verification
 
 Enable the hook per clone with `git config core.hooksPath .githooks` from the repository root. It uses `mise exec` when available and calls the same `scripts/verify` entrypoint as pull-request CI; Docker and the pinned toolchain are required.
 
-For each non-deletion update, the outgoing revision must be the checked-out HEAD, with no tracked edits or non-ignored untracked files. Ignored build outputs and `.agent-work/` evidence remain allowed. Deletion updates require no build.
+For a manual shared run, fetch the target branch and supply its reference:
 
-Pushes updating an existing remote `main` compare against that remote's old commit. Other updates compare against the target remote's local tracking `main`; fetch that remote's `main` first. Missing bases fail explicitly. The verifier receives no hook input so it cannot consume subsequent ref-update records.
+```sh
+git fetch origin main
+bash scripts/verify origin/main
+```
+
+Verify the committed checkout: the hook requires the outgoing revision to be HEAD and the tracked/non-ignored tree to be clean. Ignored build outputs and `.agent-work/` evidence remain allowed.
+
+Feature pushes compare with the fetched remote main; updates to an existing remote main compare with its previous revision. Missing ancestry is a checkout problem to resolve before retrying verification.
+
+Use `dagger call verify --all` when selection is uncertain or when validating the whole system. Gate commands are listed in Contributing.
+
+## Diagnostics
+
+Local verification writes stage output to the terminal; hosted runs expose it in GitHub Actions logs. Dagger reports container execution and cache reuse. Identify the failing stage and preserve its output before retrying against the same candidate and baseline.
+
+Failures in source checkout, module validation and application delivery have different owners. Repair the failing boundary rather than bypassing the hook or changing gate settings; pipeline operation does not require the application or NAS photo services to be running.

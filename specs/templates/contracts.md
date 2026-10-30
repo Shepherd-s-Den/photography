@@ -2,12 +2,13 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 >
-> Living-doc template. Enumerate each contract surface this component exposes or consumes. Link to authoritative contract sources rather than reprinting their declarations.
+> Living-doc template. Apply the [living-doc quality policy](README.md). Identify contract ownership and link to authoritative sources rather than reprinting declarations.
 
 ## Contract inventory
 
-<!-- A compact list or table of contract surfaces, with an authoritative source for each:
-transport APIs, application algebras, persistence, or external integrations, as applicable. -->
+<!-- A compact table of major boundary surfaces and their authoritative sources: transport,
+persistence, reference data or external integrations. The source owns its operation/schema
+inventory, catalog rows, validation details and configuration values. -->
 
 ## Boundary semantics
 
