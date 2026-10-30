@@ -227,6 +227,37 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
       assertEquals(unknown, MoveResult.SpreadNotFound)
       assertEquals(foreign, MoveResult.Rejected(Conflict.NoNeighbour))
 
+  test("should change every caption corner without changing placement identity, photo, crop or transform"):
+    CaptionCorner.values.toVector.traverse_ { corner =>
+      val refs               = Refs()
+      val occupied           = buildAlbumWithSpreads(spreads = Vector(firstOccupied, second))
+      val selected           = firstOccupied.placements.headOption.getOrElse(fail("Expected occupied spread"))
+      val expectedPlacements = firstOccupied.placements.map(value =>
+        if value.id.value === selected.id.value then value.copy(captionCorner = corner) else value
+      )
+      val expected = firstOccupied.copy(placements = expectedPlacements)
+
+      for
+        manager      <- buildManager(refs, maybeAlbum = occupied.some)
+        result       <- manager.editPlacements(album.id, first.id, Edit.SetCaptionCorner(selected.id, corner))
+        replacements <- refs.replacements.get
+      yield
+        assertEquals(result, PlacementResult.Saved(expected))
+        assertEquals(replacements, Vector(expected))
+    }
+
+  test("should reject a missing caption placement without changing saved composition"):
+    val refs    = Refs()
+    val missing = SpreadPlacementId(buildUuid(index = 999L))
+
+    for
+      manager      <- buildManager(refs)
+      result       <- manager.editPlacements(album.id, first.id, Edit.SetCaptionCorner(missing, CaptionCorner.TopLeft))
+      replacements <- refs.replacements.get
+    yield
+      assertEquals(result, PlacementResult.Rejected(Failure.PlacementNotFound))
+      assertEquals(replacements, Vector.empty[Spread])
+
   test("should change an unoccupied photo spread to a same-context layout with fresh slots"):
     val refs = Refs()
 

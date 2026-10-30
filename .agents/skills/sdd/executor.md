@@ -47,11 +47,11 @@ Project acceptance scenarios from the merged spec's criteria and enumerated edge
 
 ## Implementation PR(s)
 
-Implement the approved behavior within the checked design map. Split into multiple PRs on separable seams, or when one PR would exceed a focused review session — never to dodge a gate. Each PR links the merged spec.
+Implement the approved behavior within the checked design map and [`SKILL.md`](SKILL.md#setup)'s implementation sequence. Split further within those stages when needed for a focused review; each PR links the merged spec.
 
 Make the tests pass, then run the gates `AGENTS.md` defines; never weaken a gate to pass one. Self-check the shared quality checklist, stack leaves selected under `SKILL.md` and [`implementation-completeness.md`](checklists/implementation-completeness.md) against this slice. Replace proposed design-map calls with actual symbols and consumption. Run a second whole-diff pass for callable surfaces, declarations, syntax, capabilities and test structure before the review protocol.
 
-Run the slice locally against its real boundaries and obtain the maintainer's behavior confirmation before opening its PR, as required by `SKILL.md`. Keep local runs isolated from production state unless the maintainer explicitly authorizes that access.
+Apply [`SKILL.md`](SKILL.md#setup)'s slice-evidence gate before opening the PR. Keep local runs isolated from production state unless the maintainer explicitly authorizes that access.
 
 The handoff identifies the exact baseline and candidate revision or content manifest, every changed/untracked file, design-map answers, checklist evidence, local confirmation and command results. Missing evidence is an open gate. Follow [`reviewer.md`](reviewer.md) for the independent review, repair verification and missed-rule recovery.
 
