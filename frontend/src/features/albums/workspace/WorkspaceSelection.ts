@@ -23,7 +23,7 @@ export function findReaderNavigation(
 
 export function findSpreadNavigation(spreads: readonly Spread[], selection: Selection) {
   const index = selection.kind === "spread" ? spreads.indexOf(selection.spread) : -1;
-  const parts = spreads.map((spread) => (spread.kind === "album_start" ? null : spread.kind === "chapter_start" ? spread.chapter : spread.id));
+  const parts = spreads.map(getSpreadPart);
   const canPrevious = index > 0;
   const canNext = index >= 0 && index < parts.length - 1;
   return {
@@ -34,4 +34,21 @@ export function findSpreadNavigation(spreads: readonly Spread[], selection: Sele
     next: canNext ? parts[index + 1] : undefined,
     last: canNext ? parts.at(-1) : undefined,
   };
+}
+
+export function findDeletionSelection(spreads: readonly Pick<Spread, "id" | "kind" | "chapter">[], index: number): string | null | undefined {
+  const spread = spreads[Math.min(index, spreads.length - 1)];
+  return spread === undefined ? undefined : getSpreadPart(spread);
+}
+
+export function findSpreadPosition(spreads: readonly Spread[], selected: Spread) {
+  const chapterSpreads = spreads.filter((spread) => spread.chapter === selected.chapter);
+  return {
+    chapter: { position: chapterSpreads.indexOf(selected) + 1, total: chapterSpreads.length },
+    album: { position: spreads.indexOf(selected) + 1, total: spreads.length },
+  };
+}
+
+function getSpreadPart(spread: Pick<Spread, "id" | "kind" | "chapter">): string | null {
+  return spread.kind === "album_start" ? null : spread.kind === "chapter_start" ? spread.chapter : spread.id;
 }

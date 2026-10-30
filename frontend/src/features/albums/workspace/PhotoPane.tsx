@@ -36,7 +36,7 @@ export function PhotoPane(props: {
     props.chapters.length === 0
       ? "Add a chapter to refresh photos."
       : props.chapters.some((chapter) => props.scheduling[chapter.id] === "pending")
-        ? "Scheduling photo Refresh. Please wait."
+        ? "Scheduling photo refresh. Please wait."
         : undefined,
   );
   const liveFeedback = createMemo(
@@ -217,7 +217,7 @@ export function PhotoPane(props: {
                                   props.onRetryRefresh(id);
                                 }}
                               >
-                                Retry Refresh for {chapter().name}
+                                Retry refresh for {chapter().name}
                               </button>
                             </p>
                           </Show>
@@ -308,7 +308,7 @@ export function PhotoPane(props: {
             grip.focus();
           }}
           onKeyDown={(event) => {
-            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
             event.preventDefault();
             setCollapsed(false);
             setChosenWidth(limitPhotoWidth(width() + (event.key === "ArrowRight" ? 16 : -16), availableWidth()));
@@ -320,7 +320,7 @@ export function PhotoPane(props: {
           </svg>
         </button>
         <span id="photo-grip-help" class="photo-grip-help">
-          {width()}px. Drag or use Left/Right arrows to resize; activate to collapse or restore.
+          {width()}px. Drag or use Alt+Left/Right to resize; activate to collapse or restore.
         </span>
       </aside>
       {props.children}

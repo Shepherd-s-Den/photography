@@ -37,8 +37,17 @@ export interface Slot {
 
 export type Spread = {
   readonly id: string;
+  readonly templateId: string;
   readonly slots: readonly Slot[];
 } & ({ readonly kind: "album_start"; readonly chapter: null } | { readonly kind: "chapter_start" | "photos_only"; readonly chapter: string });
+
+export type SpreadContext = Spread["kind"];
+
+export interface SpreadTemplate {
+  readonly id: string;
+  readonly name: string;
+  readonly slots: readonly Omit<Slot, "id">[];
+}
 
 export interface Workspace {
   readonly photoInventories: Readonly<Record<string, PhotoInventory>>;

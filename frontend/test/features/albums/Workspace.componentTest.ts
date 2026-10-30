@@ -1,19 +1,140 @@
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@solidjs/testing-library";
+import { createComponent, type ComponentProps } from "solid-js";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { ChapterMetadata } from "../../../src/features/albums/workspace/ChapterMetadata";
+import { ChapterDialog } from "../../../src/features/albums/workspace/ChapterDialog";
 import {
   describeCountryLabel,
   describePeriod,
+  displayCalendarDay,
+  readCalendarDay,
   isCalendarDay,
   suggestFolder,
   validateChapter,
 } from "../../../src/features/albums/workspace/ChapterDetails";
-import { findSelection, findReaderNavigation, findSpreadNavigation } from "../../../src/features/albums/workspace/WorkspaceSelection";
-import { getChapterCapacityReason } from "../../../src/features/albums/workspace/ChapterOutline";
+import {
+  findSelection,
+  findReaderNavigation,
+  findSpreadNavigation,
+  findSpreadPosition,
+  findDeletionSelection,
+} from "../../../src/features/albums/workspace/WorkspaceSelection";
+import { getChapterCapacityReason, spreadActionReasons } from "../../../src/features/albums/workspace/ChapterOutline";
+import { templateCategory } from "../../../src/features/albums/workspace/TemplateSelector";
+import type { Spread } from "../../../src/features/albums/model/Workspace";
 import { getCoverCredits } from "../../../src/features/albums/workspace/Canvas";
 import { searchCountries } from "../../../src/features/albums/workspace/CountryPicker";
 import { readWorkspace } from "../../../src/features/albums/api/WorkspaceWire";
 import { readPhotoInventory, readScheduling } from "../../../src/features/albums/api/PhotoWire";
 
 describe("chapter detail feedback", () => {
+  it("should require both resolved spread positions in the metadata contract", () => {
+    expectTypeOf<ComponentProps<typeof ChapterMetadata>["position"]>().toEqualTypeOf<{
+      chapter: { position: number; total: number };
+      album: { position: number; total: number };
+    }>();
+  });
+
+  it("should present both positions and chapter details in the metadata block", () => {
+    const expectedMetadata = "Chapter spread2 / 3Album spread4 / 6LocationKyotoCountryJapanPeriod31/12 - 01/01";
+
+    render(() =>
+      createComponent(ChapterMetadata, {
+        chapter: { name: "Kyoto", kind: "vacation", countries: ["jp"], start: "2025-12-31", end: "2026-01-01" },
+        position: { chapter: { position: 2, total: 3 }, album: { position: 4, total: 6 } },
+        countries: [{ id: "jp", name: "Japan" }],
+        unavailable: undefined,
+        onEdit: vi.fn(),
+      }),
+    );
+
+    const metadata = screen.getByRole("region", { name: "Spread details" });
+
+    expect(metadata).toHaveTextContent(expectedMetadata);
+    expect(screen.getByRole("button", { name: "Edit chapter details" })).toBeEnabled();
+  });
+
+  it("should edit full day-first dates through typing and native calendars without changing saved years", () => {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.open = true;
+      },
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", {
+      configurable: true,
+      value(this: HTMLDialogElement) {
+        this.open = false;
+      },
+    });
+    const picker = vi.fn();
+    const save = vi.fn(() => new Promise<never>(() => undefined));
+    const expectedDetails = {
+      kind: "vacation",
+      name: "Kyoto",
+      countries: ["jp"],
+      start: "2025-12-30",
+      end: "2026-01-02",
+      sourceFolder: "/photos/Kyoto",
+    };
+
+    const view = render(() =>
+      createComponent(ChapterDialog, {
+        chapter: { kind: "vacation", name: "Kyoto", countries: ["jp"], start: "2025-12-31", end: "2026-01-01", sourceFolder: "/photos/Kyoto" },
+        countries: [{ id: "jp", name: "Japan", code: "JP" }],
+        year: 2026,
+        photoRoot: "/photos",
+        homeAvailable: false,
+        save,
+        onSaved: vi.fn(),
+        onClose: vi.fn(),
+        returnFocus: vi.fn(),
+      }),
+    );
+    const first = screen.getByRole("textbox", { name: "First day" });
+    const last = screen.getByRole("textbox", { name: "Last day" });
+    const firstCalendar = screen.getByLabelText("Choose first day from calendar");
+    const lastCalendar = screen.getByLabelText("Choose last day from calendar");
+    Object.defineProperty(firstCalendar, "showPicker", { configurable: true, value: picker });
+
+    expect(first).toHaveValue("31/12/2025");
+    expect(last).toHaveValue("01/01/2026");
+
+    fireEvent.click(firstCalendar);
+    fireEvent.keyDown(firstCalendar, { key: "Enter" });
+    fireEvent.keyDown(firstCalendar, { key: " " });
+    fireEvent.keyDown(firstCalendar, { key: "ArrowDown" });
+    fireEvent.click(lastCalendar);
+    fireEvent.input(firstCalendar, { target: { value: "" } });
+    fireEvent.input(lastCalendar, { target: { value: "" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Chapter details" }));
+
+    expect(first).toHaveValue("");
+    expect(last).toHaveValue("");
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter valid calendar dates.");
+    expect(save).not.toHaveBeenCalled();
+
+    fireEvent.input(firstCalendar, { target: { value: "2025-12-29" } });
+
+    expect(first).toHaveValue("29/12/2025");
+
+    fireEvent.input(first, { target: { value: "30/12/2025" } });
+    fireEvent.input(lastCalendar, { target: { value: "2026-01-02" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Chapter details" }));
+
+    expect(picker).toHaveBeenCalledTimes(3);
+    expect(last).toHaveValue("02/01/2026");
+    expect(firstCalendar).toBeDisabled();
+    expect(lastCalendar).toBeDisabled();
+    expect(firstCalendar).toHaveAccessibleDescription("Saving chapter. Please wait.");
+    expect(lastCalendar).toHaveAccessibleDescription("Saving chapter. Please wait.");
+    expect(save).toHaveBeenCalledWith(expectedDetails);
+
+    view.unmount();
+    Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
+    Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+  });
+
   it.each([
     [1, "Country"],
     [2, "Countries"],
@@ -70,7 +191,23 @@ describe("chapter detail feedback", () => {
     expect(suggestFolder("/mnt/photos/", 2026, " Kyoto ")).toBe("/mnt/photos/2026/selection/Kyoto");
     expect(suggestFolder("/", 2026, "Home")).toBe("/2026/selection/Home");
     expect(describePeriod({ kind: "home", start: "2026-01-01", end: "2026-12-31" })).toBe("Throughout the year");
-    expect(describePeriod({ kind: "vacation", start: "2025-12-31", end: "2026-01-01" })).toBe("31/12/2025 - 01/01/2026");
+    expect(describePeriod({ kind: "vacation", start: "2025-12-31", end: "2026-01-01" })).toBe("31/12 - 01/01");
+  });
+
+  it.each([
+    ["31/12/2025", "2025-12-31"],
+    ["29/02/2024", "2024-02-29"],
+    ["29/02/2026", ""],
+    ["31/04/2026", ""],
+    ["2026-04-02", ""],
+    ["2/04/2026", ""],
+    ["", ""],
+  ])("should read day-first calendar input %s as %s", (input, expected) => {
+    expect(readCalendarDay(input)).toBe(expected);
+  });
+
+  it("should preserve the full saved date when displaying an editable day", () => {
+    expect(displayCalendarDay("2025-12-31")).toBe("31/12/2025");
   });
 });
 
@@ -95,6 +232,83 @@ describe("chapter outline capacity", () => {
   ] as const)("should explain chapter creation availability at %i spreads", (count, expected) => {
     expect(getChapterCapacityReason(count)).toBe(expected);
   });
+
+  it.each([
+    ["unavailable", undefined, 65, "Saving changes.", ["Saving changes.", "Saving changes.", "Saving changes.", "Saving changes."]],
+    [
+      "no selection",
+      undefined,
+      7,
+      undefined,
+      [
+        "Select a chapter opening or photo spread first.",
+        "Select a photo spread first.",
+        "Select a photo spread first.",
+        "Select a photo spread first.",
+      ],
+    ],
+    [
+      "album opening",
+      0,
+      7,
+      undefined,
+      [
+        "Select a chapter opening or photo spread first.",
+        "Select a photo spread first.",
+        "Select a photo spread first.",
+        "Select a photo spread first.",
+      ],
+    ],
+    ["chapter opening", 1, 7, undefined, [undefined, "Select a photo spread first.", "Select a photo spread first.", "Select a photo spread first."]],
+    ["capacity", 3, 65, undefined, ["This album has 65 interior spreads. No more spreads can be added.", undefined, undefined, undefined]],
+    ["first", 2, 7, undefined, [undefined, "This is the first photo spread in its chapter.", undefined, undefined]],
+    ["middle", 3, 7, undefined, [undefined, undefined, undefined, undefined]],
+    ["last", 4, 7, undefined, [undefined, undefined, "This is the last photo spread in its chapter.", undefined]],
+    [
+      "single",
+      6,
+      7,
+      undefined,
+      [undefined, "This is the first photo spread in its chapter.", "This is the last photo spread in its chapter.", undefined],
+    ],
+  ] as const)("should explain spread actions for %s", (_scenario, selectedIndex, total, unavailable, expectedReasons) => {
+    const spreads: Spread[] = [
+      { id: "album", templateId: "layout", kind: "album_start", chapter: null, slots: [] },
+      { id: "opening", templateId: "layout", kind: "chapter_start", chapter: "vacation", slots: [] },
+      ...["first", "middle", "last"].map((id) => ({ id, templateId: "layout", kind: "photos_only" as const, chapter: "vacation", slots: [] })),
+      { id: "home-opening", templateId: "layout", kind: "chapter_start", chapter: "home", slots: [] },
+      { id: "single", templateId: "layout", kind: "photos_only", chapter: "home", slots: [] },
+    ];
+    const selected = selectedIndex === undefined ? undefined : spreads[selectedIndex];
+    const remaining = Array.from({ length: total - spreads.length }, (_, index): Spread => ({
+      id: `other-${String(index)}`,
+      templateId: "layout",
+      kind: "photos_only",
+      chapter: "other",
+      slots: [],
+    }));
+    const [add, earlier, later, remove] = expectedReasons;
+    const expected = { add, earlier, later, remove };
+
+    expect(spreadActionReasons([...spreads, ...remaining], selected, unavailable)).toEqual(expected);
+  });
+});
+
+describe("template photo-slot categories", () => {
+  it.each([
+    [1, 2, 1],
+    [9, 1, 9],
+    [10, 0, 10],
+    [11, 3, 10],
+    [24, 0, 10],
+  ])("should categorize %i photo slots and %i text slots as %i", (photos, texts, expected) => {
+    const slots = [
+      ...Array.from({ length: photos }, () => ({ kind: "photo" as const, x: 0, y: 0, width: 10, height: 10 })),
+      ...Array.from({ length: texts }, () => ({ kind: "text" as const, x: 0, y: 0, width: 10, height: 10 })),
+    ];
+
+    expect(templateCategory({ slots })).toBe(expected);
+  });
 });
 
 describe("cover credits", () => {
@@ -107,11 +321,47 @@ describe("cover credits", () => {
 });
 
 describe("workspace URL selection", () => {
+  it.each([
+    ["album opening", 0, false, null],
+    ["chapter opening", 1, false, "chapter"],
+    ["photo spread", 2, false, "photo"],
+    ["past the last spread", 3, false, "photo"],
+    ["empty remaining spreads", 0, true, undefined],
+  ] as const)("should retain the deletion index at %s", (_scenario, index, empty, expected) => {
+    const remainingSpreads: readonly Spread[] = empty
+      ? []
+      : [
+          { id: "album-opening", templateId: "layout", kind: "album_start", chapter: null, slots: [] },
+          { id: "chapter-opening", templateId: "layout", kind: "chapter_start", chapter: "chapter", slots: [] },
+          { id: "photo", templateId: "layout", kind: "photos_only", chapter: "chapter", slots: [] },
+        ];
+
+    expect(findDeletionSelection(remainingSpreads, index)).toBe(expected);
+  });
+
+  it.each([
+    [0, { chapter: { position: 1, total: 1 }, album: { position: 1, total: 5 } }],
+    [1, { chapter: { position: 1, total: 3 }, album: { position: 2, total: 5 } }],
+    [2, { chapter: { position: 2, total: 3 }, album: { position: 3, total: 5 } }],
+    [3, { chapter: { position: 3, total: 3 }, album: { position: 4, total: 5 } }],
+    [4, { chapter: { position: 1, total: 1 }, album: { position: 5, total: 5 } }],
+  ] as const)("should count openings and exclude Cover for spread index %i", (index, expected) => {
+    const spreads: [Spread, Spread, Spread, Spread, Spread] = [
+      { id: "album", templateId: "layout", kind: "album_start", chapter: null, slots: [] },
+      { id: "opening", templateId: "layout", kind: "chapter_start", chapter: "vacation", slots: [] },
+      { id: "first", templateId: "layout", kind: "photos_only", chapter: "vacation", slots: [] },
+      { id: "last", templateId: "layout", kind: "photos_only", chapter: "vacation", slots: [] },
+      { id: "home-opening", templateId: "layout", kind: "chapter_start", chapter: "home", slots: [] },
+    ];
+
+    expect(findSpreadPosition(spreads, spreads[index])).toEqual(expected);
+  });
+
   it("should resolve URL parts through persisted openings and spread ownership without inventing missing values", () => {
     const spreads = [
-      { id: "album-opening", chapter: null, kind: "album_start" as const, slots: [] },
-      { id: "chapter-opening", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
-      { id: "photo", chapter: "chapter", kind: "photos_only" as const, slots: [] },
+      { id: "album-opening", templateId: "layout", chapter: null, kind: "album_start" as const, slots: [] },
+      { id: "chapter-opening", templateId: "layout", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
+      { id: "photo", templateId: "layout", chapter: "chapter", kind: "photos_only" as const, slots: [] },
     ];
 
     expect(findSelection(spreads, null)).toEqual({ kind: "spread", spread: spreads[0] });
@@ -131,17 +381,17 @@ describe("workspace URL selection", () => {
     ["foreign", undefined, undefined],
   ] as const)("should traverse persisted Reader order from %s without wrapping", (part, previous, next) => {
     const spreads = [
-      { id: "album-opening", chapter: null, kind: "album_start" as const, slots: [] },
-      { id: "chapter-opening", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
-      { id: "photo", chapter: "chapter", kind: "photos_only" as const, slots: [] },
-      { id: "home-opening", chapter: "home", kind: "chapter_start" as const, slots: [] },
+      { id: "album-opening", templateId: "layout", chapter: null, kind: "album_start" as const, slots: [] },
+      { id: "chapter-opening", templateId: "layout", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
+      { id: "photo", templateId: "layout", chapter: "chapter", kind: "photos_only" as const, slots: [] },
+      { id: "home-opening", templateId: "layout", chapter: "home", kind: "chapter_start" as const, slots: [] },
     ];
 
     expect(findReaderNavigation(spreads, findSelection(spreads, part))).toEqual({ previous, next });
   });
 
   it("should navigate an album opening to Cover and keep an empty workspace unavailable", () => {
-    const spreads = [{ id: "opening", chapter: null, kind: "album_start" as const, slots: [] }];
+    const spreads = [{ id: "opening", templateId: "layout", chapter: null, kind: "album_start" as const, slots: [] }];
     const emptyNavigation = { position: undefined, total: 0, first: undefined, previous: undefined, next: undefined, last: undefined };
 
     expect(findReaderNavigation(spreads, findSelection(spreads, null))).toEqual({ previous: "cover", next: undefined });
@@ -159,9 +409,9 @@ describe("workspace URL selection", () => {
     "should derive above-editor spread destinations from %s without wrapping or navigating Cover",
     (part, position, first, previous, next, last) => {
       const spreads = [
-        { id: "opening", chapter: null, kind: "album_start" as const, slots: [] },
-        { id: "chapter-opening", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
-        { id: "photo", chapter: "chapter", kind: "photos_only" as const, slots: [] },
+        { id: "opening", templateId: "layout", chapter: null, kind: "album_start" as const, slots: [] },
+        { id: "chapter-opening", templateId: "layout", chapter: "chapter", kind: "chapter_start" as const, slots: [] },
+        { id: "photo", templateId: "layout", chapter: "chapter", kind: "photos_only" as const, slots: [] },
       ];
       const expected = { position, total: 3, first, previous, next, last };
 
@@ -182,7 +432,7 @@ describe("workspace wire representations", () => {
     description: "",
   };
   const slot = { id: "slot", kind: "photo", x: 2, y: 3, width: 24, height: 40 };
-  const spread = { id: "opening", chapter: null, kind: "album_start", slots: [slot] };
+  const spread = { id: "opening", templateId: "layout", chapter: null, kind: "album_start", slots: [slot] };
   const workspace = {
     year: 2026,
     photoRoot: "/photos",

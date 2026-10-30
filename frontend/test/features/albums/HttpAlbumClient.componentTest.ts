@@ -3,6 +3,64 @@ import { makeHttpAlbumClient } from "../../../src/features/albums/api/HttpAlbumC
 import { AlbumRequestError } from "../../../src/features/albums/model/Album";
 
 describe("same-origin album HTTP client", () => {
+  it("should use merged spread routes and preserve occupied counts until explicit confirmation", async () => {
+    const template = { id: "layout", name: "P", slots: [{ kind: "photo", x: 0, y: 0, width: 100, height: 100 }] };
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ templates: [template] })))
+      .mockResolvedValueOnce(new Response('{"id":"new"}', { status: 201 }))
+      .mockResolvedValueOnce(new Response('{"id":"new"}'))
+      .mockResolvedValueOnce(new Response('{"code":"spread_occupied","placements":7}', { status: 409 }))
+      .mockResolvedValueOnce(new Response('{"id":"new","templateId":"layout"}'))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const client = makeHttpAlbumClient(fetcher);
+    const expectedPaths = [
+      "/api/templates/photos-only",
+      "/api/albums/album%2Fid/chapters/chapter%2Fid/spreads",
+      "/api/albums/album%2Fid/spreads/new/move",
+      "/api/albums/album%2Fid/spreads/new/template",
+      "/api/albums/album%2Fid/spreads/new/template?confirmPlacements=true",
+      "/api/albums/album%2Fid/spreads/new?confirmPlacements=true",
+    ];
+
+    const templates = await client.templates("photos_only");
+    const inserted = await client.addSpread("album/id", "chapter/id", "opening");
+    await client.moveSpread("album/id", "new", "earlier");
+    const occupied = await client.changeSpreadTemplate("album/id", "new", "layout", false).catch((failure: unknown) => failure);
+    await client.changeSpreadTemplate("album/id", "new", "layout", true);
+    await client.deleteSpread("album/id", "new", true);
+
+    expect(templates).toEqual([template]);
+    expect(inserted).toBe("new");
+    expect(occupied).toMatchObject({ placements: 7 });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual(expectedPaths);
+    expect(fetcher.mock.calls[1]?.[1]).toMatchObject({ method: "POST", body: '{"afterSpreadId":"opening"}' });
+    expect(fetcher.mock.calls[2]?.[1]).toMatchObject({ method: "POST", body: '{"direction":"earlier"}' });
+  });
+
+  it.each([{ slots: [] }, { slots: [{ kind: "text", x: 0, y: 0, width: 100, height: 100 }] }])(
+    "should reject a catalog without photo slots: %j",
+    async ({ slots }) => {
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(JSON.stringify({ templates: [{ id: "invalid", name: "Invalid", slots }] })));
+      const client = makeHttpAlbumClient(fetcher);
+
+      await expect(client.templates("album_start")).rejects.toThrow("A spread template must contain a photo slot");
+    },
+  );
+
+  it.each([
+    [409, { code: "spread_occupied", placements: 0 }, "Invalid placement count"],
+    [409, { code: "spread_occupied", placements: 1.5 }, "Invalid placement count"],
+    [404, { code: "spread_not_found" }, "This spread could not be found."],
+  ])("should reject spread failure %i %j at the HTTP boundary", async (status, body, message) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+    const client = makeHttpAlbumClient(fetcher);
+
+    await expect(client.deleteSpread("album", "spread", false)).rejects.toThrow(message);
+    expect(fetcher.mock.calls[0]?.[0]).toBe("/api/albums/album/spreads/spread");
+  });
   it("should load persisted workspace geometry and send only type-specific chapter inputs", async () => {
     const workspace = { year: 2026, photoRoot: "/nas/photos", chapters: [], countries: [], spreads: [], photoInventories: {} };
     const vacation = {

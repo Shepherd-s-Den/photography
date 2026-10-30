@@ -85,11 +85,15 @@ export function FullscreenReader(props: {
           opener = element;
         }}
         type="button"
+        aria-label="Reader mode"
+        title="Reader mode"
         disabled={entryReason() !== undefined}
         aria-describedby={entryReason() !== undefined ? reasonId : undefined}
         onClick={() => void enter()}
       >
-        Reader
+        <svg class="reader-entry-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5.5C9 3.5 5.5 3 2 4v15c3.5-1 7-.5 10 1.5C15 18.5 18.5 18 22 19V4c-3.5-1-7-.5-10 1.5Zm0 0v15M5 8c1.5-.2 3 .1 4 .7M5 12c1.5-.2 3 .1 4 .7M15 8.7c1-.6 2.5-.9 4-.7M15 12.7c1-.6 2.5-.9 4-.7" />
+        </svg>
       </button>
       <Show when={entryReason()}>{(reason) => <span id={reasonId}>{reason()}</span>}</Show>
     </div>
@@ -97,9 +101,9 @@ export function FullscreenReader(props: {
 
   return (
     <>
-      <div class="reader-entry">
+      <div class="reader-entry" classList={{ "reader-entry-mounted": props.entryMount !== undefined }}>
         <Show when={props.label !== ""}>
-          <h2>{props.label}</h2>
+          <h2 classList={{ "control-help": props.entryMount !== undefined }}>{props.label}</h2>
         </Show>
         <Show when={props.entryMount} fallback={entry}>
           {(mount) => <Portal mount={mount()}>{entry}</Portal>}
@@ -113,7 +117,7 @@ export function FullscreenReader(props: {
         classList={{ "reader-active": active() }}
         role={active() ? "dialog" : undefined}
         aria-modal={active() ? true : undefined}
-        aria-label={active() ? "Fullscreen Reader" : undefined}
+        aria-label={active() ? "Fullscreen reader" : undefined}
       >
         <div class="reader-canvas" style={{ "--canvas-aspect-ratio": props.aspectRatio }}>
           {props.children}

@@ -32,10 +32,20 @@ export function suggestFolder(photoRoot: string, year: number, name: string): st
 }
 
 export function describePeriod(chapter: { kind: "vacation" | "home"; start: string; end: string }): string {
-  const displayDate = (value: string) => `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}`;
+  const displayDate = (value: string) => `${value.slice(8, 10)}/${value.slice(5, 7)}`;
   return chapter.kind === "home" ? "Throughout the year" : `${displayDate(chapter.start)} - ${displayDate(chapter.end)}`;
 }
 
 export function describeCountryLabel(count: number): string {
   return count === 1 ? "Country" : "Countries";
+}
+
+export function displayCalendarDay(value: string): string {
+  return `${value.slice(8, 10)}/${value.slice(5, 7)}/${value.slice(0, 4)}`;
+}
+
+export function readCalendarDay(value: string): string {
+  if (!/^[0-9]{2}\/[0-9]{2}\/[0-9]{4}$/.test(value)) return "";
+  const day = `${value.slice(6, 10)}-${value.slice(3, 5)}-${value.slice(0, 2)}`;
+  return isCalendarDay(day) ? day : "";
 }

@@ -1,6 +1,6 @@
-import { AlbumRequestError, type AlbumClient } from "../model/Album";
-import { readAlbum, readFailureMessage, readPage, readSummary } from "./Wire";
-import { readChapterIdentity, readWorkspace } from "./WorkspaceWire";
+import { AlbumRequestError, SpreadOccupiedError, type AlbumClient } from "../model/Album";
+import { readAlbum, readFailureMessage, readPage, readSummary, readRecord, readText, readNumber } from "./Wire";
+import { readChapterIdentity, readTemplates, readWorkspace } from "./WorkspaceWire";
 import { readPhotoInventory, readScheduling } from "./PhotoWire";
 
 export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
@@ -22,6 +22,14 @@ export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
     const response = await fetcher(path, init);
     if (!response.ok) {
       const failure: unknown = await response.json();
+      const fields = readRecord(failure);
+      if (response.status === 409 && fields["code"] === "spread_occupied") {
+        const placements = readNumber(fields["placements"]);
+        if (!Number.isInteger(placements) || placements < 1) throw new Error("Invalid placement count");
+        throw new SpreadOccupiedError(placements);
+      }
+      if (response.status === 404 && fields["code"] === "spread_not_found")
+        throw new AlbumRequestError(404, "This spread could not be found. Reload the workspace and try again.");
       throw new AlbumRequestError(response.status, readFailureMessage(failure));
     }
     if (response.status !== expectedStatus) throw new Error("Unexpected album response status");
@@ -30,6 +38,38 @@ export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
   }
 
   return {
+    templates: (context) => {
+      const paths = { photos_only: "photos-only", chapter_start: "chapter-start", album_start: "album-start" };
+      return request(`/api/templates/${paths[context]}`, "GET", undefined, 200, readTemplates);
+    },
+    addSpread: (id, chapterId, afterSpreadId) =>
+      request(`/api/albums/${encodeURIComponent(id)}/chapters/${encodeURIComponent(chapterId)}/spreads`, "POST", { afterSpreadId }, 201, (value) =>
+        readText(readRecord(value)["id"]),
+      ),
+    moveSpread: (id, spreadId, direction) =>
+      request(`/api/albums/${encodeURIComponent(id)}/spreads/${encodeURIComponent(spreadId)}/move`, "POST", { direction }, 200, (value) => {
+        readText(readRecord(value)["id"]);
+      }),
+    changeSpreadTemplate: (id, spreadId, templateId, confirmPlacements) =>
+      request(
+        `/api/albums/${encodeURIComponent(id)}/spreads/${encodeURIComponent(spreadId)}/template${confirmPlacements ? "?confirmPlacements=true" : ""}`,
+        "PUT",
+        { templateId },
+        200,
+        (value) => {
+          const fields = readRecord(value);
+          readText(fields["id"]);
+          readText(fields["templateId"]);
+        },
+      ),
+    deleteSpread: (id, spreadId, confirmPlacements) =>
+      request(
+        `/api/albums/${encodeURIComponent(id)}/spreads/${encodeURIComponent(spreadId)}${confirmPlacements ? "?confirmPlacements=true" : ""}`,
+        "DELETE",
+        undefined,
+        204,
+        () => undefined,
+      ),
     list: (page) => request(`/api/albums?page=${String(page)}`, "GET", undefined, 200, readPage),
     create: (year) => request("/api/albums", "POST", { year }, 201, readSummary),
     rename: (id, title) => request(`/api/albums/${encodeURIComponent(id)}`, "PATCH", { title }, 200, readSummary),

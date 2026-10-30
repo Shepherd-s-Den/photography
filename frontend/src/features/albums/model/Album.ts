@@ -1,4 +1,4 @@
-import type { ChapterDetails, Workspace } from "./Workspace";
+import type { ChapterDetails, SpreadContext, SpreadTemplate, Workspace } from "./Workspace";
 import type { ChapterSave, PhotoInventory } from "./Photo";
 
 export const minimumAlbumYear = 1900;
@@ -34,6 +34,17 @@ export interface AlbumClient {
   readonly refreshPhotos: (id: string) => Promise<"queued" | "coalesced">;
   readonly createChapter: (id: string, details: ChapterDetails) => Promise<ChapterSave>;
   readonly updateChapter: (id: string, chapterId: string, details: ChapterDetails) => Promise<ChapterSave>;
+  readonly templates: (context: SpreadContext) => Promise<readonly SpreadTemplate[]>;
+  readonly addSpread: (id: string, chapterId: string, afterSpreadId: string) => Promise<string>;
+  readonly moveSpread: (id: string, spreadId: string, direction: "earlier" | "later") => Promise<void>;
+  readonly changeSpreadTemplate: (id: string, spreadId: string, templateId: string, confirmPlacements: boolean) => Promise<void>;
+  readonly deleteSpread: (id: string, spreadId: string, confirmPlacements: boolean) => Promise<void>;
+}
+
+export class SpreadOccupiedError extends Error {
+  constructor(readonly placements: number) {
+    super(`This spread contains ${String(placements)} placements.`);
+  }
 }
 
 export class AlbumRequestError extends Error {

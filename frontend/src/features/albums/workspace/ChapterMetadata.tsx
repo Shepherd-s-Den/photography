@@ -4,6 +4,10 @@ import { describeCountryLabel, describePeriod } from "./ChapterDetails";
 
 export function ChapterMetadata(props: {
   chapter: Pick<Chapter, "name" | "countries" | "kind" | "start" | "end">;
+  position: {
+    chapter: { position: number; total: number };
+    album: { position: number; total: number };
+  };
   countries: readonly Pick<Country, "id" | "name">[];
   unavailable: string | undefined;
   onEdit: (opener: HTMLButtonElement) => void;
@@ -15,9 +19,21 @@ export function ChapterMetadata(props: {
       .join(", "),
   );
   return (
-    <>
+    <section class="spread-details" aria-label="Spread details">
       <div class="chapter-metadata-row">
         <dl class="chapter-metadata">
+          <div>
+            <dt>Chapter spread</dt>
+            <dd aria-label="Chapter spread">
+              {props.position.chapter.position} / {props.position.chapter.total}
+            </dd>
+          </div>
+          <div>
+            <dt>Album spread</dt>
+            <dd aria-label="Album spread">
+              {props.position.album.position} / {props.position.album.total}
+            </dd>
+          </div>
           <div>
             <dt>Location</dt>
             <dd>{props.chapter.name}</dd>
@@ -48,6 +64,6 @@ export function ChapterMetadata(props: {
         </button>
       </div>
       <Show when={props.unavailable}>{(reason) => <p id="metadata-feedback">{reason()}</p>}</Show>
-    </>
+    </section>
   );
 }

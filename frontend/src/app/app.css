@@ -13,6 +13,7 @@
   --muted: #60767b;
   --line: #d6e5e7;
   --teal: #247c7f;
+  --page-gutter: 24px;
 }
 * {
   box-sizing: border-box;
@@ -91,7 +92,7 @@ p {
   display: flex;
   align-items: center;
   min-height: 58px;
-  padding: 0 clamp(18px, 5vw, 70px);
+  padding: 0 var(--page-gutter);
   border-bottom: 1px solid var(--line);
   background: rgb(252 254 254 / 88%);
 }
@@ -507,6 +508,9 @@ small {
   }
 }
 @media (max-width: 680px) {
+  :root {
+    --page-gutter: 14px;
+  }
   .page {
     width: calc(100% - 28px);
     padding-top: 28px;

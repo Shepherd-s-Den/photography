@@ -121,7 +121,7 @@ describe("photo pane browser controls", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh photos" }));
     fireEvent.click(screen.getByRole("button", { name: "Retry inventory for Kyoto" }));
-    fireEvent.click(screen.getByRole("button", { name: "Retry Refresh for Kyoto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry refresh for Kyoto" }));
     disclosure.focus();
     change({ chapter: { ...inventory, processing: { state: "completed", unsupportedCount: 0, skippedCount: 0, issues: [] } } });
 
@@ -154,8 +154,10 @@ describe("photo pane browser controls", () => {
 
     fireEvent(grip, new MouseEvent("pointerdown", { bubbles: true, clientX: 320, button: 2 }));
     fireEvent.keyDown(grip, { key: "ArrowRight" });
+    expect(grip).toHaveAccessibleDescription(/320px/);
+    fireEvent.keyDown(grip, { key: "ArrowRight", altKey: true });
     expect(grip).toHaveAccessibleDescription(/336px/);
-    fireEvent.keyDown(grip, { key: "ArrowLeft" });
+    fireEvent.keyDown(grip, { key: "ArrowLeft", altKey: true });
     fireEvent.keyDown(grip, { key: "Tab" });
     fireEvent(grip, new MouseEvent("pointerdown", { bubbles: true, clientX: 320, button: 0 }));
     fireEvent(window, new MouseEvent("pointermove", { clientX: 322 }));
@@ -207,7 +209,7 @@ describe("photo pane browser controls", () => {
   });
 
   it.each([
-    ["pending", "Scheduling photo Refresh. Please wait."],
+    ["pending", "Scheduling photo refresh. Please wait."],
     ["queued", "Refresh photos"],
     ["coalesced", "Refresh photos"],
     ["not-requested", "Refresh photos"],
@@ -308,7 +310,7 @@ describe("photo pane browser controls", () => {
     fireEvent.click(retry);
 
     expect(screen.getByRole("button", { name: "Collapse photo pane" })).toHaveFocus();
-    const schedule = screen.getByRole("button", { name: "Retry Refresh for Kyoto" });
+    const schedule = screen.getByRole("button", { name: "Retry refresh for Kyoto" });
     schedule.focus();
     fireEvent.click(schedule);
     expect(screen.getByRole("button", { name: "Collapse photo pane" })).toHaveFocus();
