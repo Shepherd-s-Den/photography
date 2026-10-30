@@ -8,18 +8,19 @@
 
 - Confirmed runnable spike, 2026-10-30: real photographs, on-slot drag, live zoom/pan, saved transforms and read-only Reader.
 - Native-browser checks exposed and repaired hand dragging, used-photo filtering and retained-photo rendering after template changes.
+- Cover extension requested by the maintainer; existing cover slots and stored transforms reuse the confirmed interaction without another spike.
 
 ## What & Why
 
-The composition already stores photo placements; HTTP and browser editing are missing. Deliver persisted placement in existing interior slots, keeping photographs primary and editing chrome quiet.
+The composition already stores photo placements; HTTP and browser editing are missing. Deliver placement in existing interior and cover slots, keeping photographs primary and editing chrome quiet.
 
 ## Domain / Design Notes
 
 ```mermaid
 flowchart LR
-  Selection["Unplaced collection photo"] -->|Place or replace| Slot["Interior photo slot"]
+  Selection["Unplaced collection photo"] -->|Place or replace| Slot["Interior or cover photo slot"]
   Slot -->|Remove or release| Selection
-  Slot -->|Drag hand| Destination["Another slot on the same spread"]
+  Slot -->|Drag hand| Destination["Another slot on the same spread or cover"]
   Slot -->|Pan, zoom or mirror| Preview["Local preview"]
   Preview -->|Complete gesture| Save["Save transform"]
 ```
@@ -28,11 +29,11 @@ flowchart LR
 
 | Contract | Guarantee |
 | --- | --- |
-| Collection | Synopsis uses album photos; chapter openings and photo spreads use their chapter's photos. |
+| Collection | Synopsis and Cover use album photos; chapter openings and photo spreads use their chapter's photos. |
 | Placement | One photo occupies one slot; replacement releases the previous photo without deleting it. |
 | Initial transform | Centered, unmirrored, zoom 1; scale to fill the slot while preserving image proportions. |
 | Adjustment | Zoom 1–5 relative to initial fill; pan is bounded to keep the slot covered; horizontal mirror preserves the crop. |
-| Move or swap | Within one spread, photos carry their transforms and caption corners; geometry remains with the slots. |
+| Move or swap | Within one spread or between cover sides, photos carry transforms; geometry stays with slots. Spread caption corners travel with photos. |
 | Different geometry | Retain stored transforms on movement; bound the displayed crop to the destination's geometry. |
 
 Template changes retain the approved [spread-lifecycle contract](../../http-api.openapi.json): match by photo-slot order, keeping photo and caption corner while resetting transforms. New slots receive new identities; unmatched photos return to selection.
@@ -74,6 +75,7 @@ Requests use current saved state, not an editing lease: concurrent valid edits r
 
 - Original photographs remain read-only; placement never changes chapter ownership.
 - Spread identity, ordering, owner text and template geometry remain governed by existing structural editing.
+- Cover keeps back on the left, front on the right, saved spine ownership and existing title/credits.
 - Reader presents the same saved composition without editing controls.
 
 ## Acceptance Criteria
@@ -82,14 +84,16 @@ Requests use current saved state, not an editing lease: concurrent valid edits r
 
 - Drag an unplaced photo onto an empty slot to place it; dropping onto an occupied slot replaces its photo.
 - Keyboard users can choose a collection photo and activate the destination slot.
-- Placement is available in Synopsis, chapter openings and photo spreads, using the collection ownership above.
-- Placed photos disappear from selection across the relevant collection, including placements on other spreads.
+- Placement is available in Synopsis, chapter openings, photo spreads and both cover sides, using the collection ownership above.
+- Placed photos disappear from selection across the relevant collection, including placements on other spreads or Cover.
 - Removal returns the photo to selection; placing it again uses the initial transform.
 - Replacement returns the displaced photo to selection and initializes the incoming photo's transform.
 - Compact move, mirror and remove actions appear on slot hover or keyboard focus, with hints and accessible names.
 - Drag the hand icon directly to another slot to move or swap; mouse clicks do not arm two-slot selection.
 - Keyboard users can activate the hand action and then the destination, with an announced pending choice.
 - Cancelled or invalid drops leave the saved composition unchanged; drag previews show the photo rather than an empty outline.
+- Cover uses the same on-slot actions, gestures, keyboard equivalents and save/recovery behavior as interior placement.
+- Move or swap between front and back preserves transforms; cover placement leaves title/credits visible.
 
 ### Adjust and save
 
@@ -111,7 +115,7 @@ Requests use current saved state, not an editing lease: concurrent valid edits r
 - Retained photos appear immediately after template change, without placing another photo or reloading the page.
 - Released-photo selection and counts agree with saved placements after removal, replacement, template change or spread deletion.
 - Wrong-owner photos, already-used photos and foreign or obsolete slot identities are rejected without partial writes.
-- Missing spreads and vanished move sources show stale-state feedback and offer an authoritative reload.
+- Missing spreads, cover slots and vanished move sources show stale-state feedback and offer an authoritative reload.
 - Concurrent placement attempts for one photo leave exactly one placement; rejected attempts remain recoverable.
 - Acknowledged saves followed by failed reads show saved-but-unrefreshed feedback; Retry reads without replaying the mutation.
 - An uncertain write outcome is reconciled from saved state before another attempt; read failures never masquerade as an empty composition.
@@ -122,8 +126,8 @@ Requests use current saved state, not an editing lease: concurrent valid edits r
 
 - `specs/design.md` — Editing journey: integrate persisted photo editing and local-preview/save recovery into the composition lifecycle.
 - `specs/design.md` — Architectural decisions: replace the undelivered-placement limitation with coordinated browser delivery through existing boundaries.
-- `specs/http-api.openapi.json` — Define placement reads, mutations, transform semantics, placement-aware inventory and failure contracts.
+- `specs/http-api.openapi.json` — Define interior/cover placement reads, mutations, transforms, placement-aware inventory and failure contracts.
 
 ## Out of Scope
 
-- Cover and caption editing; dedicated Reset and general undo.
+- Caption editing; dedicated Reset and general undo.
