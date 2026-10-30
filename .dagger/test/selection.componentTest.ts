@@ -10,9 +10,11 @@ describe("parseChangedPaths", () => {
 });
 
 describe("findComponentsForPath", () => {
-  it("should include the backend when frontend assets are rebuilt into it", () => {
-    expect(Selection.findComponentsForPath("backend/build.sbt")).toEqual(["backend"]);
-    expect(Selection.findComponentsForPath("frontend/index.html")).toEqual(["backend", "frontend"]);
+  it.each([
+    ["backend/build.sbt", ["backend"]],
+    ["frontend/index.html", ["frontend"]],
+  ] as const)("should select the owning component for %s", (path, components) => {
+    expect(Selection.findComponentsForPath(path)).toEqual(components);
   });
 
   it("should map pipeline paths to the pipeline component", () => {
@@ -43,13 +45,21 @@ describe("selectAffected", () => {
     expect(Selection.selectAffected(["README.md"])).toEqual({ kind: "none" });
   });
 
-  it("should return all checks affected by one changed surface", () => {
+  it("should select only frontend for frontend and proposal changes", () => {
+    const paths = ["frontend/index.html", "specs/changes/spread-lifecycle/proposal.md"];
     const expected = {
       kind: "some",
-      components: ["backend", "frontend"],
+      components: ["frontend"],
     };
 
-    expect(Selection.selectAffected(["frontend/index.html"])).toEqual(expected);
+    expect(Selection.selectAffected(paths)).toEqual(expected);
+  });
+
+  it("should select both application components when both surfaces change", () => {
+    const paths = ["frontend/index.html", "backend/build.sbt"];
+    const expected = { kind: "some", components: ["backend", "frontend"] };
+
+    expect(Selection.selectAffected(paths)).toEqual(expected);
   });
 
   it("should return all when every component changed", () => {
