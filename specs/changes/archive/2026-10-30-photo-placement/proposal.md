@@ -36,7 +36,7 @@ flowchart LR
 | Move or swap | Within one spread or between cover sides, photos carry transforms; geometry stays with slots. Spread caption corners travel with photos. |
 | Different geometry | Retain stored transforms on movement; bound the displayed crop to the destination's geometry. |
 
-Template changes retain the approved [spread-lifecycle contract](../../http-api.openapi.json): match by photo-slot order, keeping photo and caption corner while resetting transforms. New slots receive new identities; unmatched photos return to selection.
+Template changes retain the approved [spread-lifecycle contract](../../../http-api.openapi.json): match by photo-slot order, keeping photo and caption corner while resetting transforms. New slots receive new identities; unmatched photos return to selection.
 
 ### Commit and recovery
 
