@@ -73,7 +73,9 @@ sequenceDiagram
   end
   Application->>Storage: Commit validated change atomically
   Application-->>Workspace: Saved result
-  Workspace->>Application: Reload authoritative composition
+  opt Collection or structure changed
+    Workspace->>Application: Reload affected authoritative views
+  end
 ```
 
 Local previews stay responsive while completed adjustments save in order. Navigation resolves pending adjustments before leaving; failed saves retain an explicitly unsaved preview for recovery.
