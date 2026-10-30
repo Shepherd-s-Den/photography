@@ -13,6 +13,8 @@ Album Layout Studio organizes chapter photo collections and edits persisted albu
 - [ci/specs/](ci/specs/) — living documentation for the CI pipeline.
 - [LICENSE](LICENSE) — MIT.
 
+**Frontend UI work only:** read [UX patterns](frontend/UX-PATTERNS.md) before changing layout, controls, navigation, keyboard interaction or user-facing copy.
+
 ## System context
 
 - [Design](specs/design.md) — album model, editing journey, photo processing and architectural decisions.
