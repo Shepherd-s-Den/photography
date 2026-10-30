@@ -68,7 +68,7 @@ object AppManagers:
           val workspaces       = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
           val composition      = SqliteAlbumCompositionRepository.make
           val spreadRepository = SqliteSpreadRepository.make
-          val spreads          = SpreadManager.make(templates, composition, spreadRepository, defaultPhotoLayout)
+          val spreads          = SpreadManager.make(templates, composition, spreadRepository, placements, defaultPhotoLayout)
           AppManagers(albums, chapters, templates, workspaces, events, spreads)
 
   private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))

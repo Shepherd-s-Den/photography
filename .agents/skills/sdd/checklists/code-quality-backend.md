@@ -31,7 +31,7 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 - [ ] Every computational/helper method name contains an action or predicate verb. Inventory all declarations, including private helpers and suite-local builders, rather than checking only changed names.
 - [ ] Result types live in the companion of the trait whose methods return them. Top-level types are only for config or shared values such as `AlbumPageSize`.
 - [ ] Private members omit return types unless the type is `Unit` or the member is public API.
-- [ ] Trait APIs never return `Either`; use per-operation sum types.
+- [ ] For every new or changed trait operation, identify its operation-owned result enum after unwrapping `F`/`Db`; `Either`, `Option`, `Unit` and bare success values fail this gate.
 - [ ] Failure enums inside a companion are named `Failure`, not repeated with the operation name.
 - [ ] Default arguments appear only in tests; runtime code uses wartremover `DefaultArguments` and scalafix `DisableSyntax.noDefaultArgs` as enforced gates.
 - [ ] A wartremover or scalafix suppression is allowed only when the flagged operation is provably safe at that site (for example `minBy` after a non-empty guard). It is scoped to the smallest declaration, uses the full wart id, and carries a comment stating why it cannot fail. Never suppress a gate to hide a real defect.
