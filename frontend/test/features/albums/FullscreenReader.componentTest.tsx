@@ -1,8 +1,38 @@
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FullscreenReader } from "../../../src/features/albums/workspace/FullscreenReader";
 
 describe("fullscreen reader browser boundary", () => {
+  it("should retain the canvas heading and mount the Reader control in the global toolbar", () => {
+    const toolbar = document.createElement("div");
+    toolbar.setAttribute("role", "toolbar");
+    toolbar.setAttribute("aria-label", "Workspace controls");
+    document.body.append(toolbar);
+    const view = render(() => (
+      <FullscreenReader
+        aspectRatio={3}
+        canPrevious={false}
+        canNext={true}
+        entryMount={toolbar}
+        unavailable={undefined}
+        onNavigate={vi.fn()}
+        label="Kyoto"
+      >
+        <div role="img" aria-label="Kyoto composition" />
+      </FullscreenReader>
+    ));
+
+    const reader = within(toolbar).getByRole("button", { name: "Reader mode" });
+
+    expect(screen.getByRole("heading", { name: "Kyoto" })).toBeInTheDocument();
+    expect(reader).toHaveAccessibleName("Reader mode");
+    expect(reader).toHaveAttribute("title", "Reader mode");
+    expect(reader).toHaveTextContent(/^$/);
+
+    view.unmount();
+    toolbar.remove();
+  });
+
   let fullscreen: Element | null;
   const request = vi.fn<() => Promise<void>>();
   const exit = vi.fn<() => Promise<void>>();
@@ -37,7 +67,7 @@ describe("fullscreen reader browser boundary", () => {
         <div role="img" aria-label="Persisted canvas" />
       </FullscreenReader>
     ));
-    const reader = screen.getByRole("button", { name: "Reader" });
+    const reader = screen.getByRole("button", { name: "Reader mode" });
 
     fireEvent.keyDown(screen.getByRole("img", { name: "Persisted canvas" }), { key: "ArrowRight" });
 
@@ -46,6 +76,8 @@ describe("fullscreen reader browser boundary", () => {
     fireEvent.click(reader);
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Exit reader" })).toHaveFocus());
+
+    expect(screen.getByRole("dialog", { name: "Fullscreen reader" })).toBeInTheDocument();
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowLeft" });
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "ArrowRight" });
@@ -115,7 +147,7 @@ describe("fullscreen reader browser boundary", () => {
       </FullscreenReader>
     ));
 
-    fireEvent.click(screen.getByRole("button", { name: "Reader" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reader mode" }));
     const control = await screen.findByRole("button", { name: button });
     fireEvent.keyDown(screen.getByRole("button", { name: "Exit reader" }), { key });
     fireEvent.keyDown(screen.getByRole("button", { name: "Exit reader" }), { key: "Tab" });
@@ -138,12 +170,12 @@ describe("fullscreen reader browser boundary", () => {
         </FullscreenReader>
       ));
 
-      fireEvent.click(screen.getByRole("button", { name: "Reader" }));
+      fireEvent.click(screen.getByRole("button", { name: "Reader mode" }));
       if (failure === "exit") fireEvent.click(await screen.findByRole("button", { name: "Exit reader" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent(/fullscreen/i);
       expect(screen.getByRole("img", { name: "Saved Cover" })).toBeInTheDocument();
-      if (failure !== "exit") expect(screen.getByRole("button", { name: "Reader" })).toBeEnabled();
+      if (failure !== "exit") expect(screen.getByRole("button", { name: "Reader mode" })).toBeEnabled();
     },
   );
 
@@ -154,8 +186,8 @@ describe("fullscreen reader browser boundary", () => {
       </FullscreenReader>
     ));
 
-    expect(screen.getByRole("button", { name: "Reader" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reader" })).toHaveAccessibleDescription("Choose an available album part.");
+    expect(screen.getByRole("button", { name: "Reader mode" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reader mode" })).toHaveAccessibleDescription("Choose an available album part.");
   });
 
   it("should prevent duplicate requests while fullscreen entry is pending", async () => {
@@ -172,13 +204,13 @@ describe("fullscreen reader browser boundary", () => {
       </FullscreenReader>
     ));
 
-    fireEvent.click(screen.getByRole("button", { name: "Reader" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reader mode" }));
 
-    expect(screen.getByRole("button", { name: "Reader" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Reader" })).toHaveAccessibleDescription("Entering fullscreen. Please wait.");
+    expect(screen.getByRole("button", { name: "Reader mode" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Reader mode" })).toHaveAccessibleDescription("Entering fullscreen. Please wait.");
 
     finish();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Reader" })).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Reader mode" })).toBeEnabled());
   });
 });

@@ -117,7 +117,7 @@ Concurrency: each action runs under one backend instance's chapter-mutation lock
 - Confirmed deletion removes the spread and its placements.
 - Released photos remain in the chapter collection as unplaced.
 - Inventory counts update after a deletion.
-- Deleting the selected spread selects its chapter opening.
+- Deletion selects the next spread at the same album position, or the previous spread when the deleted spread was last.
 
 ### Failures
 

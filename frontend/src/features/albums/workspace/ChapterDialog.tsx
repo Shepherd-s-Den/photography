@@ -3,7 +3,7 @@ import type { Chapter, ChapterDetails, Country } from "../model/Workspace";
 import type { ChapterSave } from "../model/Photo";
 import { describeFailure } from "../model/Presentation";
 import { CountryPicker } from "./CountryPicker";
-import { suggestFolder, validateChapter } from "./ChapterDetails";
+import { displayCalendarDay, readCalendarDay, suggestFolder, validateChapter } from "./ChapterDetails";
 
 export function ChapterDialog(props: {
   save: (details: ChapterDetails) => Promise<ChapterSave>;
@@ -23,8 +23,8 @@ export function ChapterDialog(props: {
   const [countries, setCountries] = createSignal<readonly string[]>(
     untrack(() => existing?.countries ?? props.countries.filter((country) => country.code === "RO").map((country) => country.id)),
   );
-  const [start, setStart] = createSignal(existing?.start ?? `${String(untrack(() => props.year))}-01-01`);
-  const [end, setEnd] = createSignal(existing?.end ?? `${String(untrack(() => props.year))}-01-01`);
+  const [start, setStart] = createSignal(displayCalendarDay(existing?.start ?? `${String(untrack(() => props.year))}-01-01`));
+  const [end, setEnd] = createSignal(displayCalendarDay(existing?.end ?? `${String(untrack(() => props.year))}-01-01`));
   const [manualFolder, setManualFolder] = createSignal(existing?.sourceFolder);
   const folder = createMemo(() => manualFolder() ?? suggestFolder(props.photoRoot, props.year, kind() === "home" ? "Home" : name()));
   const [error, setError] = createSignal<string>();
@@ -52,7 +52,9 @@ export function ChapterDialog(props: {
     }
     const common = { countries: countries(), sourceFolder: folder() };
     const details: ChapterDetails =
-      selectedKind === "home" ? { kind: "home", ...common } : { kind: "vacation", name: name().trim(), start: start(), end: end(), ...common };
+      selectedKind === "home"
+        ? { kind: "home", ...common }
+        : { kind: "vacation", name: name().trim(), start: readCalendarDay(start()), end: readCalendarDay(end()), ...common };
     const validation = validateChapter(details);
     if (validation !== undefined) {
       setError(validation);
@@ -66,6 +68,16 @@ export function ChapterDialog(props: {
       setError(describeFailure(failure));
       setPending(false);
     }
+  }
+
+  function openCalendar(event: Event & { currentTarget: HTMLInputElement }) {
+    if (typeof event.currentTarget.showPicker !== "function") return;
+    event.preventDefault();
+    event.currentTarget.showPicker();
+  }
+
+  function handleCalendarKey(event: KeyboardEvent & { currentTarget: HTMLInputElement }) {
+    if (event.key === "Enter" || event.key === " ") openCalendar(event);
   }
 
   return (
@@ -140,7 +152,10 @@ export function ChapterDialog(props: {
               <label>
                 First day
                 <input
-                  type="date"
+                  type="text"
+                  aria-label="First day"
+                  placeholder="dd/mm/yyyy"
+                  aria-description="Date in day/month/year format"
                   value={start()}
                   disabled={pending()}
                   aria-describedby="chapter-feedback"
@@ -148,11 +163,30 @@ export function ChapterDialog(props: {
                     setStart(event.currentTarget.value);
                   }}
                 />
+                <input
+                  type="date"
+                  aria-label="Choose first day from calendar"
+                  title="Choose first day from calendar"
+                  value={readCalendarDay(start())}
+                  disabled={pending()}
+                  aria-describedby="chapter-feedback"
+                  onClick={openCalendar}
+                  onKeyDown={handleCalendarKey}
+                  onInput={(event) => {
+                    setStart(event.currentTarget.value === "" ? "" : displayCalendarDay(event.currentTarget.value));
+                  }}
+                />
+                <svg class="date-calendar-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 5h14v16H5z M8 3v4 M16 3v4 M5 10h14 M8 14h2 M14 14h2 M8 17h2" />
+                </svg>
               </label>
               <label>
                 Last day
                 <input
-                  type="date"
+                  type="text"
+                  aria-label="Last day"
+                  placeholder="dd/mm/yyyy"
+                  aria-description="Date in day/month/year format"
                   value={end()}
                   disabled={pending()}
                   aria-describedby="chapter-feedback"
@@ -160,6 +194,22 @@ export function ChapterDialog(props: {
                     setEnd(event.currentTarget.value);
                   }}
                 />
+                <input
+                  type="date"
+                  aria-label="Choose last day from calendar"
+                  title="Choose last day from calendar"
+                  value={readCalendarDay(end())}
+                  disabled={pending()}
+                  aria-describedby="chapter-feedback"
+                  onClick={openCalendar}
+                  onKeyDown={handleCalendarKey}
+                  onInput={(event) => {
+                    setEnd(event.currentTarget.value === "" ? "" : displayCalendarDay(event.currentTarget.value));
+                  }}
+                />
+                <svg class="date-calendar-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 5h14v16H5z M8 3v4 M16 3v4 M5 10h14 M8 14h2 M14 14h2 M8 17h2" />
+                </svg>
               </label>
             </div>
           </Show>

@@ -6,7 +6,20 @@ import { AlbumWorkspace } from "../workspace/AlbumWorkspace";
 import { createLiveWorkspace } from "./LiveWorkspace";
 
 export function AlbumOpen(props: {
-  client: Pick<AlbumClient, "open" | "workspace" | "createChapter" | "updateChapter" | "chapterPhotos" | "refreshPhotos">;
+  client: Pick<
+    AlbumClient,
+    | "open"
+    | "workspace"
+    | "createChapter"
+    | "updateChapter"
+    | "chapterPhotos"
+    | "refreshPhotos"
+    | "templates"
+    | "addSpread"
+    | "moveSpread"
+    | "changeSpreadTemplate"
+    | "deleteSpread"
+  >;
   events: AlbumPhotoEvents;
   id: string;
 }) {
@@ -16,9 +29,11 @@ export function AlbumOpen(props: {
   const missing = createMemo(() => isMissingAlbum(live.error()));
   return (
     <>
-      <a class="back-link" href="/">
-        Back to albums
-      </a>
+      <Show when={live.workspace() === undefined}>
+        <a class="back-link" href="/">
+          Back to album catalog
+        </a>
+      </Show>
       <Show when={live.loading() && live.workspace() === undefined && live.liveStatus() !== "invalid"}>
         <div role="status" aria-label="Loading album" class="loading-placeholder" />
       </Show>

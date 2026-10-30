@@ -1,5 +1,5 @@
 import { maximumAlbumYear, minimumAlbumYear } from "../model/Album";
-import type { Chapter, Country, Slot, Spread, Workspace } from "../model/Workspace";
+import type { Chapter, Country, Slot, Spread, SpreadTemplate, Workspace } from "../model/Workspace";
 import { readArray, readNumber, readRecord, readText } from "./Wire";
 import { readPhotoInventory, readScheduling } from "./PhotoWire";
 import type { ChapterSave } from "../model/Photo";
@@ -49,16 +49,29 @@ function readChapter(value: unknown): Chapter {
 function readSpread(value: unknown): Spread {
   const fields = readRecord(value);
   const kind = readKind(fields["kind"], ["album_start", "chapter_start", "photos_only"]);
-  const geometry = { id: readText(fields["id"]), slots: readArray(fields["slots"]).map(readSlot) };
+  const geometry = { id: readText(fields["id"]), templateId: readText(fields["templateId"]), slots: readArray(fields["slots"]).map(readSlot) };
   if (kind !== "album_start") return { ...geometry, kind, chapter: readText(fields["chapter"]) };
   if (fields["chapter"] !== null) throw new Error("An album opening cannot belong to a chapter");
   return { ...geometry, kind, chapter: null };
 }
 
+export function readTemplates(value: unknown): readonly SpreadTemplate[] {
+  return readArray(readRecord(value)["templates"]).map((entry) => {
+    const fields = readRecord(entry);
+    const slots = readArray(fields["slots"]).map(readGeometry);
+    if (!slots.some((slot) => slot.kind === "photo")) throw new Error("A spread template must contain a photo slot");
+    return { id: readText(fields["id"]), name: readText(fields["name"]), slots };
+  });
+}
+
 function readSlot(value: unknown): Slot {
   const fields = readRecord(value);
+  return { id: readText(fields["id"]), ...readGeometry(value) };
+}
+
+function readGeometry(value: unknown): Omit<Slot, "id"> {
+  const fields = readRecord(value);
   return {
-    id: readText(fields["id"]),
     kind: readKind(fields["kind"], ["photo", "text"]),
     x: readNumber(fields["x"]),
     y: readNumber(fields["y"]),

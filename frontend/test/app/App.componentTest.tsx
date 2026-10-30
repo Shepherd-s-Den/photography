@@ -161,11 +161,11 @@ describe("album dashboard and open", () => {
 
     render(() => <App client={client} events={events} />);
 
-    expect(await screen.findByRole("heading", { name: "A year in photographs / 2026" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: firstAlbum.title })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Synopsis composition" })).toBeInTheDocument();
     expect(screen.queryByText("Read-only album")).not.toBeInTheDocument();
     expect(screen.queryByText(firstAlbum.createdAt)).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to albums" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Back to album catalog" })).toHaveAttribute("href", "/");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(client.open).toHaveBeenCalledWith(firstAlbum.id);
   });
@@ -369,7 +369,7 @@ describe("album dashboard and open", () => {
                 photoInventories: {},
                 chapters: [],
                 countries: [],
-                spreads: [{ id: "opening", chapter: null, kind: "album_start", slots: [] }],
+                spreads: [{ id: "opening", templateId: "layout", chapter: null, kind: "album_start", slots: [] }],
               },
         ),
     });
@@ -378,10 +378,10 @@ describe("album dashboard and open", () => {
 
     expect(screen.getByRole("status", { name: "Loading album" })).toBeInTheDocument();
     expect(await screen.findByRole("alert")).toHaveTextContent(status === 404 ? "could not be found" : "could not be loaded");
-    expect(screen.queryByRole("heading", { name: "A year in photographs / 2026" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: firstAlbum.title })).not.toBeInTheDocument();
     if (status === 500) {
       fireEvent.click(screen.getByRole("button", { name: "Retry album" }));
-      expect(await screen.findByRole("heading", { name: "A year in photographs / 2026" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { level: 1, name: firstAlbum.title })).toBeInTheDocument();
     } else {
       expect(screen.queryByRole("button", { name: "Retry album" })).not.toBeInTheDocument();
     }
@@ -410,7 +410,7 @@ describe("album dashboard and open", () => {
     }
     expect(client.workspace).not.toHaveBeenCalled();
     receive({ kind: "subscribed" });
-    await screen.findByRole("heading", { name: "A year in photographs / 2026" });
+    await screen.findByRole("heading", { level: 1, name: firstAlbum.title });
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(client.workspace).toHaveBeenCalledOnce();
@@ -431,12 +431,17 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
       photoRoot: "/photos",
       chapters: [],
       countries: [],
-      spreads: [{ id: "opening", chapter: null, kind: "album_start", slots: [] }],
+      spreads: [{ id: "opening", templateId: "layout", chapter: null, kind: "album_start", slots: [] }],
     }),
     createChapter: vi.fn(),
     updateChapter: vi.fn(),
     chapterPhotos: vi.fn(),
     refreshPhotos: vi.fn(),
+    templates: vi.fn().mockResolvedValue([]),
+    addSpread: vi.fn(),
+    moveSpread: vi.fn(),
+    changeSpreadTemplate: vi.fn(),
+    deleteSpread: vi.fn(),
     ...overrides,
   };
 }

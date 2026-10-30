@@ -3,16 +3,41 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 4px;
+  margin-bottom: 4px;
   font-size: 12px;
 }
 .reader-entry h2 {
   margin: 0 2px;
+  font: inherit;
+}
+.reader-entry-mounted {
+  display: contents;
 }
 .reader-entry-control button {
-  min-height: 32px;
-  padding: 0 12px;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-color: transparent;
+  color: #25444c;
+  background: transparent;
+}
+.reader-entry-control button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: #e8f4f4;
+}
+.reader-entry-icon {
+  display: block;
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .reader-entry-control {
   display: flex;
