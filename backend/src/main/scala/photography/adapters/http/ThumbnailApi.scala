@@ -9,8 +9,8 @@ import org.http4s.{EntityTag, HttpRoutes, Method}
 import org.http4s.dsl.Http4sDsl
 import org.http4s.headers.`If-None-Match`
 import photography.domain.album.ThumbnailLocation
-import photography.ports.ThumbnailStorage
-import photography.ports.ThumbnailStorage.ReadResult
+import photography.ports.photo.ThumbnailStorage
+import photography.ports.photo.ThumbnailStorage.ReadResult
 import java.util.UUID
 
 trait ThumbnailApi[F[_]]:

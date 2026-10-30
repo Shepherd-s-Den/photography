@@ -11,7 +11,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.ImageIOTestResources
 import photography.domain.album.*
-import photography.ports.PhotoThumbnailGenerator.GenerationResult
+import photography.ports.photo.PhotoThumbnailGenerator.GenerationResult
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, DataInputStream, EOFException, IOException}

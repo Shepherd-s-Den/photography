@@ -5,19 +5,25 @@ import cats.effect.std.Mutex
 import org.typelevel.doobie.{ConnectionIO, Transactor}
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
-import photography.adapters.sqlite.{SqliteAlbumRepository, SqliteChapterRepository, SqliteCountryRepository, SqliteSpreadTemplateRepository}
-import photography.adapters.sqlite.SqlitePhotoPlacementRepository
-import photography.adapters.sqlite.SqliteAlbumCompositionRepository
+import photography.adapters.sqlite.album.{SqliteAlbumRepository, SqliteCountryRepository}
+import photography.adapters.sqlite.chapter.SqliteChapterRepository
+import photography.adapters.sqlite.spread.SqliteSpreadTemplateRepository
+import photography.adapters.sqlite.photo.SqlitePhotoPlacementRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
-import photography.adapters.sqlite.{SqliteAlbumCompositionRepository, SqliteSpreadRepository}
+import photography.adapters.sqlite.album.SqliteAlbumCompositionRepository
+import photography.adapters.sqlite.spread.SqliteSpreadRepository
 import photography.domain.album.*
 import photography.domain.layout.SpreadTemplateId
 import java.util.UUID
-import photography.ports.{PhotoRepository, ThumbnailStorage}
-import photography.usecases.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager, ChapterManager, ChapterPhotoImport}
-import photography.usecases.{AlbumPhotoEvents, ChapterPlanning, PhotoInventory, SpreadTemplateManager}
-import photography.usecases.SpreadManager
+import photography.ports.photo.{PhotoRepository, ThumbnailStorage}
+import photography.usecases.album.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager}
+import photography.usecases.chapter.ChapterManager
+import photography.usecases.photo.ChapterPhotoImport
+import photography.usecases.photo.{AlbumPhotoEvents, PhotoInventory}
+import photography.usecases.chapter.ChapterPlanning
+import photography.usecases.spread.SpreadTemplateManager
+import photography.usecases.spread.SpreadManager
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 
 final case class AppManagers[F[_]](
