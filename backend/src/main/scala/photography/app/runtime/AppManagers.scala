@@ -9,6 +9,7 @@ import photography.adapters.sqlite.album.{SqliteAlbumRepository, SqliteCountryRe
 import photography.adapters.sqlite.chapter.SqliteChapterRepository
 import photography.adapters.sqlite.spread.SqliteSpreadTemplateRepository
 import photography.adapters.sqlite.photo.SqlitePhotoPlacementRepository
+import photography.adapters.sqlite.cover.SqliteCoverRepository
 import photography.adapters.filesystem.FilePhotoStorage
 import photography.capabilities.{Clock, IdGenerator, Transaction}
 import photography.adapters.sqlite.album.SqliteAlbumCompositionRepository
@@ -24,6 +25,7 @@ import photography.usecases.photo.{AlbumPhotoEvents, PhotoInventory}
 import photography.usecases.chapter.ChapterPlanning
 import photography.usecases.spread.SpreadTemplateManager
 import photography.usecases.spread.SpreadManager
+import photography.usecases.cover.CoverManager
 import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 
 final case class AppManagers[F[_]](
@@ -32,7 +34,8 @@ final case class AppManagers[F[_]](
     templates: SpreadTemplateManager[F],
     workspaces: AlbumWorkspaceManager[F],
     photoEvents: AlbumPhotoEvents[F],
-    spreads: SpreadManager[F]
+    spreads: SpreadManager[F],
+    coverPlacements: CoverManager[F]
 )
 
 object AppManagers:
@@ -69,6 +72,8 @@ object AppManagers:
           val composition      = SqliteAlbumCompositionRepository.make
           val spreadRepository = SqliteSpreadRepository.make
           val spreads          = SpreadManager.make(templates, composition, spreadRepository, placements, defaultPhotoLayout)
-          AppManagers(albums, chapters, templates, workspaces, events, spreads)
+          val coverRepository  = SqliteCoverRepository.make
+          val coverPlacements  = CoverManager.make(coverRepository, placements)
+          AppManagers(albums, chapters, templates, workspaces, events, spreads, coverPlacements)
 
   private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))
