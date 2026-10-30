@@ -231,6 +231,143 @@
         }
       }
     },
+    "/api/albums/{id}/chapters/{chapterId}/spreads": {
+      "parameters": [
+        { "$ref": "#/components/parameters/WorkspaceAlbumId" },
+        { "$ref": "#/components/parameters/PhotoChapterId" }
+      ],
+      "post": {
+        "operationId": "addSpread",
+        "summary": "Insert a default photo spread after a chapter opening or photo spread",
+        "description": "Inserts the seeded 8-4x2 layout immediately after an owned target in the requested chapter. Openings and other chapter blocks stay in place. The 65-interior-spread limit includes openings and excludes Cover. Invalid or foreign afterSpreadId returns 400 or 404 spread_not_found respectively; an album-opening target returns 400. Each action commits atomically under the single backend instance's chapter-mutation lock.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["afterSpreadId"],
+                "properties": {
+                  "afterSpreadId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Lowercase canonical UUID of a spread in the requested chapter."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/SpreadIdentity" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/AddSpreadTargetNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/spreads/{spreadId}/move": {
+      "parameters": [
+        { "$ref": "#/components/parameters/WorkspaceAlbumId" },
+        { "$ref": "#/components/parameters/SpreadId" }
+      ],
+      "post": {
+        "operationId": "moveSpread",
+        "summary": "Swap a photo spread with its chapter neighbour",
+        "description": "Only photo spreads move, within their own chapter, preserving chapter blocks and openings. Opening targets and missing neighbours return 400. Commits atomically under the chapter-mutation lock.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["direction"],
+                "properties": {
+                  "direction": { "enum": ["earlier", "later"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/SpreadIdentity" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/SpreadTargetNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/spreads/{spreadId}/template": {
+      "parameters": [
+        { "$ref": "#/components/parameters/WorkspaceAlbumId" },
+        { "$ref": "#/components/parameters/SpreadId" },
+        { "$ref": "#/components/parameters/ConfirmPlacements" }
+      ],
+      "put": {
+        "operationId": "changeSpreadTemplate",
+        "summary": "Apply a same-context template to an opening or photo spread",
+        "description": "Preserves spread identity, chapter, position and owner text. Unknown templates and context mismatches return 400. Occupied spreads require explicit confirmation; unconfirmed requests return 409 and change nothing. Confirmed changes match placements by photo-slot order, keep photo and caption corner, reset transforms, release unmatched photos to the chapter's unplaced pool and allocate new slot IDs. Confirmation and mutation share the chapter-mutation lock and persistence transaction. Clients reload workspace state after success.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["templateId"],
+                "properties": {
+                  "templateId": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Lowercase canonical UUID from the spread's context catalog."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved spread and applied template identities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "templateId"],
+                  "properties": {
+                    "id": { "type": "string", "format": "uuid" },
+                    "templateId": { "type": "string", "format": "uuid" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/SpreadTargetNotFound" },
+          "409": { "$ref": "#/components/responses/SpreadOccupied" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/spreads/{spreadId}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/WorkspaceAlbumId" },
+        { "$ref": "#/components/parameters/SpreadId" },
+        { "$ref": "#/components/parameters/ConfirmPlacements" }
+      ],
+      "delete": {
+        "operationId": "deleteSpread",
+        "summary": "Delete a photo spread and its placements",
+        "description": "Openings return 400. Occupied spreads return 409 without mutation until explicitly confirmed. Removes placements, retains photos in their chapter as unplaced and renumbers remaining photo spreads. Confirmation and mutation share the chapter-mutation lock and persistence transaction.",
+        "responses": {
+          "204": { "description": "Deleted; no response body" },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/SpreadTargetNotFound" },
+          "409": { "$ref": "#/components/responses/SpreadOccupied" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
     "/api/chapters/{chapterId}/photos": {
       "parameters": [{ "$ref": "#/components/parameters/PhotoChapterId" }],
       "get": {
@@ -378,6 +515,28 @@
         }
       }
     },
+    "/api/templates/photos-only": {
+      "get": {
+        "operationId": "listPhotosOnlyTemplates",
+        "summary": "List the complete photo-spread template catalog",
+        "description": "Ascending template-ID order; photo slots in template order. Geometry is percentages of the full spread axes. The reference seeds own names, identities and geometry.",
+        "responses": {
+          "200": { "$ref": "#/components/responses/SpreadTemplates" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/templates/chapter-start": {
+      "get": {
+        "operationId": "listChapterStartTemplates",
+        "summary": "List the complete chapter-opening template catalog",
+        "description": "Ascending template-ID order; photo slots followed by one owner-text slot. Geometry is percentages of the full spread axes. The reference seeds own names, identities and geometry.",
+        "responses": {
+          "200": { "$ref": "#/components/responses/SpreadTemplates" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
     "/api/templates/album-start": {
       "get": {
         "operationId": "listAlbumStartTemplates",
@@ -411,18 +570,31 @@
   },
   "components": {
     "parameters": {
+      "SpreadId": {
+        "name": "spreadId",
+        "in": "path",
+        "required": true,
+        "description": "Lowercase canonical UUID. Stale, missing or foreign spread identities return spread_not_found. Noncanonical spread-action path segments do not match these routes and use the unmatched API 404 response.",
+        "schema": { "type": "string", "format": "uuid" }
+      },
+      "ConfirmPlacements": {
+        "name": "confirmPlacements",
+        "in": "query",
+        "description": "Explicitly confirm an occupied mutation. Omitted or false returns 409 when occupied, without changing state. Values other than the literal true or false return 400.",
+        "schema": { "type": "boolean", "default": false }
+      },
       "PhotoChapterId": {
         "name": "chapterId",
         "in": "path",
         "required": true,
-        "description": "Lowercase canonical UUID. Malformed or missing chapter targets return chapter_not_found.",
+        "description": "Lowercase canonical UUID. Photo inventory/Refresh routes return chapter_not_found for malformed or missing targets. Spread insertion requires a canonical path segment: noncanonical segments use the unmatched API 404 not_found response; a canonical missing or foreign chapter returns chapter_not_found.",
         "schema": { "type": "string", "format": "uuid" }
       },
       "WorkspaceAlbumId": {
         "name": "id",
         "in": "path",
         "required": true,
-        "description": "Lowercase canonical UUID. Malformed and missing IDs return album_not_found.",
+        "description": "Lowercase canonical UUID. Workspace and chapter metadata routes return album_not_found for malformed or missing IDs. Spread-action routes require a canonical path segment: noncanonical segments use the unmatched API 404 not_found response; a canonical missing album returns album_not_found.",
         "schema": { "type": "string", "format": "uuid" }
       }
     },
@@ -442,6 +614,81 @@
       }
     },
     "responses": {
+      "SpreadIdentity": {
+        "description": "Saved spread identity",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["id"],
+              "properties": { "id": { "type": "string", "format": "uuid" } },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "SpreadTargetNotFound": {
+        "description": "Album not found, or stale, missing or foreign spread target",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["code"],
+              "properties": {
+                "code": { "enum": ["album_not_found", "spread_not_found"] }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "AddSpreadTargetNotFound": {
+        "description": "Album or requested chapter not found, or stale, missing or foreign spread target",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["code"],
+              "properties": {
+                "code": {
+                  "enum": [
+                    "album_not_found",
+                    "chapter_not_found",
+                    "spread_not_found"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "SpreadOccupied": {
+        "description": "No mutation; repeat the action with confirmPlacements=true only after explicit confirmation",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/SpreadOccupied" }
+          }
+        }
+      },
+      "SpreadTemplates": {
+        "description": "Complete context-scoped catalog in ascending template-ID order",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": ["templates"],
+              "properties": {
+                "templates": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/components/schemas/AlbumStartTemplate" }
+                }
+              }
+            }
+          }
+        }
+      },
       "ChapterIdentity": {
         "description": "Persisted chapter identity and independent postcommit scheduling result; failed scheduling preserves the save",
         "content": {
@@ -531,6 +778,15 @@
       }
     },
     "schemas": {
+      "SpreadOccupied": {
+        "type": "object",
+        "required": ["code", "placements"],
+        "properties": {
+          "code": { "const": "spread_occupied" },
+          "placements": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false
+      },
       "AlbumYear": { "type": "integer", "minimum": 1900, "maximum": 2100 },
       "CountryIds": {
         "type": "array",
@@ -778,9 +1034,14 @@
       },
       "WorkspaceSpread": {
         "type": "object",
-        "required": ["id", "chapter", "kind", "slots"],
+        "required": ["id", "chapter", "kind", "templateId", "slots"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
+          "templateId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Applied template identity from the spread's context catalog."
+          },
           "chapter": {
             "type": ["string", "null"],
             "format": "uuid",
