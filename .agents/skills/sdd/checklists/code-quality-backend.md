@@ -38,6 +38,14 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 - [ ] Real imports are used, not fully-qualified paths.
 - [ ] Optional values use the `maybe` prefix.
 
+## Refinement placement and proof cost
+
+- [ ] Inventory changed Iron refinement declarations and explicit/implicit construction sites (`autoRefine` included); identify each invariant and consumer. Outside production `domain`/`usecases`, including tests in mirrored packages, retain refinements only for a required guarantee; use underlying types for transport, rendering and temporary data that needs none.
+- [ ] Adapters still validate incoming data into domain-valid port results, and domain-valued test inputs/collaborator responses retain their constraints. Reuse suite-local typed values or existing checked construction, validating before the tested call rather than bypassing an invariant.
+- [ ] Expected standalone text/numeric catalogs and tables use underlying types, with actual refined outputs safely widened for comparison. For whole-domain outcomes, reuse already-typed arranged fields instead of re-proving identical literals, preserving complete result variants, flags, order and associations.
+- [ ] Review bulk fixtures and repeated literals for proof-site multiplication, counting construction/conversion sites rather than aliases, field declarations or runtime records. Reuse existing checked setup/iteration sites where possible; preserve validation-specific proofs and rejection scenarios.
+- [ ] Record `file:symbol` evidence for each retained refinement in tests/non-core code: the required guarantee and why underlying or already-typed values do not suffice; unjustified sites block review. Cost reductions preserve core types, constraints, full assertions and strict gates, with no unchecked casts/`assume` or new fixture framework.
+
 ## Syntax
 
 - [ ] Use cats syntax: `x.pure[F]`, `.some`, `.asRight`, `.as`, `traverse_`. Do not write `F.pure(x)` or `IO.pure(x)`.
