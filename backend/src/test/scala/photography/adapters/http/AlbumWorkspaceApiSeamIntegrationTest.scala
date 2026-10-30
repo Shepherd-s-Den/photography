@@ -300,12 +300,22 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
 
     statuses.traverse_ { case (status, expected) =>
       val execution = ExecutionOutcome(status, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
-      val found     = AlbumWorkspaceManager.ChapterResult.Found(AlbumWorkspaceManager.ChapterPhotos(empty, execution))
-      val server    = buildApi(Refs(), chapterResult = found)
+      val snapshot  = AlbumWorkspaceManager.ChapterPhotos(empty, execution)
+      val found     = AlbumWorkspaceManager.ChapterResult.Found(snapshot)
+      val server    = buildApi(Refs(), chapterResult = found, workspaceResult = workspace.copy(photoInventories = Map(chapter.id -> snapshot)))
+      val expectedInventory = Json.obj(
+        "photos"         -> Json.arr(),
+        "placedPhotoIds" -> Json.arr(),
+        "counts"         -> Json.obj("unplaced" -> Json.fromInt(0), "total" -> Json.fromInt(0)),
+        "processing"     -> expected
+      )
 
-      send(server, Method.GET, s"/api/chapters/${chapter.id.value}/photos").map: response =>
-        assertEquals(response.body.hcursor.get[Json]("processing"), expected.asRight)
-        assertEquals(response.body.hcursor.downField("counts").get[Int]("total"), 0.asRight)
+      for
+        response  <- send(server, Method.GET, s"/api/chapters/${chapter.id.value}/photos")
+        aggregate <- send(server, Method.GET, s"$albumPath/workspace")
+      yield
+        assertEquals(response, ApiResponse(Status.Ok, expectedInventory))
+        assertEquals(aggregate.body.hcursor.downField("photoInventories").get[Json](chapter.id.value.toString), expectedInventory.asRight)
     } >> Scheduling.values.toVector.traverse_ { scheduling =>
       val server   = buildApi(Refs(), createResult = CreateResult.Created(chapter.id, scheduling), updateResult = UpdateResult.Updated(scheduling))
       val expected = scheduling match
@@ -378,27 +388,44 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
         thumbnail,
         maybeCaption = maybeCaption
       )
-      val inventory = PhotoInventory.Inventory(photos = Vector(photo), placed = Set(photo.id))
+      val secondPhoto   = photo.copy(id = PhotoId(new UUID(0L, 84L)))
+      val unplacedPhoto = photo.copy(id = PhotoId(new UUID(0L, 83L)))
+      val photos        = Vector(photo, secondPhoto, unplacedPhoto)
+      val placements    = Vector(
+        (Set.empty[PhotoId], Json.arr(), 3),
+        (Set(secondPhoto.id, photo.id), Json.arr(Json.fromString(photo.id.value.toString), Json.fromString(secondPhoto.id.value.toString)), 1)
+      )
       val execution =
         ExecutionOutcome(ImportStatus.Finished(PhotoManager.RefreshResult(unsupportedCount = 3, issues = issues)), retirementIssues = cleanup)
-      val snapshot = AlbumWorkspaceManager.ChapterPhotos(inventory, execution)
-      val server   = buildApi(
-        Refs(),
-        chapterResult = AlbumWorkspaceManager.ChapterResult.Found(snapshot),
-        workspaceResult = workspace.copy(photoInventories = Map(chapter.id -> snapshot))
-      )
       val expectedPhoto = json(s"""{"id":"${photo.id.value}","filename":"one.jpg","capturedLocal":${maybeDate.fold("null")(date => s"\"$date\"")},
         "width":20,"height":30,"caption":${maybeCaption.fold("null")(caption => s"\"$caption\"")},
         "thumbnail":{"url":"/thumbnails/${location.value}/version.jpg","width":10,"height":15}}""")
+      val expectedSecond   = expectedPhoto.deepMerge(Json.obj("id" -> Json.fromString(secondPhoto.id.value.toString)))
+      val expectedUnplaced = expectedPhoto.deepMerge(Json.obj("id" -> Json.fromString(unplacedPhoto.id.value.toString)))
 
-      for
-        read      <- send(server, Method.GET, s"/api/chapters/${chapter.id.value}/photos")
-        workspace <- send(server, Method.GET, s"$albumPath/workspace")
-      yield
-        assertEquals(read.body.hcursor.get[Vector[Json]]("photos"), Vector(expectedPhoto).asRight)
-        assertEquals(read.body.hcursor.get[Json]("processing"), expectedProcessing.asRight)
-        assertEquals(workspace.body.hcursor.downField("photoInventories").get[Json](chapter.id.value.toString), read.body.asRight)
-        assert(!read.body.noSpaces.contains("/private") && !read.body.noSpaces.contains(intent.value.toString))
+      placements.traverse_ { case (placed, encodedPlaced, unplaced) =>
+        val inventory = PhotoInventory.Inventory(photos = photos, placed = placed)
+        val snapshot  = AlbumWorkspaceManager.ChapterPhotos(inventory, execution)
+        val server    = buildApi(
+          Refs(),
+          chapterResult = AlbumWorkspaceManager.ChapterResult.Found(snapshot),
+          workspaceResult = workspace.copy(photoInventories = Map(chapter.id -> snapshot))
+        )
+        val expectedInventory = Json.obj(
+          "photos"         -> Json.arr(expectedPhoto, expectedSecond, expectedUnplaced),
+          "placedPhotoIds" -> encodedPlaced,
+          "counts"         -> Json.obj("unplaced" -> Json.fromInt(unplaced), "total" -> Json.fromInt(photos.size)),
+          "processing"     -> expectedProcessing
+        )
+
+        for
+          read      <- send(server, Method.GET, s"/api/chapters/${chapter.id.value}/photos")
+          aggregate <- send(server, Method.GET, s"$albumPath/workspace")
+        yield
+          assertEquals(read, ApiResponse(Status.Ok, expectedInventory))
+          assertEquals(aggregate.body.hcursor.downField("photoInventories").get[Json](chapter.id.value.toString), expectedInventory.asRight)
+          assert(!read.body.noSpaces.contains("/private") && !read.body.noSpaces.contains(intent.value.toString))
+      }
     }
 
   final private case class Refs():

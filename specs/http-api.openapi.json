@@ -7,6 +7,61 @@
   },
   "servers": [{ "url": "/" }],
   "paths": {
+    "/api/albums/{id}/spreads/{spreadId}/placements": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }, "description": "Lowercase canonical album UUID." },
+        { "name": "spreadId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }, "description": "Current spread UUID owned by the album." }
+      ],
+      "get": {
+        "operationId": "readSpreadPlacements",
+        "summary": "Read the saved interior photo composition",
+        "responses": {
+          "200": { "description": "Current saved placements", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SpreadPlacements" } } } },
+          "404": { "$ref": "#/components/responses/PlacementNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      },
+      "post": {
+        "operationId": "editSpreadPlacements",
+        "summary": "Place, replace, remove, adjust, move or swap an interior photo",
+        "description": "Synopsis accepts album photos; chapter openings and photo spreads accept their chapter photos. Validate current ownership and globally unique photo use in the same coordination interval as the atomic write. Place initializes centered, unmirrored zoom 1; replacement releases the old photo. Move within this spread swaps occupied destinations and carries transforms and caption corners. Geometry remains with slots. Requests use current saved state, not an editing lease. An uncertain outcome must be read before repeating a mutation.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlacementEdit" } } } },
+        "responses": {
+          "200": { "description": "Acknowledged saved composition; a later refresh failure must be retried as reads only", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SpreadPlacements" } } } },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/PlacementNotFound" },
+          "409": { "$ref": "#/components/responses/PlacementRejected" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
+    "/api/albums/{id}/cover/placements": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" }, "description": "Lowercase canonical album UUID." }
+      ],
+      "get": {
+        "operationId": "readCoverPlacements",
+        "summary": "Read both saved cover sides and spine ownership",
+        "responses": {
+          "200": { "description": "Back on the left, front on the right", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CoverPlacements" } } } },
+          "404": { "$ref": "#/components/responses/PlacementNotFound" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      },
+      "post": {
+        "operationId": "editCoverPlacements",
+        "summary": "Edit photos on either cover side",
+        "description": "Uses album-wide photos and the same atomic placement, transform and recovery guarantees as interior edits. Movement and swaps are confined to the two cover sides and preserve transforms. Title, credits and spine ownership remain unchanged. Cover placements have no caption corner.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PlacementEdit" } } } },
+        "responses": {
+          "200": { "description": "Saved cover composition", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CoverPlacements" } } } },
+          "400": { "$ref": "#/components/responses/ValidationFailure" },
+          "404": { "$ref": "#/components/responses/PlacementNotFound" },
+          "409": { "$ref": "#/components/responses/PlacementRejected" },
+          "500": { "$ref": "#/components/responses/ServiceFailure" }
+        }
+      }
+    },
     "/api/albums": {
       "get": {
         "operationId": "listAlbums",
@@ -614,6 +669,14 @@
       }
     },
     "responses": {
+      "PlacementNotFound": {
+        "description": "Current target is missing or belongs elsewhere. Reload authoritative composition. Noncanonical path IDs fall through to the API's not_found response.",
+        "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "enum": ["album_not_found", "spread_not_found", "cover_not_found", "not_found"] } } } } }
+      },
+      "PlacementRejected": {
+        "description": "Current ownership or identity validation rejected the edit without partial writes. Reload authoritative state before choosing another action.",
+        "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "enum": ["photo_not_in_collection", "photo_already_used", "slot_not_found", "placement_not_found", "invalid_transform"] } } } } }
+      },
       "SpreadIdentity": {
         "description": "Saved spread identity",
         "content": {
@@ -778,6 +841,57 @@
       }
     },
     "schemas": {
+      "PhotoTransform": {
+        "type": "object",
+        "required": ["x", "y", "zoom", "mirrored"],
+        "description": "Finite pan in InDesign points and zoom relative to centered scale-to-fill. Displayed pan is bounded to keep the destination slot covered; stored transforms survive movement to different geometry. Horizontal mirroring preserves the crop.",
+        "properties": {
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "zoom": { "type": "number", "minimum": 1, "maximum": 5 },
+          "mirrored": { "type": "boolean" }
+        }
+      },
+      "PlacementEdit": {
+        "oneOf": [
+          { "type": "object", "required": ["operation", "slotId", "photoId"], "properties": { "operation": { "const": "place" }, "slotId": { "type": "string", "format": "uuid" }, "photoId": { "type": "string", "format": "uuid" } } },
+          { "type": "object", "required": ["operation", "placementId"], "properties": { "operation": { "const": "remove" }, "placementId": { "type": "string", "format": "uuid" } } },
+          { "type": "object", "required": ["operation", "placementId", "slotId"], "properties": { "operation": { "const": "move" }, "placementId": { "type": "string", "format": "uuid" }, "slotId": { "type": "string", "format": "uuid" } } },
+          { "type": "object", "required": ["operation", "placementId", "transform"], "properties": { "operation": { "const": "adjust" }, "placementId": { "type": "string", "format": "uuid" }, "transform": { "$ref": "#/components/schemas/PhotoTransform" } } }
+        ],
+        "description": "All IDs are lowercase canonical UUIDs. Source placement identity must still exist; clients cannot allocate placement IDs."
+      },
+      "PhotoPlacement": {
+        "type": "object",
+        "required": ["id", "slotId", "photoId", "transform"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "slotId": { "type": "string", "format": "uuid" },
+          "photoId": { "type": "string", "format": "uuid" },
+          "transform": { "$ref": "#/components/schemas/PhotoTransform" }
+        }
+      },
+      "SpreadPlacements": {
+        "type": "object",
+        "required": ["id", "placements"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "placements": { "type": "array", "items": { "allOf": [
+            { "$ref": "#/components/schemas/PhotoPlacement" },
+            { "type": "object", "required": ["captionCorner"], "properties": { "captionCorner": { "enum": ["top_left", "top_right", "bottom_left", "bottom_right"] } } }
+          ] } }
+        }
+      },
+      "CoverPlacements": {
+        "type": "object",
+        "required": ["frontSlotId", "backSlotId", "spineOwner", "placements"],
+        "properties": {
+          "frontSlotId": { "type": "string", "format": "uuid" },
+          "backSlotId": { "type": "string", "format": "uuid" },
+          "spineOwner": { "enum": ["front", "back"] },
+          "placements": { "type": "array", "maxItems": 2, "items": { "$ref": "#/components/schemas/PhotoPlacement" } }
+        }
+      },
       "SpreadOccupied": {
         "type": "object",
         "required": ["code", "placements"],
@@ -881,8 +995,14 @@
       },
       "PhotoInventory": {
         "type": "object",
-        "required": ["photos", "counts", "processing"],
+        "required": ["photos", "placedPhotoIds", "counts", "processing"],
         "properties": {
+          "placedPhotoIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "format": "uuid" },
+            "description": "Authoritative used identities among this chapter's complete canonical photos, including use elsewhere in the album or on Cover. Filter selection by these IDs; retain canonical metadata for rendering. total minus this length equals unplaced."
+          },
           "photos": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/Photo" },
