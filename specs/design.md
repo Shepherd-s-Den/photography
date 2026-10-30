@@ -45,13 +45,13 @@ Photos belong to chapter collections independently of their use in layouts. Chap
 stateDiagram-v2
   [*] --> Catalog
   Catalog --> Workspace: Create or open album
-  Workspace --> Workspace: Edit chapters and spreads
+  Workspace --> Workspace: Edit structure and photo composition
   Workspace --> Reader: Enter Reader
   Reader --> Workspace: Resume editing
   Workspace --> Catalog: Return to catalog
 ```
 
-The workspace keeps the selected part addressable and restores it across navigation and reloads. Structural editing operates within chapter boundaries; template choices follow the selected spread's context. Reader presents the same composition without editing chrome.
+The workspace keeps the selected part addressable and restores it across navigation and reloads. Structural editing operates within chapter boundaries; template choices follow the selected spread's context. Photo editing persists placements and transforms for interior layouts and Cover; collection availability is derived from saved placements. Reader presents the same saved composition without editing chrome.
 
 ```mermaid
 sequenceDiagram
@@ -59,7 +59,11 @@ sequenceDiagram
   participant Workspace
   participant Application
   participant Storage
-  Editor->>Workspace: Change composition
+  Editor->>Workspace: Edit composition
+  opt Adjust a photograph
+    Workspace-->>Editor: Preview locally
+    Editor->>Workspace: Complete adjustment
+  end
   Workspace->>Application: Request mutation
   opt Existing placements need confirmation
     Application-->>Workspace: Report occupied spread
@@ -72,7 +76,9 @@ sequenceDiagram
   Workspace->>Application: Reload authoritative composition
 ```
 
-Cancellation preserves saved state. Validation and confirmation precede writes; a failed refresh after a successful save retries the read, not the mutation. Accessibility, focus continuity and recoverable feedback apply throughout the journey.
+Local previews stay responsive while completed adjustments save in order. Navigation resolves pending adjustments before leaving; failed saves retain an explicitly unsaved preview for recovery.
+
+Cancellation preserves saved state. Validation and confirmation precede writes; a failed refresh after a successful save retries the read, not the mutation. An uncertain write outcome is reconciled from authoritative state before another attempt. Accessibility, focus continuity and recoverable feedback apply throughout the journey.
 
 ## Photo processing and live views
 
@@ -113,4 +119,4 @@ Domain and application policy stay independent of HTTP, SQLite and image/filesys
 
 The supported topology is one backend instance. Shared mutation coordination protects read/decision/write decisions; database transactions make supplied changes atomic. Slow source and image work runs outside that critical section.
 
-Current workspace delivery covers album, chapter and spread-structure editing plus photo browsing. Photo placement is represented in the composition model but has no browser action or HTTP API. [Contracts](contracts.md) identify authoritative representations; [operations](operational.md) owns deployment and recovery.
+Browser photo editing reaches the existing composition services through HTTP. Placement, structural editing and photo reconciliation share mutation coordination, preserving collection ownership and exclusive photo use across interior and Cover. [Contracts](contracts.md) identify authoritative representations; [operations](operational.md) owns deployment and recovery.
