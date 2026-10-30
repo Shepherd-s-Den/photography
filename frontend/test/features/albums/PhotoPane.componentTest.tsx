@@ -21,6 +21,7 @@ describe("photo processing visibility", () => {
 
 describe("photo pane browser controls", () => {
   const inventory: PhotoInventory = {
+    placedPhotoIds: [],
     photos: [
       {
         id: "photo",
@@ -74,6 +75,84 @@ describe("photo pane browser controls", () => {
     else Object.defineProperty(HTMLElement.prototype, "setPointerCapture", nativeCapture);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("chooses or drags only authoritative unplaced photos and explains temporary structural exclusion", () => {
+    const choose = vi.fn();
+    const [reason, setReason] = createSignal<string>();
+    const [inventories, setInventories] = createSignal({ chapter: { ...inventory, counts: { unplaced: 1, total: 1 } } });
+    render(() => (
+      <PhotoPane
+        label="Chapter photos"
+        chapters={[{ id: "chapter", name: "Kyoto" }]}
+        inventories={inventories()}
+        inventoryErrors={{}}
+        scheduling={{}}
+        liveStatus="live"
+        onRefresh={vi.fn()}
+        onRetryInventory={vi.fn()}
+        onRetryRefresh={vi.fn()}
+        onChoosePhoto={choose}
+        unavailable={reason()}
+      >
+        <div />
+      </PhotoPane>
+    ));
+    const button = screen.getByRole("button", { name: "Choose Photo.jpg" });
+    const image = screen.getByRole("img", { name: "Photo.jpg" });
+    Object.defineProperties(image, { complete: { value: true }, naturalWidth: { value: 1600 } });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 120, 80));
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 120, 80));
+    const context = { scale: vi.fn(), translate: vi.fn(), drawImage: vi.fn() };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(vi.fn().mockReturnValue(context));
+    const transfer = { setData: vi.fn(), setDragImage: vi.fn() };
+
+    fireEvent.click(button);
+    fireEvent.dragStart(button, { dataTransfer: transfer });
+    setReason("Saving spread. Please wait.");
+    const unavailablePhoto = screen.getByRole("button", { name: "Choose Photo.jpg", description: "Saving spread. Please wait." });
+    setInventories({ chapter: { ...inventory, placedPhotoIds: ["photo"] } });
+
+    expect(choose).toHaveBeenCalledWith("photo");
+    expect(transfer.setDragImage).toHaveBeenCalled();
+    expect(unavailablePhoto).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Choose Photo.jpg" })).not.toBeInTheDocument();
+  });
+
+  it("explains an unready thumbnail preview and retains keyboard selection as an alternative", () => {
+    const choose = vi.fn();
+    const photos: PhotoInventory = {
+      ...inventory,
+      counts: { unplaced: 1, total: 1 },
+      processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] },
+    };
+    render(() => (
+      <PhotoPane
+        label="Chapter photos"
+        chapters={[{ id: "chapter", name: "Kyoto" }]}
+        inventories={{ chapter: photos }}
+        inventoryErrors={{}}
+        scheduling={{}}
+        liveStatus="live"
+        onRefresh={vi.fn()}
+        onRetryInventory={vi.fn()}
+        onRetryRefresh={vi.fn()}
+        onChoosePhoto={choose}
+      >
+        <div />
+      </PhotoPane>
+    ));
+    const button = screen.getByRole("button", { name: "Choose Photo.jpg" });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 120, 80));
+
+    const accepted = fireEvent.dragStart(button, { dataTransfer: { setData: vi.fn(), setDragImage: vi.fn() } });
+    const feedback = screen.getByRole("alert").textContent;
+    fireEvent.click(button);
+
+    expect(accepted).toBe(false);
+    expect(feedback).toContain("Wait for the photo to load, or use keyboard selection");
+    expect(choose).toHaveBeenCalledWith("photo");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("should render authoritative counts, complete processing feedback and unchanged lazy image URLs without photo actions", () => {

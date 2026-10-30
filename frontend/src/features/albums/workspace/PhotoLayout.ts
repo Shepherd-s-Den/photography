@@ -21,7 +21,10 @@ export interface PhotoRows {
 }
 
 export function derivePhotos(chapterIds: readonly string[], inventories: Readonly<Record<string, PhotoInventory>>) {
-  const photos = chapterIds.flatMap((chapterId) => inventories[chapterId]?.photos.map((photo) => ({ chapterId, photo })) ?? []);
+  const photos = chapterIds.flatMap((chapterId) => {
+    const inventory = inventories[chapterId];
+    return inventory?.photos.filter((photo) => !inventory.placedPhotoIds.includes(photo.id)).map((photo) => ({ chapterId, photo })) ?? [];
+  });
   if (chapterIds.length > 1)
     photos.sort(
       (left, right) =>

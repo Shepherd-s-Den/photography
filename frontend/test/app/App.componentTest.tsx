@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@solidjs/testing-lib
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { App } from "../../src/app/App";
 import { AlbumRequestError, type AlbumClient, type AlbumPage, type AlbumSummary } from "../../src/features/albums/model/Album";
+import type { PlacementContext, PlacementSnapshot } from "../../src/features/albums/model/Placement";
 import type { AlbumPhotoEvents, PhotoEvent } from "../../src/features/albums/model/Photo";
 
 const events: AlbumPhotoEvents = {
@@ -162,7 +163,7 @@ describe("album dashboard and open", () => {
     render(() => <App client={client} events={events} />);
 
     expect(await screen.findByRole("heading", { level: 1, name: firstAlbum.title })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Synopsis composition" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Synopsis composition" })).toBeInTheDocument();
     expect(screen.queryByText("Read-only album")).not.toBeInTheDocument();
     expect(screen.queryByText(firstAlbum.createdAt)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to album catalog" })).toHaveAttribute("href", "/");
@@ -420,6 +421,24 @@ describe("album dashboard and open", () => {
 
 function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
   return {
+    readPlacements: vi
+      .fn()
+      .mockImplementation((_album: string, context: PlacementContext): Promise<PlacementSnapshot> =>
+        Promise.resolve(
+          context.kind === "cover"
+            ? { kind: "cover", placements: [], frontSlotId: "front", backSlotId: "back", spineOwner: "front" }
+            : { kind: "spread", id: context.id, placements: [] },
+        ),
+      ),
+    editPlacements: vi
+      .fn()
+      .mockImplementation((_album: string, context: PlacementContext): Promise<PlacementSnapshot> =>
+        Promise.resolve(
+          context.kind === "cover"
+            ? { kind: "cover", placements: [], frontSlotId: "front", backSlotId: "back", spineOwner: "front" }
+            : { kind: "spread", id: context.id, placements: [] },
+        ),
+      ),
     list: vi.fn().mockResolvedValue(firstPage),
     create: vi.fn().mockResolvedValue(firstAlbum),
     rename: vi.fn().mockResolvedValue(firstAlbum),

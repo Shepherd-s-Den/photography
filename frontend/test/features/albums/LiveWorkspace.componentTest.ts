@@ -9,6 +9,7 @@ import type { AlbumClient } from "../../../src/features/albums/model/Album";
 describe("live workspace application coordination", () => {
   const inventory: PhotoInventory = {
     photos: [],
+    placedPhotoIds: [],
     counts: { unplaced: 0, total: 0 },
     processing: { state: "idle", unsupportedCount: 0, skippedCount: 0, issues: [] },
   };

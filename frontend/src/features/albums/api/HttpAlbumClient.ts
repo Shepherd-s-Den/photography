@@ -2,6 +2,16 @@ import { AlbumRequestError, SpreadOccupiedError, type AlbumClient } from "../mod
 import { readAlbum, readFailureMessage, readPage, readSummary, readRecord, readText, readNumber } from "./Wire";
 import { readChapterIdentity, readTemplates, readWorkspace } from "./WorkspaceWire";
 import { readPhotoInventory, readScheduling } from "./PhotoWire";
+import { readPlacementSnapshot } from "./PlacementWire";
+import type {
+  CoverContext,
+  CoverSnapshot,
+  PlacementContext,
+  PlacementEdit,
+  PlacementSnapshot,
+  SpreadContext,
+  SpreadSnapshot,
+} from "../model/Placement";
 
 export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
   async function request<T>(
@@ -37,7 +47,23 @@ export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
     return decode(value);
   }
 
+  function readPlacements(id: string, context: CoverContext): Promise<CoverSnapshot>;
+  function readPlacements(id: string, context: SpreadContext): Promise<SpreadSnapshot>;
+  function readPlacements(id: string, context: PlacementContext): Promise<PlacementSnapshot>;
+  function readPlacements(id: string, context: PlacementContext): Promise<PlacementSnapshot> {
+    return request(placementPath(id, context), "GET", undefined, 200, (value) => readPlacementSnapshot(value, context));
+  }
+
+  function editPlacements(id: string, context: CoverContext, edit: PlacementEdit): Promise<CoverSnapshot>;
+  function editPlacements(id: string, context: SpreadContext, edit: PlacementEdit): Promise<SpreadSnapshot>;
+  function editPlacements(id: string, context: PlacementContext, edit: PlacementEdit): Promise<PlacementSnapshot>;
+  function editPlacements(id: string, context: PlacementContext, edit: PlacementEdit): Promise<PlacementSnapshot> {
+    return request(placementPath(id, context), "POST", edit, 200, (value) => readPlacementSnapshot(value, context));
+  }
+
   return {
+    readPlacements,
+    editPlacements,
     templates: (context) => {
       const paths = { photos_only: "photos-only", chapter_start: "chapter-start", album_start: "album-start" };
       return request(`/api/templates/${paths[context]}`, "GET", undefined, 200, readTemplates);
@@ -90,4 +116,9 @@ export function makeHttpAlbumClient(fetcher: typeof fetch): AlbumClient {
       return request(`/api/albums/${encodeURIComponent(id)}/chapters/${encodeURIComponent(chapterId)}`, "PUT", body, 200, readChapterIdentity);
     },
   };
+}
+
+function placementPath(id: string, context: PlacementContext): string {
+  const target = context.kind === "cover" ? "cover" : `spreads/${encodeURIComponent(context.id)}`;
+  return `/api/albums/${encodeURIComponent(id)}/${target}/placements`;
 }

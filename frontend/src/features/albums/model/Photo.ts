@@ -27,6 +27,7 @@ export interface Photo {
 }
 export interface PhotoInventory {
   readonly photos: readonly Photo[];
+  readonly placedPhotoIds: readonly string[];
   readonly counts: { readonly unplaced: number; readonly total: number };
   readonly processing: {
     readonly state: (typeof processingStates)[number];

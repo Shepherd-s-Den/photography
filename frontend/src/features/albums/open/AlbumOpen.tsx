@@ -19,6 +19,8 @@ export function AlbumOpen(props: {
     | "moveSpread"
     | "changeSpreadTemplate"
     | "deleteSpread"
+    | "readPlacements"
+    | "editPlacements"
   >;
   events: AlbumPhotoEvents;
   id: string;

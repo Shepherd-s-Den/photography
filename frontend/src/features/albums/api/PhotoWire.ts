@@ -8,11 +8,19 @@ export function readPhotoInventory(value: unknown): PhotoInventory {
   const counts = readRecord(fields["counts"]);
   const unplaced = readCount(counts["unplaced"]);
   const total = readCount(counts["total"]);
+  const placedPhotoIds = readArray(fields["placedPhotoIds"]).map(readIdentity);
   if (total !== photos.length || unplaced > total || new Set(photos.map((photo) => photo.id)).size !== total)
     throw new Error("Invalid photo counts or identities");
+  if (
+    new Set(placedPhotoIds).size !== placedPhotoIds.length ||
+    placedPhotoIds.some((id) => !photos.some((photo) => photo.id === id)) ||
+    total - placedPhotoIds.length !== unplaced
+  )
+    throw new Error("Invalid placed photo identities");
   const processing = readRecord(fields["processing"]);
   return {
     photos,
+    placedPhotoIds,
     counts: { unplaced, total },
     processing: {
       state: readChoice(processing["state"], processingStates),

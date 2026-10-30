@@ -10,6 +10,7 @@ export function FullscreenReader(props: {
   unavailable: string | undefined;
   onNavigate: (direction: -1 | 1) => void;
   label: string;
+  onActive?: (active: boolean) => void;
   children: JSX.Element;
 }) {
   const [active, setActive] = createSignal(false);
@@ -25,6 +26,7 @@ export function FullscreenReader(props: {
     const entered = document.fullscreenElement === stage;
     const exited = active() && !entered;
     setActive(entered);
+    props.onActive?.(entered);
     if (entered) exitButton?.focus();
     if (exited) {
       setError(undefined);
