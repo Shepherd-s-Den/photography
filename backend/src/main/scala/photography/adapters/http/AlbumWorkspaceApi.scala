@@ -130,9 +130,10 @@ object AlbumWorkspaceApi:
     private def encodePhotos(snapshot: ChapterPhotos) =
       val inventory = snapshot.inventory
       Json.obj(
-        "photos"     -> Json.arr(inventory.photos.map(encodePhoto)*),
-        "counts"     -> Json.obj("unplaced" -> Json.fromInt(inventory.countUnplaced), "total" -> Json.fromInt(inventory.total)),
-        "processing" -> encodeProcessing(snapshot.execution)
+        "photos"         -> Json.arr(inventory.photos.map(encodePhoto)*),
+        "placedPhotoIds" -> Json.arr(inventory.placed.toVector.sortBy(_.value.toString).map(photo => Json.fromString(photo.value.toString))*),
+        "counts"         -> Json.obj("unplaced" -> Json.fromInt(inventory.countUnplaced), "total" -> Json.fromInt(inventory.total)),
+        "processing"     -> encodeProcessing(snapshot.execution)
       )
 
     private def encodePhoto(photo: Photo) =
