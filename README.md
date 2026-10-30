@@ -1,6 +1,6 @@
 # Photography
 
-A photography application for managing persisted albums and opening their metadata, with a SolidJS frontend and a Scala 3 backend.
+Album Layout Studio organizes chapter photo collections and edits persisted album compositions, with a SolidJS browser workspace and a Scala 3 backend.
 
 - [DESIGN-PRINCIPLES.md](DESIGN-PRINCIPLES.md) — architecture and engineering principles.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — toolchain, workflow, conventions, and definition of done.
@@ -13,10 +13,11 @@ A photography application for managing persisted albums and opening their metada
 - [ci/specs/](ci/specs/) — living documentation for the CI pipeline.
 - [LICENSE](LICENSE) — MIT.
 
-## Local SQLite development
+**Frontend UI work only:** read [UX patterns](frontend/UX-PATTERNS.md) before changing layout, controls, navigation, keyboard interaction or user-facing copy.
 
-The undeployed application separates the Flyway schema (V1) from its authoritative reference-data seeds (V2): 249 countries/territories and 27 Saal chapter-start layouts. For a checksum-incompatible development database, select a fresh `PHOTOGRAPHY_SQLITE_PATH` or explicitly recreate only the identified disposable database. Retain spike data and unrelated databases.
+## System context
 
-The supported runtime is one backend instance. The chapter manager owns chapter integrity rules; its shared mutex coordinates concurrent editors' read/decision/write operations. SQLite provides basic relational constraints and transactions for atomic chapter metadata, country associations, opening slots and supplied order.
-
-Workspace HTTP responses expose `/photos` as the default photo root; set `PHOTOGRAPHY_PHOTO_ROOT` to override it with an absolute path. Chapter source folders are saved as full paths and need not exist yet.
+- [Design](specs/design.md) — album model, editing journey, photo processing and architectural decisions.
+- [Contracts](specs/contracts.md) — authoritative APIs, persistence and dependency boundaries.
+- [Testing](specs/testing.md) — confidence strategy and test nomenclature.
+- [Operations](specs/operational.md) — running locally/on the NAS, storage, recovery and observability.

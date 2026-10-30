@@ -51,10 +51,13 @@ accessibility behavior where relevant. -->
 
 ## Doc Sync
 
-<!-- Required. Name only docs that need a durable update. Point to the authoritative artifact
-instead of repeating its contents. Say "None" if no living doc changes. -->
+<!-- Required. Read specs/templates/README.md and the affected living-doc templates first.
+Each entry is a knowledge delta, not copy-ready prose: the durable change to the system model,
+boundary ownership, testing strategy or operating model. Point precise details to their
+authoritative artifact. Acceptance criteria and per-scenario evidence stay with this change.
+Say "None" if no living knowledge changes. -->
 
-- <doc> — <section>: <specific knowledge to add or revise>
+- <doc> — <section>: <durable knowledge to revise>; <detail authority when needed>
 
 ## Out of Scope
 

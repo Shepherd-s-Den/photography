@@ -2,140 +2,115 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 
-## Overview
+## Purpose and system boundary
 
-The application manages persisted albums through a SolidJS dashboard and serves the frontend and backend API on one origin.
-
-## Album workflow
-
-The dashboard at `/` shows existing albums newest-first, six per page, with 42:28 cover placeholders and directional pagination that retains the current cards while loading. An empty collection leaves the album area blank.
-
-A single top-right Add album action opens a centered dialog requiring an unused year, initially the browser's current year. Creation generates `Journey of the Shepherds <year>`; rename accepts any nonblank title and trims surrounding whitespace. Invalid or duplicate years and failed saves retain entered values with readable feedback. Deletion requires confirmation and falls back to the last available page.
-
-Dialogs expose pending status, prevent duplicate submissions, support keyboard/pointer use and Escape/cancel, and restore focus when closed. Text formatting and line breaks remain stable during saving, retries and closing, including deletion confirmation.
-
-Selecting a card opens `/albums/{id}` with one heading, `A year in photographs / <year>`, beneath Back to albums. The application serves its site favicon. Creation and opening are separate actions. Loading and retryable failures precede usable content; missing albums retain the dashboard return path.
-
-The noncollapsible spread navigator sits above the right-hand editor: Synopsis, then individual spread miniatures grouped by chapter with vertical separators. Compact centered captions omit chapter numbers/dates; photo-spread names remain distinguishable. The strip scrolls horizontally and keeps the selected tile discoverable. First/Previous/position/Next/Last controls sit below it, followed by Add Spread and Add Chapter; endpoints expose accessible context. Add Spread is disabled with an associated explanation.
-
-Add chapter initially offers a type selector; once Home exists it opens directly as a vacation. Vacation details are location/name, countries, first/last day and photo folder; Home exposes countries and folder with `Throughout the year`. One trailing pencil opens the selected chapter's details and receives focus when the dialog closes.
-
-Vacation periods display `dd/mm/yyyy - dd/mm/yyyy`; date years initially use the album year but support same-day, cross-year and outside-year trips. New chapters default to Romania; multi-country search matches names/codes locally with keyboard selection and explicit no-match feedback. Folder suggestions follow the album year and destination name while preserving manual overrides. Saved details and composition survive reload; creating a chapter selects its opening.
-
-Selection is URL-addressable: absent `part` selects the album opening (Synopsis), `?part=cover` selects Cover, a chapter ID selects its opening, and a spread ID selects that spread. Direct links, reload and Back restore selection; missing or foreign parts offer feedback and Go to Synopsis. Spreads / Cover remembers the last interior selection; direct Cover loads return to the album opening when none exists. Cover hides the spread navigator.
-
-Read-only canvases render persisted full-spread geometry and owner text: album title and synopsis, or chapter name and description. Empty photo areas remain unlabeled. Compact headers, comfortable gutters and thin framing leave room for the canvas. Metadata distinguishes labels from values, uses Country for one country and Countries for several, and wraps on narrow screens. Source folders remain editable in details, absent from workspace narration.
-
-The full-height left photo explorer shows the selected chapter's photos, or all chapters' photos on Synopsis/Cover. Normal text is Photos with authoritative `unplaced / total` counts directly beneath; active processing and genuine failures retain explicit feedback. Whole uncropped images fill chronological rows, including the last, with small gutters and modest portrait emphasis. Photos have no preview, enlargement or placement action.
-
-A compact circular Refresh photos control reconciles the selected chapter, or every chapter on Synopsis/Cover, exposing pending status separately from processing. Creation and changed-folder saves schedule import after commit; a scheduling failure keeps the chapter saved and offers Refresh-only retry. Inventory failures remain retryable without inventing empty photos; interrupted live updates retain displayed images with explicit feedback.
-
-One outlined sharp-cut trapezoid grip resizes the explorer by pointer or Left/Right arrows and collapses/restores its chosen workspace-local width. Its full height and directional chevrons remain in both states. Hidden controls leave the focus order and focus transfers to the grip without changing selection. Narrow layouts avoid horizontal page overflow; reduced-motion preferences are respected.
-
-One global Reader control, left of Spreads / Cover, enters browser fullscreen from either view, hiding workspace chrome and metadata. It fits each canvas without stretching or cropping. Left/right navigation traverses Cover, the album opening and persisted chapter spreads without wrapping. Controls appear on hover or focus; Previous spread and Next spread are disabled at their endpoints without explanatory text.
-
-Escape or Exit reader retains the current part, restores chrome and returns focus to Reader. Fullscreen failures show readable feedback while leaving the workspace usable.
-
-## Domain model
+Album Layout Studio turns a year's chapter-organized photographs into a persisted album composition. The browser combines a photo collection, a spread editor and a distraction-free Reader; one backend serves the application and owns saved state.
 
 ```mermaid
 flowchart LR
-  Album -->|one| AlbumStart["AlbumStart spread"]
-  Album -->|one| Cover
-  Album -->|many| Chapter
-  Chapter -->|one| ChapterStart["ChapterStart spread"]
-  Chapter -->|many| PhotosOnly["PhotosOnly spread"]
-  Chapter -->|owns| Photo
-  Chapter --> Destination -->|one or more| Country
-  Photo --> PhotoDimensions
-  AlbumStart & ChapterStart & PhotosOnly --> Spread
-  Spread --> SpreadOwner
-  SpreadOwner --> Album
-  SpreadOwner --> Chapter
-  Spread --> SpreadTemplate
-  SpreadTemplate --> TemplateSlot["Template slot: Photo or Text"] --> SlotBox
-  Spread --> SpreadSlot["Spread slot: Photo or Text"]
-  SpreadSlot --> SlotBox
-  SpreadSlot --> PhotoSlot["Photo slot"]
-  SpreadSlot --> TextSlot["Text slot"]
-  PhotoSlot --> SpreadPlacement --> Photo
-  Cover --> CoverSlot --> CoverPlacement --> Photo
-  Cover --> SpineOwner
-  Chapter --> ChapterGearSelection --> CameraUse
-  CameraUse --> Camera
-  CameraUse --> Lens
-  EditorId["Browser profile: EditorId"] -->|at most one live| EditorSession["EditorSession: SessionId"]
-  EditorSession --> EditingLock --> EditingTarget
-  EditingTarget --> Spread
-  EditingTarget --> Cover
+  Editor --> Browser["Album catalog and workspace"]
+  Browser <-->|Commands and reads| Backend["Application services"]
+  Backend --> Database[("Albums and composition")]
+  Originals["Original photographs"] -->|Read only| Backend
+  Backend --> Thumbnails[("Managed thumbnails")]
+  Backend -->|Live inventory invalidations| Browser
 ```
 
-The Scala domain package defines records, identities, refined scalar types, and closed alternatives. Use cases enforce cross-record and lifecycle rules; adapters validate external values and route mutations through use cases.
+Original photographs remain independently owned. The application stores editorial decisions and derived previews, rather than becoming the authoritative photo archive.
 
-Each album has a required immutable year identifying at most one album and a freely editable title. Each chapter owns its destination name and nonempty set of reference countries; album countries derive from those destinations, independently of the complete selectable catalog.
+## Album model
 
-### Album composition
+```mermaid
+flowchart TD
+  Album --> Synopsis["Album opening: Synopsis"]
+  Album --> Cover
+  Album --> Chapters["Chronological chapters"]
+  Chapters --> Opening["Chapter opening"]
+  Chapters --> Spreads["Ordered photo spreads"]
+  Chapters --> Photos["Chapter photo collection"]
+  Synopsis & Opening & Spreads --> Template["Context-specific layout"]
+  Synopsis & Opening & Spreads & Cover --> Placements
+  Placements --> Photos
+```
 
-- Each album has one `AlbumStart` and one `Cover`; each chapter belongs to an album and has one `ChapterStart`; each photo belongs to a chapter.
-- An album's spreads are non-empty and ordered; the first spread is an `AlbumStart`, followed by chapter blocks, each a `ChapterStart` followed by zero or more `PhotosOnly` spreads.
-- Interior capacity is 65 spreads (130 pages), including album/chapter openings and photo spreads, excluding Cover. At 64 spreads a chapter opening can be added; at 65 creation is unavailable with a visible reason and rejected saves leave state unchanged.
-- Chapter blocks sort by first day, last day and chapter ID; the unique Home chapter remains last and spans the album year. Chapter positions are unique; start spreads use position zero, and `PhotosOnly` positions are unique from one. Chapter deletion and manual ordering are not workspace actions.
-- Creation atomically initializes an empty synopsis, one `AlbumStart` with the lowest-ID template's slots and no placements, and both empty cover sides with front-owned spine.
-- Chapter creation atomically saves metadata, country associations, a default opening's complete slots and chronological positions. Metadata updates preserve identity, type and composition. One backend instance's shared chapter-mutation lock covers concurrent editors' read/decision/write sequence; persistence transactions commit supplied changes atomically.
+An album has a unique, immutable year and an editable title. Chapters describe destinations and visit periods; Home represents the whole year and remains last. The interior starts with Synopsis, followed by chapter blocks whose openings stay ahead of their photo spreads.
 
-### Values
+Composition is bounded by the physical book: at most 65 interior spreads, excluding Cover. Templates provide layout geometry for their context; reference catalogs remain data, not duplicated application policy.
 
-- Album years are integers from 1900 through 2100.
-- Each chapter requires a full backend-visible absolute source-folder path, unique within its album, without parent traversal; the folder need not exist yet. Suggestions use `<photoRoot>/<year>/selection/<destination>`. Photo locations combine that source folder with one validated immediate filename, rejecting separators and parent-traversal names.
-- Sources contain immediate regular JPEG files (`.jpg`/`.jpeg`, case-insensitive); discovery reports unsupported files. Original files are referenced in place, read-only. Same-path replacements retain photo identity, caption and placement.
-- Capture time uses camera-local EXIF values, with missing/invalid dates treated as undated rather than inferred from file timestamps or a timezone. Order is capture time ascending, undated last, then case-insensitive filename, exact filename and chapter ID.
-- Each complete photo has one orientation-correct, uncropped JPEG thumbnail, never upscaled. Low permits at most 1024px/75,000 bytes, Standard 1536px/150,000 bytes and High 2048px/300,000 bytes. These are ceilings; bounded adaptive encoding lowers JPEG quality and then dimensions when needed, explicitly failing if no output fits.
-- Visit periods expose inclusive calendar days in `YYYY-MM-DD` form, with last day not preceding first day; storage runs from UTC midnight on the first day to midnight after the last. Dimensions are positive; names are nonempty after trimming; country codes are two uppercase ASCII letters; country flags are absolute.
-- Country, camera, and lens reference codes are unique within their kinds.
+Photos belong to chapter collections independently of their use in layouts. Chapter spreads use their chapter's photos; Synopsis and Cover can use the album collection. Removing a spread releases its placements rather than deleting its photographs.
 
-### Templates and covers
+## Editing journey
 
-- Start templates have exactly one text slot; `PhotosOnly` templates contain only photo slots; every template is nonempty.
-- Spreads retain a matching template ID and kind; applying a template copies geometry into typed slots.
-- The 27 seeded chapter-start layouts use the lowest-ID default, `Text + 2P + 2L`, with four photo slots and one text column. Chapter creation copies the complete default geometry into an empty opening; existing slot IDs, geometry and matching templates survive metadata changes.
-- New photo slots have no bleed; only photo slots can have bleed, and slot order is spatial. Text slots render owner fields without separate placements.
-- Slot boxes use nonnegative positions and positive sizes. Seeded start layouts retain percentages of the full spread axes; previews use the Saal `2381.102 × 765.354 pt` aspect ratio independently of occupied-slot extrema.
-- Spread coordinates use the top-left of the full two-page spread as the origin; x increases right and y increases down.
-- Cover front and back slots have distinct IDs, separate from spread-slot IDs; cover slots have no geometry or bleed.
-- Interior pages equal twice the spread count, up to 130; choose the smallest listed Saal specification that fits.
-- Derive cover geometry from that specification; `SpineOwner` selects the panel extending across the spine. A cover is complete only when both slots are placed (`IncompleteCover`).
-- Workspace Cover presents the saved album title with back on the left and front on the right. Credits read `by Cosmin & Mara` through 2025 and `by Cosmin, Mara & Iacob` from 2026; this preview does not promise print-accurate cover geometry.
+```mermaid
+stateDiagram-v2
+  [*] --> Catalog
+  Catalog --> Workspace: Create or open album
+  Workspace --> Workspace: Edit chapters and spreads
+  Workspace --> Reader: Enter Reader
+  Reader --> Workspace: Resume editing
+  Workspace --> Catalog: Return to catalog
+```
 
-### Placements and gear
+The workspace keeps the selected part addressable and restores it across navigation and reloads. Structural editing operates within chapter boundaries; template choices follow the selected spread's context. Reader presents the same composition without editing chrome.
 
-PhotoManager coordinates creation/Refresh reconciliation through original/thumbnail filesystem ports, photo metadata persistence and in-memory thumbnail generation. Each photo becomes visible only after its complete row and managed thumbnail are committed; processing publishes completed photos progressively without partial rows or broken-image placeholders.
+```mermaid
+sequenceDiagram
+  actor Editor
+  participant Workspace
+  participant Application
+  participant Storage
+  Editor->>Workspace: Change composition
+  Workspace->>Application: Request mutation
+  opt Existing placements need confirmation
+    Application-->>Workspace: Report occupied spread
+    Workspace-->>Editor: Explain impact and request confirmation
+    Editor->>Workspace: Confirm
+    Workspace->>Application: Repeat with confirmation
+  end
+  Application->>Storage: Commit validated change atomically
+  Application-->>Workspace: Saved result
+  Workspace->>Application: Reload authoritative composition
+```
 
-Refresh compares stable original-content hashes and configured quality, detecting same-name edits even when size/timestamps are unchanged. Unchanged photos retain their thumbnail URLs; replacements atomically preserve identity/caption/placement and the old complete version until publication. Complete enumeration authorizes removal of confirmed-absent photos and their placement references, preserving empty slots; failed enumeration preserves inventory.
+Cancellation preserves saved state. Validation and confirmation precede writes; a failed refresh after a successful save retries the read, not the mutation. Accessibility, focus continuity and recoverable feedback apply throughout the journey.
 
-Changed source folders atomically clear old photo/placement references with the chapter update. Superseded work, including A-to-B-to-A changes, cannot publish. Undecodable/unstable files skip replacement; read/encoding/storage/database failures retain completed photos and remain explicit. Ordinary opens and reconnects read saved state; explicit Refresh retries work interrupted by restart.
+## Photo processing and live views
 
-Per-photo durable publication/retirement intents precede filesystem effects and survive cancellation/crashes. Store the new thumbnail before committing its reference; failed/superseded publication deletes only that attempt's file, while committed replacement/removal retires only previous locations. Startup reconciles journaled locations without scanning originals or enumerating thumbnail storage.
+Chapter saves commit independently of background photo processing. Creation, a changed source folder or an explicit Refresh initiates reconciliation; opening an album reads saved state.
 
-- Each photo and slot can be placed at most once per album.
-- Chapter spreads accept photos only from their chapter; album-start and cover placements accept any photo in the album.
-- Transforms use two-axis shifts, mirroring, and positive uncapped zoom; the image must cover the full slot.
-- Fixed-lens cameras use `CameraUse.FixedLens`; interchangeable-lens cameras require a nonempty set of their own lenses.
+```mermaid
+sequenceDiagram
+  participant Editor
+  participant Application
+  participant Worker
+  participant Originals
+  participant Storage
+  participant Browser
+  Editor->>Application: Save chapter or request Refresh
+  opt Saving chapter details
+    Application->>Storage: Commit chapter
+  end
+  Application->>Worker: Schedule chapter reconciliation
+  par Report scheduling outcome
+    Application-->>Editor: Saved or scheduled result
+  and Reconcile in background
+    Worker->>Originals: Read current source photographs
+    loop Each complete photo
+      Worker->>Storage: Publish thumbnail and metadata safely
+      Worker-->>Browser: Invalidate chapter inventory
+      Browser->>Application: Read current inventory
+    end
+  end
+```
 
-### Editor sessions
+Complete photos become visible progressively. Existing usable data remains available during replacement or recoverable processing failure. Durable write intents bridge database and filesystem updates so restart recovery can finish interrupted publication and cleanup.
 
-- `EditorId` is a persistent pseudonymous browser-profile identity, stable across tabs and reconnects; it is not User-Agent metadata or authentication. A profile has at most one live `SessionId`.
-- The first tab creates a session; a second tab offers takeover or keep-existing. Keeping leaves the new tab inactive without a session.
-- Takeover atomically replaces the session, releases its locks, and creates one for the same profile; the old ID cannot edit or renew. Expiry is exclusive.
+The browser treats live events as invalidations, not a second database. Initial loads and reconnects catch up from authoritative reads; ordinary composition changes become visible to other workspaces on reload.
 
-Missing records, lock/session outcomes, infrastructure failures, and changed/unchanged mutation reporting belong to use cases.
+## Architectural decisions
 
-## Architecture constraints
+Domain and application policy stay independent of HTTP, SQLite and image/filesystem adapters, following [Design principles](../DESIGN-PRINCIPLES.md). The composition root supplies concrete infrastructure.
 
-- The backend is Scala 3 and follows Typelevel and Tagless Final principles.
-- The application maintains the SQLite schema with Flyway on startup.
-- All backend APIs use REST over HTTP.
-- Readiness is available only after SQLite migration and pending photo-write reconciliation succeed and the HTTP listener starts.
-- Image decoding, transformation and encoding run through the effect runtime's blocking facility; source scanning/image work never holds the chapter-mutation lock or delays a committed chapter's save response.
-- Workspace reads include one canonical inventory per chapter. The browser derives Synopsis/Cover from those collections rather than fetching another album-photo inventory.
-- One album-scoped http4s SSE stream per open browser workspace reports chapter invalidations and processing changes. Subscribe before initial/reconnect workspace catch-up, buffer invalidations during it, serialize/coalesce chapter reads and reject superseded responses; independent browsers/tabs own separate subscriptions.
-- Lazy images use supplied immutable versioned thumbnail URLs unchanged. Inventory/status and SSE are uncached; image delivery neither looks up photo metadata nor starts generation. One thumbnail-storage instance owns the backing namespace for recovery, import and HTTP delivery.
+The supported topology is one backend instance. Shared mutation coordination protects read/decision/write decisions; database transactions make supplied changes atomic. Slow source and image work runs outside that critical section.
+
+Current workspace delivery covers album, chapter and spread-structure editing plus photo browsing. Photo placement is represented in the composition model but has no browser action or HTTP API. [Contracts](contracts.md) identify authoritative representations; [operations](operational.md) owns deployment and recovery.

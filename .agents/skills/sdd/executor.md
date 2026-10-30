@@ -6,7 +6,7 @@ Does the work for one phase at a time, in order, as sequenced by [`SKILL.md`](SK
 
 Decide `feature` (planned change, refactor, migration — you already know the new behavior) or `investigation` (bug/incident — the spec is a trail toward a root cause). Name the branch `feature/<slug>` or `investigation/<slug>` and record the classification in `.agent-work/<slug>/checklist.md`.
 
-Then decide whether a spec is required: draft the Doc Sync entry first — one line naming a doc, section, and specific fact. A non-empty entry means write the spec; a pure refactor or internal cleanup with nothing to put there doesn't need one. Only the maintainer may waive this requirement, explicitly and for a specific change — record the decision (or waiver) in `.agent-work/<slug>/checklist.md`.
+Then decide whether a spec is required: draft the Doc Sync knowledge delta first — one line naming the owning doc, section and durable change. Apply `SKILL.md`'s living-context policy when deciding what belongs there. A non-empty entry means write the spec; a pure refactor or internal cleanup with nothing to put there doesn't need one. Only the maintainer may waive this requirement, explicitly and for a specific change — record the decision (or waiver) in `.agent-work/<slug>/checklist.md`.
 
 Also make the complexity call here, before the spec (`DESIGN-PRINCIPLES.md` §7): whether this behavior is served by growing an existing flow or needs new machinery, and whether a unit the change will cross grows past a single responsibility and must split as part of it. "You don't need this" and "split this first" are valid, in-scope outcomes. Record the call in `.agent-work/<slug>/checklist.md`; by spec time it is already decided, and the spec only reflects it.
 
@@ -25,6 +25,8 @@ Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recr
 State changed domain, persisted-data and boundary guarantees and who enforces them. Distinguish database constraints from application rules and verify constraint mechanisms against current sources.
 
 Keep signatures, module/file layouts, adapter internals and slice execution notes in the ignored implementation design map. The proposal owns agreed behavior and domain contracts; its structure follows intent rather than a diff walkthrough.
+
+Draft Doc Sync as the change to the enduring system model, boundary ownership, testing strategy or operating model. Link precise contract/data changes to their authoritative artifact. The proposal's acceptance criteria remain feature evidence, not the outline of a new living-doc section.
 
 When a spike preceded this phase, ground design notes and any real alternatives in its findings.
 
@@ -57,6 +59,10 @@ The handoff identifies the exact baseline and candidate revision or content mani
 
 Before archiving, run the implemented journey locally and compare it with the approved spec and the user's spike confirmation. Resolve any mismatch first.
 
-After every Implementation PR has merged: apply each `Doc Sync` entry verbatim to the named living doc and section (`specs/*.md`, or `ci/specs/*.md` for pipeline changes) — prune obsolete or duplicated content rather than appending. Move the spec to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
+After every Implementation PR has merged, read `SKILL.md`'s living-context policy, each affected template and the complete current owning document. Verify current facts against merged source before writing.
+
+Integrate each `Doc Sync` knowledge delta into its owning section (`specs/*.md`, or `ci/specs/*.md` for pipeline changes). Synthesize at the document's strategic altitude rather than copying proposal text. Preserve precise details in their authoritative contracts or source, and prune stale explanations. Keep a local ledger mapping every delta to its integrated section or authoritative pointer.
+
+Read the resulting documents as a new contributor: the system model and operating decisions must be clear without reconstructing the feature history. Apply the living-doc publication check to the whole affected documents, then move the spec to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
 
 Before opening this PR, self-check [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) against the **complete merged change**, not just the last PR, then satisfy `SKILL.md`'s PR-opening gate. This PR introduces no new product behavior.

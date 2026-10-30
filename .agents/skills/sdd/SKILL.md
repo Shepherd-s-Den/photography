@@ -1,7 +1,7 @@
 ---
 name: sdd
 description: >-
-  Use for product changes (features, refactors, migrations) and investigations (bugs, incidents). Every feature starts with a local spike confirmed by the user before its spec. Trigger when asked to add or change behavior, fix a bug, investigate an incident, or write a change spec.
+  Use for product changes, investigations, change specs and living-document synchronization. Features start with a user-confirmed local spike before their spec.
 ---
 
 # SDD — spec-driven development
@@ -11,6 +11,8 @@ This file sequences classify → spike → spec → tests → implementation →
 ## Change discipline
 
 Make the smallest change that satisfies the request. Keep each rule in one owning document; update other docs only when their owned facts change, and keep changes proportional to the product slice.
+
+**Living context:** when planning Doc Sync, authoring living docs or reviewing their changes, read the [living-doc quality policy](../../../specs/templates/README.md) and each affected document's template. They own the strategic altitude and knowledge-placement gate; detailed acceptance evidence stays with the change.
 
 **Spec amendments during implementation:** ask the maintainer before changing an approved spec. Once authorized, amend it in the Implementation PR when implementation reveals a changed contract. Update the affected criteria before their tests and implementation; include the amendment in the independent review against `spec-quality.md` as well as the implementation checklists.
 
@@ -53,6 +55,6 @@ Before drafting a spec, read the archived [Album dashboard and open](../../../sp
 3. **Spec PR** — After spike confirmation, follow [`executor.md`](executor.md#spec-pr)'s behavior/contract-first guidance using the active model, living docs and confirmed findings. Run the Markdown wrapping check on the proposal and every changed Markdown file; failure blocks the PR. Pass `spec-quality.md`, keep criteria observable and Doc Sync minimal, complete the independent review in [`reviewer.md`](reviewer.md), adjudicate findings, and merge before implementation.
 4. **Tests** — projected from the merged spec, before implementation. Gate: every acceptance criterion and enumerated edge case maps to a test; changed tests fail for the right reason first.
 5. **Implementation PR(s)** — one or more, each within the approved spec. Gate: run the slice locally against its real boundaries and obtain maintainer confirmation of its behavior before opening its PR; every gate in `AGENTS.md` exits zero; [`checklists/code-quality.md`](checklists/code-quality.md) plus the stack leaf for each surface this PR changes, and [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) (this PR's slice), pass.
-6. **Local verification, then Archive + Living Docs PR** — after every Implementation PR has merged, run the implemented journey through the local application and check it against the approved spec and the behavior the user confirmed in the spike. Resolve discrepancies before archiving. The Archive PR introduces no new product behavior. Gate: the local journey matches the spec; every `Doc Sync` entry is applied verbatim; [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) passes against the complete merged change; the spec is moved to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
+6. **Local verification, then Archive + Living Docs PR** — after every Implementation PR has merged, run the implemented journey through the local application and check it against the approved spec and the behavior the user confirmed in the spike. Resolve discrepancies before archiving. The Archive PR introduces no new product behavior. Gate: the local journey matches the spec; every `Doc Sync` knowledge delta is integrated at its owning section under the living-doc quality policy; [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) passes against the complete merged change; the spec is moved to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
 
 Phase detail: [`executor.md`](executor.md). Review protocol: [`reviewer.md`](reviewer.md). Change-spec template: [`templates/change-spec.md`](templates/change-spec.md). `superpowers:brainstorming`, `superpowers:writing-plans`, and `superpowers:test-driven-development` are available when a design or test set is non-obvious.

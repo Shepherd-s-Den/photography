@@ -2,30 +2,61 @@
 
 > Standard: Agentic Engineering Standards v1.2.0
 
-## Local service
+## Run locally
 
-Run `python3 scripts/local.py` from the repository root to start the current checkout for local development. The launcher creates `.local/` with owner-only permissions, stores the SQLite database at `.local/photography.db`, and prevents concurrent launcher instances.
+Install the pinned toolchain as described in [Contributing](../CONTRIBUTING.md), then run from the repository root:
 
-The launcher installs locked frontend dependencies and builds assets before starting services; preparation failures stop startup. The backend binds to `127.0.0.1:8080` by default. When the checkout has a frontend, the launcher also starts it at `127.0.0.1:5173`. `PHOTOGRAPHY_HOST` and `PHOTOGRAPHY_PORT` override the backend bind settings, `PHOTOGRAPHY_FRONTEND_PORT` overrides the frontend port, and `PHOTOGRAPHY_SQLITE_PATH` overrides the database path. The backend defaults and optional environment substitutions are defined in `backend/src/main/resources/application.conf`.
+```sh
+python3 scripts/local.py
+```
 
-Workspace folder suggestions use `/photos` as the default root, configurable through `PHOTOGRAPHY_PHOTO_ROOT` as an absolute path. Suggestions take the form `/photos/<year>/selection/<destination>`; editors can override them with a full backend-visible path. Saved chapter folders need not exist yet.
+The launcher builds frontend assets and starts the backend plus development server, reporting their URLs after readiness. Defaults are `127.0.0.1:8080` and `127.0.0.1:5173`; local SQLite state lives under `.local/`.
 
-`GET /health` returns HTTP 200 with `{"status":"ok"}` after the service has migrated the database, reconciled pending photo-write intents and started the HTTP listener. The launcher checks its tools and ports before starting, then polls readiness for up to 180 seconds. It prints each local URL after readiness and stops its child processes and releases its lock when it exits.
+For isolated work, set `PHOTOGRAPHY_SQLITE_PATH`, `PHOTOGRAPHY_PHOTO_ROOT` and `PHOTOGRAPHY_THUMBNAIL_ROOT` to disposable development locations. The launcher overrides the database default only; explicitly choose a writable thumbnail directory. `PHOTOGRAPHY_PORT` and `PHOTOGRAPHY_FRONTEND_PORT` allow separate verification ports.
 
-## Production deployment
+Stop with Ctrl+C. If a forked process survives, identify the listener and terminate that exact owned PID; preserve unrelated services and retained data.
 
-Mount original photo directories read-only and the application thumbnail root read/write on the NAS. Thumbnail temporary/final writes share that filesystem; SQLite stores locations and metadata, not image bytes. Back up the database together with its referenced thumbnail storage; original files remain independently owned.
+## Run on the NAS
 
-| Environment setting | Default | Contract |
-| --- | --- | --- |
-| `PHOTOGRAPHY_PHOTO_ROOT` | `/photos` | Absolute root for chapter-folder suggestions; saved folders are full backend-visible paths. |
-| `PHOTOGRAPHY_THUMBNAIL_ROOT` | `/thumbnails` | Absolute writable managed-thumbnail root, separate from read-only originals. |
-| `PHOTOGRAPHY_THUMBNAIL_QUALITY` | `standard` | `low`: 1024px/75,000 bytes; `standard`: 1536px/150,000 bytes; `high`: 2048px/300,000 bytes. |
+Use one backend instance with durable SQLite and thumbnail storage, and mount original photo directories read-only. The backend serves the built application and API together; the frontend development server is unnecessary on the NAS.
 
-Settings flow through HOCON and PureConfig into typed configuration. Unknown quality or invalid roots fail startup explicitly. Presets bound the longest edge and encoded bytes, not a target output size; Refresh applies changed quality while retaining photo identity and placement.
+The repository currently supports source-based JVM startup, not a packaged NAS service or deployment manifest. With the pinned toolchain installed and `/data`, `/photos` and `/thumbnails` mapped to the intended NAS locations, build and run from the repository root:
 
-Startup migrates SQLite and reconciles pending photo-write intents before accepting requests or starting workers. Reconciliation preserves referenced files and deletes only journaled unused locations; failed reference reads/cleanup block readiness and retain evidence. It does not scan originals or regenerate photos. Opening/reconnecting displays retained photos; explicit Refresh retries interrupted import.
+```sh
+npm ci --prefix frontend
+npm --prefix frontend run build
+cd backend
+PHOTOGRAPHY_HOST=0.0.0.0 \
+PHOTOGRAPHY_SQLITE_PATH=/data/photography.db \
+PHOTOGRAPHY_PHOTO_ROOT=/photos \
+PHOTOGRAPHY_THUMBNAIL_ROOT=/thumbnails \
+sbt -batch run
+```
 
-Serve `/api/albums/{id}/photo-events` as an uncached long-lived `text/event-stream`, with proxy buffering disabled and response timeouts allowing the stream to remain open. The server sends heartbeat comments every 15 seconds and `X-Accel-Buffering: no`; preserve streaming and reconnect behavior through the reverse proxy. SSE contains invalidations, never thumbnail bytes.
+Run under a NAS process supervisor that captures output and restarts failed processes. Keep the listener on a trusted network or behind an authenticated reverse proxy; the application does not provide user authentication.
 
-Inventory/status responses use `Cache-Control: no-store`; managed thumbnail URLs use `private, max-age=31536000, immutable` with content-version ETags. Changed output gets a new URL. Preserve these headers and keep browser/proxy original-file access separate from thumbnail delivery.
+| Storage | Ownership and operating requirement |
+| --- | --- |
+| SQLite | Writable, persistent application state; run only one backend against it. |
+| Managed thumbnails | Writable derived media, backed up consistently with database references. |
+| Original photographs | Independently owned, read-only source material; saved chapter paths must be visible to the backend. |
+
+[Application configuration](../backend/src/main/resources/application.conf) owns environment settings and defaults. Set `PHOTOGRAPHY_HOST`/`PHOTOGRAPHY_PORT` for the listener and `PHOTOGRAPHY_THUMBNAIL_QUALITY` for preview quality; invalid configuration stops startup.
+
+Preserve long-lived Server-Sent Events through the proxy: disable buffering and allow idle connections to survive heartbeats. Keep API and event responses uncached and preserve immutable thumbnail caching; [OpenAPI](http-api.openapi.json) owns the transport details.
+
+## Readiness, logs and metrics
+
+Probe `GET /health` for HTTP readiness. Startup migrates SQLite and reconciles unfinished photo writes before opening the listener. This probe establishes startup completion and reachability, not continuous database or storage health.
+
+The backend writes startup and failure diagnostics through SLF4J to process output. Capture stdout/stderr with the local terminal or NAS supervisor; retain application errors alongside migration and database-pool diagnostics when investigating failures.
+
+Current observability comprises the health endpoint, logs and chapter inventory/processing feedback. Dedicated metrics export, dashboards and alert rules are not configured. Monitor process availability, health responses and free space for the database and thumbnail volume at the host level; these are operating recommendations, not existing application metrics.
+
+## Recovery and maintenance
+
+Take a consistent backup of SQLite and its referenced thumbnail storage, preferably while the backend is stopped, and restore them together. Retain the independent originals backup. Preserve failed startup data and logs before changing files or retrying recovery.
+
+After restart, unfinished thumbnail publication/cleanup is reconciled from durable intents. Source enumeration is explicit: use Refresh to resume interrupted photo processing. A failed scheduling attempt does not undo a saved chapter.
+
+For checksum-incompatible disposable development databases, select a fresh database path or recreate only the explicitly identified disposable database. Retained spike data, NAS state and original photographs require their owner's authorization before replacement.
