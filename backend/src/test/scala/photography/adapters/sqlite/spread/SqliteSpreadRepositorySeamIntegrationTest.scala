@@ -434,8 +434,9 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
     given transaction: Transaction[ConnectionIO, IO] with
       override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
       override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
-    val templates = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
-    SpreadManager.make(templates, composition, spreads, defaultLayout)
+    val templates  = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
+    val placements = SqlitePhotoPlacementRepository.make
+    SpreadManager.make(templates, composition, spreads, placements, defaultLayout)
 
   private def buildInventory(xa: Transactor[IO]) =
     given transaction: Transaction[ConnectionIO, IO] with

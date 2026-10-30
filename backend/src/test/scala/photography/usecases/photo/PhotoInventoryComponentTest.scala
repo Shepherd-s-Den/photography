@@ -104,6 +104,8 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
     val placements = new PhotoPlacementRepository[Db]:
       override def findPlacedPhotos(id: ChapterId): Db[PhotoPlacementRepository.FindResult] =
         StateT.modify[IO, Int](_ + 1).as(placed)
+      override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): Db[PhotoPlacementRepository.Inspection] =
+        StateT.liftF(IO.raiseError[PhotoPlacementRepository.Inspection](new AssertionError("Unexpected photo inspection")))
     val chapters = new ChapterRepository[Db]:
       override def findSource(id: ChapterId): Db[ChapterRepository.SourceResult] = StateT.modify[IO, Int](_ + 1).as(source)
       override def create(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId]) =

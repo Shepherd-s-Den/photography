@@ -9,20 +9,32 @@ import munit.CatsEffectSuite
 import org.typelevel.doobie.implicits.*
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.app.config.SqliteConfig
-import photography.domain.album.{ChapterId, PhotoId}
-import photography.ports.photo.PhotoPlacementRepository.FindResult
+import photography.domain.album.{AlbumId, ChapterId, PhotoId}
+import photography.ports.photo.PhotoPlacementRepository.{FindResult, Inspection}
 import photography.syntax.SyncSyntax.*
 import java.nio.file.{Files, Path}
 import java.util.UUID
 
 final class SqlitePhotoPlacementRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should read authoritative chapter-owned spread and cover placements, including empty inventories and failures"):
-    val chapter  = ChapterId(new UUID(0L, 1L))
-    val other    = ChapterId(new UUID(0L, 2L))
-    val spread   = PhotoId(new UUID(0L, 3L))
-    val cover    = PhotoId(new UUID(0L, 4L))
-    val foreign  = PhotoId(new UUID(0L, 5L))
-    val unplaced = ChapterId(new UUID(0L, 6L))
+    val album        = AlbumId(new UUID(0L, 100L))
+    val chapter      = ChapterId(new UUID(0L, 1L))
+    val other        = ChapterId(new UUID(0L, 2L))
+    val spread       = PhotoId(new UUID(0L, 3L))
+    val cover        = PhotoId(new UUID(0L, 4L))
+    val foreign      = PhotoId(new UUID(0L, 5L))
+    val unplaced     = ChapterId(new UUID(0L, 6L))
+    val unused       = PhotoId(new UUID(0L, 7L))
+    val missingPhoto = PhotoId(new UUID(0L, 8L))
+    val unknownAlbum = AlbumId(new UUID(0L, 999L))
+    val inspections  = Vector(
+      (album, none[ChapterId], spread, Inspection(inCollection = true, placed = true)),
+      (album, chapter.some, cover, Inspection(inCollection = true, placed = true)),
+      (album, chapter.some, foreign, Inspection(inCollection = false, placed = true)),
+      (unknownAlbum, none[ChapterId], spread, Inspection(inCollection = false, placed = true)),
+      (album, chapter.some, unused, Inspection(inCollection = true, placed = false)),
+      (album, none[ChapterId], missingPhoto, Inspection(inCollection = false, placed = false))
+    )
     val database = Resource.make(Files.createTempFile(Path.of("target"), "placements-", ".sqlite").blocking[IO]): path =>
       Files.deleteIfExists(path).blocking[IO].void
 
@@ -30,17 +42,17 @@ final class SqlitePhotoPlacementRepositorySeamIntegrationTest extends CatsEffect
       SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 1, maxSessions = 1)).buildTransactor.use: xa =>
         val repository = SqlitePhotoPlacementRepository.make
         val seed       =
-          sql"INSERT INTO album VALUES ('a', 2026, 'Album', '', 0)".update.run >>
+          sql"INSERT INTO album VALUES (${album.value}, 2026, 'Album', '', 0)".update.run >>
             sql"INSERT INTO destination VALUES ('d', 'Trip')".update.run >>
-            sql"INSERT INTO chapter VALUES (${chapter.value}, 'a', 'd', '', 0, 1, 0, '/photos')".update.run >>
-            sql"INSERT INTO chapter VALUES (${other.value}, 'a', 'd', '', 0, 1, 1, '/other')".update.run >>
-            sql"INSERT INTO chapter VALUES (${unplaced.value}, 'a', 'd', '', 0, 1, 2, '/empty')".update.run >>
-            sql"INSERT INTO cover VALUES ('a', 'front')".update.run >>
-            sql"INSERT INTO cover_slot VALUES ('front', 'a', 'front'), ('back', 'a', 'back')".update.run >>
+            sql"INSERT INTO chapter VALUES (${chapter.value}, ${album.value}, 'd', '', 0, 1, 0, '/photos')".update.run >>
+            sql"INSERT INTO chapter VALUES (${other.value}, ${album.value}, 'd', '', 0, 1, 1, '/other')".update.run >>
+            sql"INSERT INTO chapter VALUES (${unplaced.value}, ${album.value}, 'd', '', 0, 1, 2, '/empty')".update.run >>
+            sql"INSERT INTO cover VALUES (${album.value}, 'front')".update.run >>
+            sql"INSERT INTO cover_slot VALUES ('front', ${album.value}, 'front'), ('back', ${album.value}, 'back')".update.run >>
             sql"INSERT INTO spread_template VALUES ('template', 'Test', 'photos_only')".update.run >>
             sql"INSERT INTO spread VALUES ('spread', 'template', 'photos_only', NULL, ${chapter.value}, 1)".update.run >>
             sql"INSERT INTO spread_photo_slot VALUES ('slot', 'spread', 0, 0, 10, 10)".update.run >>
-            Vector((spread, chapter), (cover, chapter), (foreign, other)).traverse_ { case (photo, owner) =>
+            Vector((spread, chapter), (cover, chapter), (foreign, other), (unused, chapter)).traverse_ { case (photo, owner) =>
               sql"""INSERT INTO photo
                 (id, chapter_id, source, source_hash, width, height, thumbnail, thumbnail_version,
                  thumbnail_width, thumbnail_height, thumbnail_quality, thumbnail_bytes)
@@ -50,15 +62,21 @@ final class SqlitePhotoPlacementRepositorySeamIntegrationTest extends CatsEffect
               ('spread-placement', ${spread.value}, 'spread', 'slot', NULL, 0, 0, 0, 1, 'top_left'),
               ('cover-placement', ${cover.value}, 'cover', NULL, 'front', 0, 0, 0, 1, NULL),
               ('other-placement', ${foreign.value}, 'cover', NULL, 'back', 0, 0, 0, 1, NULL)""".update.run
+        val unavailableInspection =
+          sql"ALTER TABLE placement RENAME TO inaccessible".update.run >> repository.inspect(album, maybeChapter = none[ChapterId], spread)
 
         for
-          _      <- seed.transact(xa)
-          placed <- repository.findPlacedPhotos(chapter).transact(xa)
-          scoped <- repository.findPlacedPhotos(other).transact(xa)
-          empty  <- repository.findPlacedPhotos(unplaced).transact(xa)
-          failed <- (sql"DROP TABLE placement".update.run >> repository.findPlacedPhotos(chapter)).transact(xa).attempt
+          _         <- seed.transact(xa)
+          placed    <- repository.findPlacedPhotos(chapter).transact(xa)
+          scoped    <- repository.findPlacedPhotos(other).transact(xa)
+          empty     <- repository.findPlacedPhotos(unplaced).transact(xa)
+          inspected <- inspections.traverse { case (owner, scope, photo, _) => repository.inspect(owner, maybeChapter = scope, photo).transact(xa) }
+          inspectionFailure <- unavailableInspection.transact(xa).attempt
+          failed            <- (sql"DROP TABLE placement".update.run >> repository.findPlacedPhotos(chapter)).transact(xa).attempt
         yield
           assertEquals(placed, FindResult.Found(photos = Set(spread, cover)))
           assertEquals(scoped, FindResult.Found(photos = Set(foreign)))
           assertEquals(empty, FindResult.Found(photos = Set.empty[PhotoId]))
+          assertEquals(inspected, inspections.map { case (_, _, _, expected) => expected })
+          assert(inspectionFailure.isLeft)
           assert(failed.isLeft)

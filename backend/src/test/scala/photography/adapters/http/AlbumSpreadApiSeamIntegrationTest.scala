@@ -200,6 +200,10 @@ final class AlbumSpreadApiSeamIntegrationTest extends CatsEffectSuite:
     val changeOutcome = change
     val deleteOutcome = delete
     val spreads       = new SpreadManager[IO]:
+      override def readPlacements(album: AlbumId, spread: SpreadId): IO[PlacementReadResult] =
+        IO.raiseError[PlacementReadResult](new AssertionError("Unexpected placement read"))
+      override def editPlacements(album: AlbumId, spread: SpreadId, request: Edit): IO[PlacementResult] =
+        IO.raiseError[PlacementResult](new AssertionError("Unexpected placement edit"))
       override def add(album: AlbumId, chapter: ChapterId, after: SpreadId): IO[AddResult] =
         calls.update(_ :+ s"add:${album.value}:${chapter.value}:${after.value}").as(addOutcome)
       override def move(album: AlbumId, spread: SpreadId, direction: Direction): IO[MoveResult] =

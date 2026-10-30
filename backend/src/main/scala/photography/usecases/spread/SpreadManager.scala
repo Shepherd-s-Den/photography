@@ -8,10 +8,11 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import org.typelevel.log4cats.Logger
 import photography.capabilities.{IdGenerator, Transaction}
-import photography.domain.album.{AlbumId, ChapterId, InteriorSpreadCapacity}
+import photography.domain.album.{AlbumId, ChapterId, PhotoId, InteriorSpreadCapacity}
 import photography.domain.layout.*
 import photography.ports.album.AlbumCompositionRepository
 import photography.ports.spread.SpreadRepository
+import photography.ports.photo.PhotoPlacementRepository
 import photography.ports.album.AlbumCompositionRepository.Located
 import photography.syntax.EitherSyntax.*
 import photography.syntax.EitherSyntax.Pure.*
@@ -23,20 +24,24 @@ trait SpreadManager[F[_]]:
   def move(album: AlbumId, spread: SpreadId, direction: Direction): F[MoveResult]
   def changeTemplate(album: AlbumId, spread: SpreadId, template: SpreadTemplateId, confirmPlacements: Boolean): F[ChangeTemplateResult]
   def delete(album: AlbumId, spread: SpreadId, confirmPlacements: Boolean): F[DeleteResult]
+  def readPlacements(album: AlbumId, spread: SpreadId): F[PlacementReadResult]
+  def editPlacements(album: AlbumId, spread: SpreadId, request: Edit): F[PlacementResult]
 
 object SpreadManager:
   def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       templates: SpreadTemplateManager[F],
       composition: AlbumCompositionRepository[Db],
       spreads: SpreadRepository[Db],
+      placements: PhotoPlacementRepository[Db],
       defaultPhotoLayout: SpreadTemplateId
   )(using Transaction[Db, F]): SpreadManager[F] =
-    new LiveSpreadManager(templates, composition, spreads, defaultPhotoLayout)
+    new LiveSpreadManager(templates, composition, spreads, placements, defaultPhotoLayout)
 
   final private class LiveSpreadManager[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
       templates: SpreadTemplateManager[F],
       composition: AlbumCompositionRepository[Db],
       spreads: SpreadRepository[Db],
+      placements: PhotoPlacementRepository[Db],
       defaultPhotoLayout: SpreadTemplateId
   )(using Transaction[Db, F]) extends SpreadManager[F]:
     override def add(album: AlbumId, chapter: ChapterId, after: SpreadId): F[AddResult] =
@@ -107,9 +112,108 @@ object SpreadManager:
         yield DeleteResult.Deleted: DeleteResult
       act[DeleteResult](DeleteResult.Failed)(Transaction[Db, F].run(mutation.merge))
 
+    override def readPlacements(album: AlbumId, spread: SpreadId): F[PlacementReadResult] =
+      val read = composition.hasAlbum(album).flatMap:
+        case false => PlacementReadResult.AlbumNotFound.pure[Db]
+        case true  =>
+          composition.findSpread(album, spread).map(_.fold[PlacementReadResult](PlacementReadResult.SpreadNotFound)(value =>
+            PlacementReadResult.Found(value.spread)
+          ))
+      act(PlacementReadResult.Failed)(Transaction[Db, F].run(read))
+
+    override def editPlacements(album: AlbumId, spread: SpreadId, request: Edit): F[PlacementResult] =
+      act(PlacementResult.Failed):
+        preparePlacementEdit(request).flatMap: change =>
+          val mutation = composition.hasAlbum(album).flatMap:
+            case false => PlacementResult.AlbumNotFound.pure[Db]
+            case true  =>
+              composition.findSpread(album, spread).flatMap:
+                case None         => PlacementResult.SpreadNotFound.pure[Db]
+                case Some(target) =>
+                  checkPlacementPhoto(album, maybeChapter = findPlacementChapter(target), request).flatMap: permission =>
+                    permission.flatMap(_ => change(target.spread)) match
+                      case Left(reason)   => PlacementResult.Rejected(reason).pure[Db]
+                      case Right(updated) => spreads.replace(updated).as(PlacementResult.Saved(updated): PlacementResult)
+          Transaction[Db, F].run(mutation)
+
     private def act[A](failed: A)(body: F[A]) =
       MonadCancelThrow[F].uncancelable: _ =>
         summon[Mutex[F]].lock.surround(body).handleErrorWith(error => Logger[F].error(error)("Spread action failed").as(failed))
+
+    private type PlacementChange = Spread => Either[Failure, Spread]
+
+    private def preparePlacementEdit(request: Edit) = request match
+      case Edit.Place(slot, photo) =>
+        IdGenerator[F].generateId.map: id =>
+          val change: PlacementChange = spread =>
+            requirePlacementSlot(slots = collectPlacementSlots(spread), slot).map: _ =>
+              val fresh = SpreadPlacement(SpreadPlacementId(id), slot, photo, untouched, CaptionCorner.BottomRight)
+              replacePlacements(spread, values = spread.placements.filterNot(_.slot.value === slot.value) :+ fresh)
+          change
+      case Edit.Remove(id) =>
+        val change: PlacementChange = spread =>
+          findPlacement(values = spread.placements, id).map(_ =>
+            replacePlacements(spread, values = spread.placements.filterNot(_.id.value === id.value))
+          )
+        change.pure[F]
+      case Edit.Adjust(id, transform) =>
+        val change: PlacementChange = spread =>
+          adjustPlacement(values = spread.placements, id, transform).map(values => replacePlacements(spread, values = values))
+        change.pure[F]
+      case Edit.Move(source, destination) =>
+        val change: PlacementChange = spread =>
+          movePlacement(slots = collectPlacementSlots(spread), values = spread.placements, source, destination)
+            .map(values => replacePlacements(spread, values = values))
+        change.pure[F]
+
+    private def checkPlacementPhoto(album: AlbumId, maybeChapter: Option[ChapterId], request: Edit) = request match
+      case Edit.Place(_, photo) =>
+        placements.inspect(album, maybeChapter = maybeChapter, photo).map: inspection =>
+          if !inspection.inCollection then Failure.PhotoNotInCollection.asLeft[Unit]
+          else if inspection.placed then Failure.PhotoAlreadyUsed.asLeft[Unit]
+          else ().asRight[Failure]
+      case _ => ().asRight[Failure].pure[Db]
+
+    private def findPlacementChapter(target: Located) = target match
+      case Located.AlbumOpening(_)            => none[ChapterId]
+      case Located.ChapterOpening(chapter, _) => chapter.some
+      case Located.Photo(chapter, _)          => chapter.some
+
+    private def collectPlacementSlots(spread: Spread) = spread match
+      case value: Spread.AlbumStart   => value.photoSlots.map(_.id).toSet
+      case value: Spread.ChapterStart => value.photoSlots.map(_.id).toSet
+      case value: Spread.PhotosOnly   => value.photoSlots.toList.map(_.id).toSet
+
+    private def adjustPlacement(values: Vector[SpreadPlacement], id: SpreadPlacementId, transform: PhotoTransform) =
+      for
+        _ <- findPlacement(values = values, id)
+        _ <- Either.cond(transform.zoom >= 1.0 && transform.zoom <= 5.0, (), Failure.InvalidTransform)
+      yield values.map(value => if value.id.value === id.value then value.copy(transform = transform) else value)
+
+    private def movePlacement(
+        slots: Set[PhotoSpreadSlotId],
+        values: Vector[SpreadPlacement],
+        source: SpreadPlacementId,
+        destination: PhotoSpreadSlotId
+    ) =
+      for
+        placed <- findPlacement(values = values, source)
+        _      <- requirePlacementSlot(slots = slots, destination)
+      yield values.map: value =>
+        if value.id.value === source.value then value.copy(slot = destination)
+        else if value.slot.value === destination.value then value.copy(slot = placed.slot)
+        else value
+
+    private def requirePlacementSlot(slots: Set[PhotoSpreadSlotId], slot: PhotoSpreadSlotId) =
+      Either.cond(slots.contains(slot), (), Failure.SlotNotFound)
+
+    private def findPlacement(values: Vector[SpreadPlacement], id: SpreadPlacementId) =
+      values.find(_.id.value === id.value).toRight(Failure.PlacementNotFound)
+
+    private def replacePlacements(spread: Spread, values: Vector[SpreadPlacement]) = spread match
+      case value: Spread.AlbumStart   => value.copy(placements = values)
+      case value: Spread.ChapterStart => value.copy(placements = values)
+      case value: Spread.PhotosOnly   => value.copy(placements = values)
 
     private def isAlbumOpening(target: Located) = target match
       case Located.AlbumOpening(_) => true
@@ -193,6 +297,24 @@ object SpreadManager:
 
   enum Direction derives CanEqual:
     case Earlier, Later
+
+  enum Edit:
+    case Place(slot: PhotoSpreadSlotId, photo: PhotoId)
+    case Remove(id: SpreadPlacementId)
+    case Adjust(id: SpreadPlacementId, transform: PhotoTransform)
+    case Move(source: SpreadPlacementId, destination: PhotoSpreadSlotId)
+
+  enum PlacementReadResult:
+    case Found(spread: Spread)
+    case AlbumNotFound, SpreadNotFound, Failed
+
+  enum PlacementResult:
+    case Saved(spread: Spread)
+    case Rejected(reason: Failure)
+    case AlbumNotFound, SpreadNotFound, Failed
+
+  enum Failure derives CanEqual:
+    case PhotoNotInCollection, PhotoAlreadyUsed, SlotNotFound, PlacementNotFound, InvalidTransform
 
   enum Conflict derives CanEqual:
     case AtCapacity, AddTarget, ContextMismatch, OpeningMove, OpeningDelete, NoNeighbour, UnknownTemplate
