@@ -1,14 +1,17 @@
 package photography.adapters.sqlite.chapter
 
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptyVector}
+import cats.Eq
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import org.typelevel.doobie.ConnectionIO
 import org.typelevel.doobie.free.connection
 import org.typelevel.doobie.implicits.*
+import org.typelevel.log4cats.Logger
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.domain.album.*
 import photography.domain.layout.*
+import photography.domain.gear.*
 import photography.ports.chapter.ChapterRepository
 import photography.ports.chapter.ChapterRepository.*
 
@@ -16,9 +19,30 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 object SqliteChapterRepository:
-  def make: ChapterRepository.Metadata[ConnectionIO] = new LiveChapterRepository
+  def make(using Logger[ConnectionIO]): ChapterRepository[ConnectionIO] = new LiveChapterRepository
 
-  final private class LiveChapterRepository extends ChapterRepository.Metadata[ConnectionIO]:
+  final private class LiveChapterRepository(using Logger[ConnectionIO]) extends ChapterRepository[ConnectionIO]:
+    override def readGear(album: AlbumId, chapter: ChapterId): ConnectionIO[GearReadResult] =
+      chapterExists(album, chapter).flatMap:
+        case false => GearReadResult.NotFound.pure[ConnectionIO]
+        case true  => loadGear(chapter).map(GearReadResult.Found(_))
+      .handleErrorWith(error => Logger[ConnectionIO].error(error)("Chapter gear read failed").as(GearReadResult.Failed))
+
+    override def readSelections: ConnectionIO[SelectionsReadResult] =
+      sql"SELECT id FROM chapter ORDER BY rowid".query[UUID].to[Vector]
+        .flatMap(_.traverse(id => loadGear(ChapterId(id)).map(ChapterGearSelection(ChapterId(id), _))))
+        .map(SelectionsReadResult.Found(_))
+        .handleErrorWith(error => Logger[ConnectionIO].error(error)("Saved chapter selections read failed").as(SelectionsReadResult.Failed))
+
+    override def replaceGear(album: AlbumId, chapter: ChapterId, selection: GearSelection): ConnectionIO[GearWriteResult] =
+      chapterExists(album, chapter).attempt.flatMap:
+        case Right(false) => GearWriteResult.NotFound.pure[ConnectionIO]
+        case Right(true)  =>
+          replaceSelection(chapter, selection = selection).flatMap:
+            case Right(_)    => GearWriteResult.Saved.pure[ConnectionIO]
+            case Left(error) => Logger[ConnectionIO].error(error)("Chapter gear replacement failed").as(GearWriteResult.Failed)
+        case Left(error) => Logger[ConnectionIO].error(error)("Chapter gear target acquisition failed").as(GearWriteResult.Failed)
+
     override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): ConnectionIO[SaveDescriptionResult] =
       albumExists(album).attempt.flatMap:
         case Right(false) => SaveDescriptionResult.AlbumNotFound.pure[ConnectionIO]
@@ -72,6 +96,8 @@ object SqliteChapterRepository:
                   yield UpdateResult.Saved: UpdateResult
                 countryReferencesExist(countries = countries).ifM(ifTrue = write, ifFalse = UpdateResult.UnknownCountries.pure[ConnectionIO])
 
+    private given Eq[GearSelection] = Eq.fromUniversalEquals
+
     private def writeDescription(album: AlbumId, chapter: ChapterId, text: String) =
       val update = sql"UPDATE chapter SET description = $text WHERE id = ${chapter.value} AND album_id = ${album.value}".update.run
         .flatMap(rows => checkDescriptionWrite(album, chapter, rows = rows))
@@ -80,6 +106,60 @@ object SqliteChapterRepository:
           val rollback = sql"ROLLBACK TO chapter_description".update.run >> sql"RELEASE chapter_description".update.run.void
           rollback.handleErrorWith(error => connection.delay(cause.addSuppressed(error)) >> cause.raiseError[ConnectionIO, Unit])
         case Right(_) => sql"RELEASE chapter_description".update.run.void
+
+    private def chapterExists(album: AlbumId, chapter: ChapterId) =
+      sql"SELECT EXISTS(SELECT 1 FROM chapter WHERE id = ${chapter.value} AND album_id = ${album.value})".query[Boolean].unique
+
+    private def loadGear(chapter: ChapterId) =
+      val cameras = sql"""SELECT c.camera_id, c.use_kind FROM chapter_camera c
+        LEFT JOIN camera k ON k.id = c.camera_id WHERE c.chapter_id = ${chapter.value} AND k.id IS NOT NULL ORDER BY c.rowid"""
+      val orphaned = sql"""SELECT EXISTS(SELECT 1 FROM chapter_camera c LEFT JOIN camera k ON k.id = c.camera_id
+        WHERE c.chapter_id = ${chapter.value} AND k.id IS NULL) OR EXISTS(
+        SELECT 1 FROM chapter_camera_lens s LEFT JOIN lens l ON l.id = s.lens_id
+        LEFT JOIN chapter_camera c ON c.chapter_id = s.chapter_id AND c.camera_id = s.camera_id
+        WHERE s.chapter_id = ${chapter.value} AND (l.id IS NULL OR c.camera_id IS NULL))""".query[Boolean].unique
+      orphaned.ensure(new IllegalArgumentException("Invalid saved gear references"))(!_) >>
+        cameras.query[(UUID, String)].to[Vector].flatMap(_.traverse { case (camera, kind) => loadCameraUse(chapter, camera, kind = kind) })
+
+    private def loadCameraUse(chapter: ChapterId, camera: UUID, kind: String) =
+      val lenses = sql"SELECT lens_id FROM chapter_camera_lens WHERE chapter_id = ${chapter.value} AND camera_id = $camera ORDER BY rowid"
+      lenses.query[UUID].to[Vector].flatMap: ids =>
+        val use = (kind, NonEmptyVector.fromVector(ids.map(LensId(_)))) match
+          case ("fixed_lens", None)                       => CameraUse.FixedLens.asRight[Throwable]
+          case ("interchangeable_lenses", Some(selected)) => CameraUse.Interchangeable(lenses = selected).asRight[Throwable]
+          case _                                          => new IllegalArgumentException("Invalid saved chapter gear").asLeft[CameraUse]
+        use.liftTo[ConnectionIO].map(CameraSelection(CameraId(camera), _))
+
+    private def replaceSelection(chapter: ChapterId, selection: GearSelection) =
+      val write =
+        for
+          _     <- deleteSelection(chapter)
+          _     <- selection.traverse_(entry => insertSelection(chapter, entry))
+          saved <- loadGear(chapter)
+          _     <- Either.cond(saved === selection, (), new IllegalStateException("Incomplete gear replacement")).liftTo[ConnectionIO]
+        yield ()
+      sql"SAVEPOINT chapter_gear".update.run >> write.attempt.flatTap:
+        case Left(cause) =>
+          val rollback = sql"ROLLBACK TO chapter_gear".update.run >> sql"RELEASE chapter_gear".update.run.void
+          rollback.handleErrorWith(error => connection.delay(cause.addSuppressed(error)) >> cause.raiseError[ConnectionIO, Unit])
+        case Right(_) => sql"RELEASE chapter_gear".update.run.void
+
+    private def deleteSelection(chapter: ChapterId) =
+      sql"DELETE FROM chapter_camera WHERE chapter_id = ${chapter.value}".update.run >>
+        sql"SELECT count(*) FROM chapter_camera WHERE chapter_id = ${chapter.value}".query[Int].unique
+          .ensure(new IllegalStateException("Incomplete gear removal"))(_ === 0).void
+
+    private def insertSelection(chapter: ChapterId, entry: CameraSelection) =
+      val (kind, lenses) = entry.use match
+        case CameraUse.FixedLens               => ("fixed_lens", Vector.empty[LensId])
+        case CameraUse.Interchangeable(values) => ("interchangeable_lenses", values.toVector)
+      val insert       = sql"INSERT INTO chapter_camera (chapter_id, camera_id, use_kind) VALUES (${chapter.value}, ${entry.camera.value}, $kind)"
+      val insertLenses = lenses.traverse_ { lens =>
+        sql"""INSERT INTO chapter_camera_lens (chapter_id, camera_id, lens_id)
+          VALUES (${chapter.value}, ${entry.camera.value}, ${lens.value})""".update.run
+          .ensure(new IllegalStateException("Expected one saved lens selection"))(_ === 1).void
+      }
+      insert.update.run.ensure(new IllegalStateException("Expected one saved camera selection"))(_ === 1) >> insertLenses
 
     private def checkDescriptionWrite(album: AlbumId, chapter: ChapterId, rows: Int) =
       if rows === 1 then rows.pure[ConnectionIO]

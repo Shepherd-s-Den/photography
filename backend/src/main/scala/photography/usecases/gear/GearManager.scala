@@ -3,7 +3,8 @@ package photography.usecases.gear
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.std.Mutex
 import cats.syntax.all.*
-import photography.capabilities.IdGenerator
+import photography.capabilities.{IdGenerator, Transaction}
+import org.typelevel.log4cats.Logger
 import photography.domain.gear.*
 import photography.ports.chapter.ChapterRepository
 import photography.ports.gear.GearRepository
@@ -20,13 +21,15 @@ trait GearManager[F[_]]:
   def validateSelection(catalog: GearCatalog, selection: GearSelection): ValidationResult
 
 object GearManager:
-  def make[F[_]: MonadCancelThrow: Mutex: IdGenerator](repository: GearRepository[F], chapters: ChapterRepository[F]): GearManager[F] =
+  def make[F[_]: MonadCancelThrow: Mutex: IdGenerator: Logger, Db[_]](repository: GearRepository[F], chapters: ChapterRepository[Db])(using
+      Transaction[Db, F]
+  ): GearManager[F] =
     new LiveGearManager(repository, chapters)
 
-  final private class LiveGearManager[F[_]: MonadCancelThrow: Mutex: IdGenerator](
+  final private class LiveGearManager[F[_]: MonadCancelThrow: Mutex: IdGenerator: Logger, Db[_]](
       repository: GearRepository[F],
-      chapters: ChapterRepository[F]
-  ) extends GearManager[F]:
+      chapters: ChapterRepository[Db]
+  )(using Transaction[Db, F]) extends GearManager[F]:
     override def createCamera(code: CameraExifCode, name: CameraName, kind: CameraKind): F[CameraCreateResult] =
       IdGenerator[F].generateId.flatMap: id =>
         val camera = Camera(CameraId(id), code, name, kind)
@@ -45,7 +48,7 @@ object GearManager:
               if !catalog.cameras.exists(_.id.value === camera.id.value) then CameraUpdateResult.NotFound.pure[F]
               else
                 val updated = catalog.copy(cameras = catalog.cameras.map(current => if current.id.value === camera.id.value then camera else current))
-                chapters.readSelections.flatMap:
+                readSavedSelections.flatMap:
                   case ChapterRepository.SelectionsReadResult.Failed       => CameraUpdateResult.Failed.pure[F]
                   case ChapterRepository.SelectionsReadResult.Found(saved) =>
                     val selected = saved.flatMap(_.selection).filter(_.camera.value === camera.id.value)
@@ -86,7 +89,7 @@ object GearManager:
               if !catalog.lenses.exists(_.id.value === lens.id.value) then LensUpdateResult.NotFound.pure[F]
               else
                 val updated = catalog.copy(lenses = catalog.lenses.map(current => if current.id.value === lens.id.value then lens else current))
-                chapters.readSelections.flatMap:
+                readSavedSelections.flatMap:
                   case ChapterRepository.SelectionsReadResult.Failed       => LensUpdateResult.Failed.pure[F]
                   case ChapterRepository.SelectionsReadResult.Found(saved) =>
                     val selected = saved.flatMap(_.selection).filter: entry =>
@@ -127,6 +130,10 @@ object GearManager:
         validateSelection(catalog, selection = Vector(entry)) match
           case ValidationResult.Valid       => true
           case _: ValidationResult.Rejected => false
+
+    private def readSavedSelections =
+      Transaction[Db, F].run(chapters.readSelections).handleErrorWith: error =>
+        Logger[F].error(error)("Saved chapter selections read failed").as(ChapterRepository.SelectionsReadResult.Failed)
 
     private def validateCamera(catalog: GearCatalog, entry: CameraSelection) =
       catalog.cameras.find(_.id.value === entry.camera.value).toRight(Failure.UnknownCamera).flatMap: camera =>

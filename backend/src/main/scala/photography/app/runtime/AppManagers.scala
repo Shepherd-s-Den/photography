@@ -5,6 +5,7 @@ import cats.effect.std.Mutex
 import org.typelevel.doobie.{ConnectionIO, Transactor}
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.adapters.sqlite.album.{SqliteAlbumRepository, SqliteCountryRepository}
 import photography.adapters.sqlite.chapter.SqliteChapterRepository
 import photography.adapters.sqlite.spread.SqliteSpreadTemplateRepository
@@ -48,15 +49,16 @@ object AppManagers:
       quality: ThumbnailQuality
   ): Resource[F, AppManagers[F]] =
     Resource.eval(Mutex[F]).flatMap: mutex =>
-      given Mutex[F] = mutex
+      given Mutex[F]             = mutex
+      given Logger[ConnectionIO] = Slf4jLogger.getLogger[ConnectionIO]
       given Transaction[ConnectionIO, F] with
         override def run[A](program: ConnectionIO[A]): F[A]     = program.transact(sqlite)
         override def resolve[A](program: ConnectionIO[A]): F[A] = program.transact(sqlite)
       val templateRepository = SqliteSpreadTemplateRepository.make[F](sqlite)
       val templates          = SpreadTemplateManager.make(templateRepository)
       val albumComposition   = SqliteAlbumCompositionRepository.make
-      val albumRepository    = SqliteAlbumRepository.make[F](sqlite, albumComposition)
       val chapterRepository  = SqliteChapterRepository.make
+      val albumRepository    = SqliteAlbumRepository.make[F](sqlite, albumComposition, chapterRepository)
       val countries          = SqliteCountryRepository.make[F](sqlite)
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)
       val placements         = SqlitePhotoPlacementRepository.make

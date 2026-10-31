@@ -1,4 +1,5 @@
 package photography.adapters.sqlite.album
+import photography.adapters.sqlite.chapter.SqliteChapterRepository
 import photography.domain.gear.CameraSelection
 
 import photography.adapters.sqlite.FlywayMigrator
@@ -27,6 +28,7 @@ import java.util.UUID
 
 final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]             = Slf4jLogger.getLogger[IO]
+  private given Logger[ConnectionIO]   = Slf4jLogger.getLogger[ConnectionIO]
   private val createdAt                = Instant.parse("2026-10-07T12:00:00.123Z")
   private val changedTitle: AlbumTitle = "Asian capitals"
   private val countInitialRows         = sql"""SELECT (SELECT count(*) FROM album) + (SELECT count(*) FROM spread) +
@@ -37,7 +39,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should persist the complete initial album and preserve year and composition when renamed"):
     Vector(SpineOwner.Front -> "front", SpineOwner.Back -> "back").traverse_ { case (spineOwner, expectedSpine) =>
       buildTransactor.use: xa =>
-        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
         val album      = buildAlbum(index = 1)
         val cover      = buildCover(album).copy(spineOwner = spineOwner)
 
@@ -59,7 +61,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should list newest-first slices with stable ordering for equal creation instants and an empty collection"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val albums     = Vector(1, 2, 3).map(buildAlbum)
 
       for
@@ -77,7 +79,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should enforce unique required years atomically under concurrent creation"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val first      = buildAlbum(index = 1)
       val second     = buildAlbum(index = 2).copy(year = first.year)
       val later      = buildAlbum(index = 3)
@@ -96,7 +98,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should report unknown albums consistently and delete all initial owned rows without deleting shared templates"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val unknownId  = AlbumId(buildUuid(index = 999))
       val album      = buildAlbum(index = 1)
 
@@ -120,7 +122,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should roll back every album-owned row when a late cover write fails"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val failCover  = sql"""CREATE TRIGGER fail_cover BEFORE INSERT ON cover_slot WHEN NEW.side = 'back'
                            BEGIN SELECT RAISE(ABORT, 'injected cover failure'); END"""
       val album = buildAlbum(index = 1)
@@ -135,7 +137,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should reject noninitial composition or a foreign cover without writing owned rows"):
     buildTransactor.use: xa =>
-      val repository      = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository      = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val album           = buildAlbum(index = 1)
       val templateId      = SpreadTemplateId(buildUuid(index = 1))
       val textSlot        = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 11)), SlotBox(x = 0.0, y = 0.0, width = 100.0, height = 100.0))
@@ -188,7 +190,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       "UPDATE spread_text_slot SET id = '0-0-0-0-1'"
     ).traverse_ { corruption =>
       buildTransactor.use: xa =>
-        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
         val album      = buildAlbum(index = 1)
 
         for
@@ -216,7 +218,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should report database failures explicitly for every operation"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val album      = buildAlbum(index = 1)
 
       for
@@ -235,7 +237,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should preserve persisted photo-slot bleed when reading an album"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val album      = buildAlbum(index = 1)
 
       for
@@ -252,7 +254,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should read chapter spreads and placements in domain order and cascade deletion through the owned graph"):
     buildTransactor.use: xa =>
-      val repository         = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository         = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val countryId          = buildUuid(index = 400).toString
       val destinationId      = buildUuid(index = 401).toString
       val chapterId          = buildUuid(index = 402).toString
@@ -458,7 +460,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should preserve the complete aggregate through all nonempty author combinations and Unicode synopsis clearing"):
     buildTransactor.use: xa =>
-      val repository             = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository             = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val album                  = buildAlbum(index = 1)
       val text                   = "Ș 日本語\n🙂"
       val combinations           = Author.all.subsets().filter(_.nonEmpty).toVector.map(_.refineUnsafe[MinLength[1]])
@@ -490,7 +492,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should reject field writes atomically without treating known rejection as uncertain"):
     Vector("RAISE(ABORT, 'rejected')", "RAISE(IGNORE)").traverse_ { rejection =>
       buildTransactor.use: xa =>
-        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
         val album      = buildAlbum(index = 1)
         val reject     = Fragment.const(s"CREATE TRIGGER reject_album BEFORE UPDATE ON album BEGIN SELECT $rejection; END")
 
@@ -510,7 +512,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should reject empty domain authors and invalid stored representations without changing retained data"):
     buildTransactor.use: xa =>
-      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val album      = buildAlbum(index = 1)
       val invalid    = Vector("0", "8", "'Cosmin'", "1.5")
 
@@ -534,7 +536,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
       val albums      = Vector(original, later)
       val selected    = Set(Author.Iacob).refineUnsafe[MinLength[1]]
       val saveAuthors = buildConnection(path).use: xa =>
-        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
 
         for
           _       <- albums.traverse_(album => repository.create(album, buildCover(album)))
@@ -546,7 +548,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(current, GetResult.Found(later))
           assertEquals(saved, SaveAuthorsResult.Saved(original.copy(authors = selected)))
       val verifyRestartRetention = buildConnection(path).use: xa =>
-        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
 
         for
           retained <- repository.get(original.id)
@@ -569,10 +571,10 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
     acknowledgements.traverse_ { error =>
       buildTransactor.use: xa =>
-        val repository  = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val repository  = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
         val album       = buildAlbum(index = 1)
         val interrupted = Transactor.after.set(xa, xa.strategy.after >> error.raiseError[ConnectionIO, Unit])
-        val uncertain   = SqliteAlbumRepository.make[IO](interrupted, SqliteAlbumCompositionRepository.make)
+        val uncertain   = SqliteAlbumRepository.make[IO](interrupted, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
         val selected    = Set(Author.Mara).refineUnsafe[MinLength[1]]
 
         for
