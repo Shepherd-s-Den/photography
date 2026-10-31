@@ -6,6 +6,7 @@ import { AlbumRequestError, SpreadOccupiedError, type AlbumClient } from "../../
 import type { Chapter, Workspace } from "../../../src/features/albums/model/Workspace";
 import type { AlbumPhotoEvents, PhotoEvent, PhotoInventory } from "../../../src/features/albums/model/Photo";
 import type { PlacementContext, PlacementSnapshot, SpreadPlacement, SpreadSnapshot } from "../../../src/features/albums/model/Placement";
+import { resourceFixture, type SnapshotClient } from "./WorkspaceResources";
 
 const album = { id: "album", year: 2026, title: "Saved free-form album title", createdAt: "2026-10-25T12:00:00Z", synopsis: "Saved album synopsis" };
 const inventory: PhotoInventory = {
@@ -484,7 +485,7 @@ describe("album workspace browser boundary", () => {
     const moved = { ...workspace, spreads: [opening, vacationOpening, second, vacationPhoto, ...workspace.spreads.slice(3)] };
     const client = buildClient({
       workspace: vi.fn().mockResolvedValueOnce(withSecond).mockResolvedValue(moved),
-      moveSpread: vi.fn().mockResolvedValue(undefined),
+      replaceChapterComposition: vi.fn().mockResolvedValue(undefined),
     });
     window.history.replaceState(null, "", "?part=vacation-photo");
     render(() => <AlbumOpen id={album.id} client={client} events={events} />);
@@ -495,7 +496,12 @@ describe("album workspace browser boundary", () => {
     expect(earlier).toHaveAccessibleDescription("This is the first photo spread in its chapter.");
     fireEvent.click(later);
     await waitFor(() => expect(later).toHaveAccessibleDescription("This is the last photo spread in its chapter."));
-    expect(client.moveSpread).toHaveBeenCalledWith(album.id, "vacation-photo", "later");
+    expect(client.replaceChapterComposition).toHaveBeenCalledWith(
+      album.id,
+      vacation.id,
+      ["vacation-opening", "vacation-photo", "second-photo"],
+      ["vacation-opening", "second-photo", "vacation-photo"],
+    );
     expect(window.location.search).toBe("?part=vacation-photo");
     fireEvent.click(screen.getByRole("link", { name: "Home" }));
     expect(earlier).toHaveAccessibleDescription("Select a photo spread first.");
@@ -503,9 +509,40 @@ describe("album workspace browser boundary", () => {
     fireEvent.click(screen.getByRole("link", { name: "Kyoto · Photo spread 2" }));
     fireEvent.click(earlier);
     await waitFor(() => {
-      expect(client.moveSpread).toHaveBeenCalledTimes(2);
+      expect(client.replaceChapterComposition).toHaveBeenCalledTimes(2);
     });
-    expect(client.moveSpread).toHaveBeenLastCalledWith(album.id, "vacation-photo", "earlier");
+    expect(client.replaceChapterComposition).toHaveBeenLastCalledWith(
+      album.id,
+      vacation.id,
+      ["vacation-opening", "second-photo", "vacation-photo"],
+      ["vacation-opening", "vacation-photo", "second-photo"],
+    );
+  });
+
+  it("should reload a concurrently changed chapter composition without replaying the rejected editor intent", async () => {
+    const second = { ...vacationPhoto, id: "second-photo" };
+    const displayed = { ...workspace, spreads: [...workspace.spreads.slice(0, 3), second, ...workspace.spreads.slice(3)] };
+    const changed = { ...workspace, spreads: [opening, vacationOpening, second, vacationPhoto, ...workspace.spreads.slice(3)] };
+    const client = buildClient({
+      workspace: vi.fn().mockResolvedValueOnce(displayed).mockResolvedValue(changed),
+      replaceChapterComposition: vi.fn().mockRejectedValue(new AlbumRequestError(409, "Composition changed")),
+    });
+    window.history.replaceState(null, "", "?part=vacation-photo");
+    render(() => <AlbumOpen id={album.id} client={client} events={events} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Shift spread right" }));
+    const reload = await screen.findByRole("button", { name: "Reload saved workspace" });
+    expect(screen.getByRole("alert")).toHaveTextContent("This chapter's composition changed.");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("outcome is uncertain");
+    fireEvent.click(reload);
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Reload saved workspace" })).not.toBeInTheDocument();
+    });
+    expect(client.replaceChapterComposition).toHaveBeenCalledExactlyOnceWith(
+      album.id,
+      vacation.id,
+      ["vacation-opening", "vacation-photo", "second-photo"],
+      ["vacation-opening", "second-photo", "vacation-photo"],
+    );
   });
 
   it.each(["resolve", "reject", "reload"] as const)("should discard a late spread %s after leaving the workspace", async (outcome) => {
@@ -1192,8 +1229,8 @@ describe("album workspace browser boundary", () => {
   });
 });
 
-function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
-  return {
+function buildClient(overrides: Partial<SnapshotClient> = {}): SnapshotClient & AlbumClient {
+  const client: SnapshotClient = {
     readPlacements: vi
       .fn()
       .mockImplementation((_album: string, context: PlacementContext): Promise<PlacementSnapshot> =>
@@ -1224,9 +1261,11 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
     updateChapter: vi.fn().mockResolvedValue({ id: vacation.id, scheduling: "not-requested" }),
     templates: vi.fn().mockResolvedValue([{ id: "layout", name: "Applied layout", slots: [photoSlot, textSlot] }]),
     addSpread: vi.fn(),
-    moveSpread: vi.fn(),
+    replaceChapterComposition: vi.fn(),
     changeSpreadTemplate: vi.fn(),
     deleteSpread: vi.fn(),
     ...overrides,
   };
+  const resources = resourceFixture(client);
+  return { ...client, ...resources, chapterPhotos: vi.fn(resources.chapterPhotos) };
 }

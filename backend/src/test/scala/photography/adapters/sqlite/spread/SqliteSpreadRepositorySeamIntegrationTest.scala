@@ -27,9 +27,9 @@ import photography.domain.layout.*
 import photography.ports.album.AlbumRepository
 import photography.ports.chapter.ChapterRepository
 import photography.ports.spread.SpreadTemplateRepository
-import photography.usecases.chapter.{ChapterMetadataManager, ChapterPlanning}
+import photography.usecases.chapter.{ChapterComposition, ChapterMetadataManager, ChapterPlanning}
 import photography.usecases.photo.{ChapterPhotoImport, PhotoInventory}
-import photography.usecases.spread.{SpreadManager, SpreadTemplateManager}
+import photography.usecases.spread.SpreadManager
 import photography.usecases.spread.SpreadManager.*
 
 import java.nio.file.{Files, Path}
@@ -117,18 +117,19 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
     buildTransactor.use: xa =>
       Mutex[IO].flatMap: mutex =>
         given coordination: Mutex[IO] = mutex
-        val manager                   = buildManager(xa)
+        val manager                   = buildComposition(xa)
 
         for
-          _       <- seedChapter(xa)
+          opening <- seedChapter(xa)
           first   <- buildPhotoSpread(xa, index = 15L, layout = defaultLayout)
           second  <- buildPhotoSpread(xa, index = 16L, layout = defaultLayout)
           _       <- (spreads.insert(chapterId, first) >> spreads.insert(chapterId, second)).transact(xa)
           _       <- sql"DELETE FROM cover_slot WHERE album_id = ${albumId.value} AND side = 'back'".update.run.transact(xa)
-          result  <- manager.move(albumId, second.id, SpreadManager.Direction.Earlier)
+          result  <-
+            manager.replace(albumId, chapterId, NonEmptyList.of(opening.id, first.id, second.id), NonEmptyList.of(opening.id, second.id, first.id))
           ordered <- sql"SELECT id FROM spread WHERE chapter_id = ${chapterId.value} ORDER BY position".query[UUID].to[List].transact(xa)
         yield
-          assertEquals(result, SpreadManager.MoveResult.Moved(second.id))
+          assertEquals(result, ChapterComposition.Result.Saved)
           assertEquals(ordered.drop(1), List(second.id.value, first.id.value))
 
   test("should decide concurrent occupied confirmations from the state committed by the preceding mutation"):
@@ -194,27 +195,28 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
         val insertOther = sql"INSERT INTO album (id, year, title, synopsis, created_at_ms) VALUES (${otherAlbum.value}, 2025, 'Other', '', 0)"
 
         for
-          opening         <- seedChapter(xa)
-          _               <- insertOther.update.run.transact(xa)
-          photo           <- buildPhotoSpread(xa, index = 22L, layout = defaultLayout)
-          _               <- spreads.insert(chapterId, photo).transact(xa)
-          foreignMove     <- manager.move(otherAlbum, photo.id, Direction.Earlier)
+          opening     <- seedChapter(xa)
+          _           <- insertOther.update.run.transact(xa)
+          photo       <- buildPhotoSpread(xa, index = 22L, layout = defaultLayout)
+          _           <- spreads.insert(chapterId, photo).transact(xa)
+          foreignMove <-
+            buildComposition(xa).replace(otherAlbum, chapterId, NonEmptyList.of(opening.id, photo.id), NonEmptyList.of(opening.id, photo.id))
           foreignTemplate <- manager.changeTemplate(otherAlbum, photo.id, singleLayout, confirmPlacements = true)
           foreignDelete   <- manager.delete(otherAlbum, photo.id, confirmPlacements = true)
           foreignAdd      <- manager.add(otherAlbum, chapterId, opening.id)
           removed         <- manager.delete(albumId, photo.id, confirmPlacements = true)
-          staleMove       <- manager.move(albumId, photo.id, Direction.Earlier)
-          staleTemplate   <- manager.changeTemplate(albumId, photo.id, singleLayout, confirmPlacements = true)
-          staleDelete     <- manager.delete(albumId, photo.id, confirmPlacements = true)
-          staleAdd        <- manager.add(albumId, chapterId, photo.id)
-          rows            <- spreadRows.transact(xa)
+          staleMove <- buildComposition(xa).replace(albumId, chapterId, NonEmptyList.of(opening.id, photo.id), NonEmptyList.of(opening.id, photo.id))
+          staleTemplate <- manager.changeTemplate(albumId, photo.id, singleLayout, confirmPlacements = true)
+          staleDelete   <- manager.delete(albumId, photo.id, confirmPlacements = true)
+          staleAdd      <- manager.add(albumId, chapterId, photo.id)
+          rows          <- spreadRows.transact(xa)
         yield
-          assertEquals(foreignMove, MoveResult.SpreadNotFound)
+          assertEquals(foreignMove, ChapterComposition.Result.NotFound)
           assertEquals(foreignTemplate, ChangeTemplateResult.SpreadNotFound)
           assertEquals(foreignDelete, DeleteResult.SpreadNotFound)
           assertEquals(foreignAdd, AddResult.ChapterNotFound)
           assertEquals(removed, DeleteResult.Deleted)
-          assertEquals(staleMove, MoveResult.SpreadNotFound)
+          assertEquals(staleMove, ChapterComposition.Result.Stale)
           assertEquals(staleTemplate, ChangeTemplateResult.SpreadNotFound)
           assertEquals(staleDelete, DeleteResult.SpreadNotFound)
           assertEquals(staleAdd, AddResult.SpreadNotFound)
@@ -435,9 +437,15 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
     given transaction: Transaction[ConnectionIO, IO] with
       override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
       override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
-    val templates  = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
+    val templates  = SqliteSpreadTemplateRepository.make[IO](xa)
     val placements = SqlitePhotoPlacementRepository.make
     SpreadManager.make(templates, composition, spreads, placements, defaultLayout)
+
+  private def buildComposition(xa: Transactor[IO])(using Mutex[IO]) =
+    given Transaction[ConnectionIO, IO] with
+      override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
+      override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
+    ChapterComposition.make[IO, ConnectionIO](composition, spreads)
 
   private def buildInventory(xa: Transactor[IO]) =
     given transaction: Transaction[ConnectionIO, IO] with
@@ -450,7 +458,7 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
     given transaction: Transaction[ConnectionIO, IO] with
       override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
       override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
-    val templates = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
+    val templates = SqliteSpreadTemplateRepository.make[IO](xa)
     val albums    = SqliteAlbumRepository.make[IO](xa, composition, SqliteChapterRepository.make)
     val imports   = new ChapterPhotoImport[IO]:
       override def prepare(album: AlbumId, chapter: ChapterId, source: PhotoSource): IO[ChapterPhotoImport.Request] =

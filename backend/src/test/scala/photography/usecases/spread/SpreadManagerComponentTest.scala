@@ -17,7 +17,8 @@ import photography.ports.spread.SpreadRepository
 import photography.ports.photo.PhotoPlacementRepository
 import photography.ports.album.AlbumCompositionRepository.Located
 import photography.usecases.spread.SpreadManager.*
-import photography.usecases.spread.SpreadTemplateManager.FindTemplateResult
+import photography.ports.spread.SpreadTemplateRepository
+import photography.ports.spread.SpreadTemplateRepository.FindTemplateResult
 
 import java.nio.file.Path
 import java.time.{Instant, LocalDate}
@@ -62,7 +63,6 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
   )
   private val first         = buildPhotoSpread(index = 40L, placements = Vector.empty[SpreadPlacement])
   private val second        = buildPhotoSpread(index = 41L, placements = Vector.empty[SpreadPlacement])
-  private val third         = buildPhotoSpread(index = 42L, placements = Vector.empty[SpreadPlacement])
   private val firstOccupied = buildPhotoSpread(
     index = 40L,
     placements = Vector(
@@ -175,60 +175,6 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     yield
       assertEquals(unavailable, AddResult.Failed)
       assertEquals(wrong, AddResult.Failed)
-
-  test("should swap a photo spread with its chapter neighbour in either direction"):
-    val refs = Refs()
-
-    for
-      manager <- buildManager(refs)
-      earlier <- manager.move(album.id, second.id, Direction.Earlier)
-      later   <- manager.move(album.id, first.id, Direction.Later)
-      orders  <- refs.orders.get
-    yield
-      val swapped = (chapter.id, NonEmptyList.of(chapterOpening.id, second.id, first.id))
-      assertEquals(earlier, MoveResult.Moved(second.id))
-      assertEquals(later, MoveResult.Moved(first.id))
-      assertEquals(orders, Vector(swapped, swapped))
-
-  test("should keep unrelated spreads in place when a photo spread swaps with a later neighbour"):
-    val refs   = Refs()
-    val longer = buildAlbumWithSpreads(spreads = Vector(first, second, third))
-
-    for
-      manager <- buildManager(refs, maybeAlbum = longer.some)
-      result  <- manager.move(longer.id, second.id, Direction.Later)
-      orders  <- refs.orders.get
-    yield
-      assertEquals(result, MoveResult.Moved(second.id))
-      assertEquals(orders, Vector((chapter.id, NonEmptyList.of(chapterOpening.id, first.id, third.id, second.id))))
-
-  test("should reject moving openings and photo spreads without a neighbour in their chapter"):
-    val refs = Refs()
-
-    for
-      albumOpeningMove   <- buildManager(refs).flatMap(_.move(album.id, albumOpening.id, Direction.Later))
-      chapterOpeningMove <- buildManager(refs).flatMap(_.move(album.id, chapterOpening.id, Direction.Earlier))
-      firstEarlier       <- buildManager(refs).flatMap(_.move(album.id, first.id, Direction.Earlier))
-      lastLater          <- buildManager(refs).flatMap(_.move(album.id, second.id, Direction.Later))
-      orders             <- refs.orders.get
-    yield
-      assertEquals(albumOpeningMove, MoveResult.Rejected(Conflict.OpeningMove))
-      assertEquals(chapterOpeningMove, MoveResult.Rejected(Conflict.OpeningMove))
-      assertEquals(firstEarlier, MoveResult.Rejected(Conflict.NoNeighbour))
-      assertEquals(lastLater, MoveResult.Rejected(Conflict.NoNeighbour))
-      assertEquals(orders, Vector.empty[(ChapterId, NonEmptyList[SpreadId])])
-
-  test("should report unknown album and spread targets when moving"):
-    val refs = Refs()
-
-    for
-      missingAlbum <- buildManager(refs, maybeAlbum = none[Album]).flatMap(_.move(album.id, first.id, Direction.Later))
-      unknown      <- buildManager(refs).flatMap(_.move(album.id, SpreadId(buildUuid(index = 999L)), Direction.Later))
-      foreign      <- buildManager(refs).flatMap(_.move(album.id, foreign.id, Direction.Earlier))
-    yield
-      assertEquals(missingAlbum, MoveResult.AlbumNotFound)
-      assertEquals(unknown, MoveResult.SpreadNotFound)
-      assertEquals(foreign, MoveResult.Rejected(Conflict.NoNeighbour))
 
   test("should change every caption corner without changing placement identity, photo, crop or transform"):
     CaptionCorner.values.toVector.traverse_ { corner =>
@@ -355,7 +301,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     val refs = Refs()
 
     for
-      manager  <- buildManager(refs, maybeTemplateResult = FindTemplateResult.Failed.some)
+      manager  <- buildManager(refs, maybeTemplateResult = FindTemplateResult.Failed(SpreadTemplateRepository.Failure.DatabaseFailure).some)
       result   <- manager.changeTemplate(album.id, first.id, singleLayout, confirmPlacements = false)
       replaced <- refs.replacements.get
     yield
@@ -614,13 +560,13 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     given ids: IdGenerator[IO] with
       private val next                  = Ref.unsafe[IO, Long](1000L)
       override def generateId: IO[UUID] = next.getAndUpdate(_ + 1L).map(buildUuid)
-    val templates = new SpreadTemplateManager[IO]:
-      override def listAlbumStartTemplates: IO[SpreadTemplateManager.ListAlbumStartTemplatesResult] =
-        IO.raiseError[SpreadTemplateManager.ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
-      override def listChapterStartTemplates: IO[SpreadTemplateManager.ListChapterStartTemplatesResult] =
-        IO.raiseError[SpreadTemplateManager.ListChapterStartTemplatesResult](new AssertionError("Unexpected chapter templates"))
-      override def listPhotosOnlyTemplates: IO[SpreadTemplateManager.ListPhotosOnlyTemplatesResult] =
-        IO.raiseError[SpreadTemplateManager.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
+    val templates = new SpreadTemplateRepository[IO]:
+      override def listAlbumStartTemplates: IO[SpreadTemplateRepository.ListAlbumStartTemplatesResult] =
+        IO.raiseError[SpreadTemplateRepository.ListAlbumStartTemplatesResult](new AssertionError("Unexpected album templates"))
+      override def listChapterStartTemplates: IO[SpreadTemplateRepository.ListChapterStartTemplatesResult] =
+        IO.raiseError[SpreadTemplateRepository.ListChapterStartTemplatesResult](new AssertionError("Unexpected chapter templates"))
+      override def listPhotosOnlyTemplates: IO[SpreadTemplateRepository.ListPhotosOnlyTemplatesResult] =
+        IO.raiseError[SpreadTemplateRepository.ListPhotosOnlyTemplatesResult](new AssertionError("Unexpected photo templates"))
       override def findTemplate(id: SpreadTemplateId): IO[FindTemplateResult] = maybeTemplateResult.getOrElse(resolveCatalog(id)).pure[IO]
     val composition = new AlbumCompositionRepository[IO]:
       override def hasAlbum(value: AlbumId): IO[Boolean] =

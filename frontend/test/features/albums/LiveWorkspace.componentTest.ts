@@ -1,12 +1,20 @@
 import { createRoot, createSignal } from "solid-js";
 import { waitFor } from "@solidjs/testing-library";
 import { describe, expect, it, vi } from "vitest";
-import { createLiveWorkspace } from "../../../src/features/albums/open/LiveWorkspace";
+import { createLiveWorkspace as createResourceWorkspace } from "../../../src/features/albums/open/LiveWorkspace";
+import { resourceFixture, type SnapshotClient } from "./WorkspaceResources";
 import type { AlbumPhotoEvents, PhotoEvent, PhotoInventory } from "../../../src/features/albums/model/Photo";
-import type { Workspace } from "../../../src/features/albums/model/Workspace";
+import type { Spread, Workspace } from "../../../src/features/albums/model/Workspace";
 import type { AlbumClient } from "../../../src/features/albums/model/Album";
 
 describe("live workspace application coordination", () => {
+  function createLiveWorkspace(
+    id: Parameters<typeof createResourceWorkspace>[0],
+    client: Pick<AlbumClient, "open" | "chapterPhotos" | "refreshPhotos"> & { workspace: (id: string, signal?: AbortSignal) => Promise<Workspace> },
+    events: AlbumPhotoEvents,
+  ) {
+    return createResourceWorkspace(id, { ...client, ...resourceFixture(client) }, events);
+  }
   const inventory: PhotoInventory = {
     photos: [],
     placedPhotoIds: [],
@@ -31,6 +39,84 @@ describe("live workspace application coordination", () => {
     photoInventories: { a: inventory, b: inventory },
   };
   const album = { id: "album", year: 2026, title: "Album", synopsis: "", createdAt: "2026-01-01T00:00:00Z" };
+
+  it.each([false, true])("should compose independently timed resources and honor acquisition disposal: %s", async (closed) => {
+    const metadata = pendingRead<typeof album>();
+    const chapterMetadata = pendingRead<Workspace["chapters"]>();
+    const membership = pendingRead<readonly { id: string; chapter: string | null }[]>();
+    const geometry = pendingRead<Spread>();
+    const photos = pendingRead<PhotoInventory>();
+    const opening: Spread = { id: "opening", chapter: null, kind: "album_start", templateId: "layout", slots: [] };
+    let receive: (event: PhotoEvent) => void = () => {
+      throw new Error("Not subscribed");
+    };
+    const close = vi.fn();
+    const events: AlbumPhotoEvents = {
+      subscribe: (_id, listener) => {
+        receive = listener;
+        return close;
+      },
+    };
+    const client = {
+      open: vi.fn().mockReturnValue(metadata.promise),
+      chapters: vi.fn().mockReturnValue(chapterMetadata.promise),
+      composition: vi.fn().mockReturnValue(membership.promise),
+      spread: vi.fn().mockReturnValue(geometry.promise),
+      countries: vi.fn().mockResolvedValue(workspace.countries),
+      photoSource: vi.fn().mockResolvedValue("/photos"),
+      chapterPhotos: vi.fn().mockReturnValueOnce(photos.promise).mockResolvedValue(inventory),
+      refreshPhotos: vi.fn(),
+    };
+    const { live, dispose } = createRoot((release) => ({ live: createResourceWorkspace(() => "album", client, events), dispose: release }));
+    receive({ kind: "subscribed" });
+    expect(client.chapters).toHaveBeenCalledOnce();
+    expect(client.chapterPhotos).not.toHaveBeenCalled();
+    metadata.resolve(album);
+    chapterMetadata.resolve([...workspace.chapters].reverse());
+    membership.resolve([{ id: opening.id, chapter: null }]);
+    await waitFor(() => {
+      expect(client.spread).toHaveBeenCalledWith(album.id, opening.id, null, expect.any(AbortSignal));
+      expect(client.chapterPhotos).toHaveBeenCalledTimes(2);
+    });
+    receive({ kind: "inventory-changed", chapterId: "b" });
+    expect(live.workspace()).toBeUndefined();
+    if (closed) dispose();
+    geometry.resolve(opening);
+    photos.resolve(inventory);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (closed) {
+      expect(live.workspace()).toBeUndefined();
+      expect(close).toHaveBeenCalledOnce();
+    } else {
+      expect(live.workspace()?.chapters.map((chapter) => chapter.id)).toEqual(["b", "a"]);
+      expect(live.workspace()?.spreads).toEqual([opening]);
+      expect(live.liveStatus()).toBe("live");
+      expect(client.chapterPhotos).toHaveBeenCalledTimes(3);
+      dispose();
+    }
+  });
+
+  it("should expose duplicated chapter identities as an acquisition failure instead of silently replacing an inventory", async () => {
+    const duplicated = { ...workspace, chapters: [...workspace.chapters, ...workspace.chapters] };
+    const client = {
+      open: vi.fn().mockResolvedValue(album),
+      workspace: vi.fn().mockResolvedValue(duplicated),
+      chapterPhotos: vi.fn().mockResolvedValue(inventory),
+      refreshPhotos: vi.fn(),
+    };
+    const events: AlbumPhotoEvents = {
+      subscribe: (_id, receive) => {
+        receive({ kind: "subscribed" });
+        return vi.fn();
+      },
+    };
+    const { live, dispose } = createRoot((release) => ({ live: createLiveWorkspace(() => "album", client, events), dispose: release }));
+    await waitFor(() => {
+      expect(live.error()).toEqual(new Error("Duplicate chapter identities"));
+    });
+    expect(live.workspace()).toBeUndefined();
+    dispose();
+  });
 
   it("should wait for subscribed, buffer changes during catch-up and serialize trailing reads for unselected chapters", async () => {
     const snapshot = pendingRead<Workspace>();
@@ -148,9 +234,9 @@ describe("live workspace application coordination", () => {
       open: vi
         .fn()
         .mockReturnValueOnce(firstAlbum.promise)
-        .mockResolvedValue({ ...album, id: "other" }),
+        .mockResolvedValue({ ...album, id: "other", year: 2027 }),
       workspace: vi
-        .fn<AlbumClient["workspace"]>()
+        .fn<SnapshotClient["workspace"]>()
         .mockReturnValueOnce(firstWorkspace.promise)
         .mockResolvedValue({ ...workspace, year: 2027 }),
       chapterPhotos: vi.fn(),

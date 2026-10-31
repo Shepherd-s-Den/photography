@@ -29,9 +29,9 @@ object SqliteAlbumRepository:
       composition: AlbumCompositionRepository[ConnectionIO],
       chapters: ChapterRepository[ConnectionIO]
   ): AlbumRepository[F] =
-    new LiveAlbumRepository(transactor, composition, chapters)
+    new LiveSqliteAlbumRepository(transactor, composition, chapters)
 
-  final private class LiveAlbumRepository[F[_]: Async: Logger](
+  final private class LiveSqliteAlbumRepository[F[_]: Async: Logger](
       transactor: Transactor[F],
       composition: AlbumCompositionRepository[ConnectionIO],
       chapters: ChapterRepository[ConnectionIO]

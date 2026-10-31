@@ -88,8 +88,8 @@ describe("placement representation", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: "spread", placements: [] })));
     const client = makeHttpAlbumClient(fetcher);
     const expectedRequests = [
-      ["/api/albums/album/cover/placements", "GET", undefined],
-      ["/api/albums/album/spreads/spread/placements", "POST", '{"operation":"remove","placementId":"p"}'],
+      ["/api/albums/album/cover", "GET", undefined],
+      ["/api/albums/album/spreads/spread/placements/p", "DELETE", undefined],
     ];
 
     const savedCover = await client.readPlacements("album", { kind: "cover" });

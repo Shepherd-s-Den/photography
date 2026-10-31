@@ -113,7 +113,7 @@ sequenceDiagram
 
 Complete photos become visible progressively. Existing usable data remains available during replacement or recoverable processing failure. Durable write intents bridge database and filesystem updates so restart recovery can finish interrupted publication and cleanup.
 
-The browser treats live events as invalidations, not a second database. Initial loads and reconnects catch up from authoritative reads; ordinary composition changes become visible to other workspaces on reload.
+The browser treats live events as invalidations, not a second database. Initial loads and reconnects assemble album metadata, ordered chapter metadata, composition membership, individual spreads, Cover and chapter photo inventories from authoritative resource reads. Country and template catalogs are independent resources. Ordinary composition changes become visible to other workspaces on reload.
 
 ## Architectural decisions
 
@@ -121,4 +121,4 @@ Domain and application policy stay independent of HTTP, SQLite and image/filesys
 
 The supported topology is one backend instance. Shared mutation coordination protects read/decision/write decisions; database transactions make supplied changes atomic. Slow source and image work runs outside that critical section.
 
-Browser photo editing reaches the existing composition services through HTTP. Placement, structural editing and photo reconciliation share mutation coordination, preserving collection ownership and exclusive photo use across interior and Cover. [Contracts](contracts.md) identify authoritative representations; [operations](operational.md) owns deployment and recovery.
+Browser photo editing mutates placement resources; chapter composition replacement compares the observed order and preserves the opening and membership atomically. Placement, structural editing and photo reconciliation share mutation coordination, preserving collection ownership and exclusive photo use across interior and Cover. The runtime owns resource acquisition and release, with recovery completed before serving. [Contracts](contracts.md) identify authoritative representations; [operations](operational.md) owns deployment and recovery.
