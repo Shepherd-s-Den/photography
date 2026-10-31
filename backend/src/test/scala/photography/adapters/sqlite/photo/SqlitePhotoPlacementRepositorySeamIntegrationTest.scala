@@ -43,7 +43,7 @@ final class SqlitePhotoPlacementRepositorySeamIntegrationTest extends CatsEffect
       SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 1, maxSessions = 1)).buildTransactor.use: xa =>
         val repository = SqlitePhotoPlacementRepository.make
         val seed       =
-          sql"INSERT INTO album VALUES (${album.value}, 2026, 'Album', '', 0)".update.run >>
+          sql"INSERT INTO album (id, year, title, synopsis, created_at_ms) VALUES (${album.value}, 2026, 'Album', '', 0)".update.run >>
             sql"INSERT INTO destination VALUES ('d', 'Trip')".update.run >>
             sql"INSERT INTO chapter VALUES (${chapter.value}, ${album.value}, 'd', '', 0, 1, 0, '/photos')".update.run >>
             sql"INSERT INTO chapter VALUES (${other.value}, ${album.value}, 'd', '', 0, 1, 1, '/other')".update.run >>

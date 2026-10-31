@@ -27,7 +27,7 @@ import photography.domain.layout.*
 import photography.ports.album.AlbumRepository
 import photography.ports.chapter.ChapterRepository
 import photography.ports.spread.SpreadTemplateRepository
-import photography.usecases.chapter.{ChapterManager, ChapterPlanning}
+import photography.usecases.chapter.{ChapterMetadataManager, ChapterPlanning}
 import photography.usecases.photo.{ChapterPhotoImport, PhotoInventory}
 import photography.usecases.spread.{SpreadManager, SpreadTemplateManager}
 import photography.usecases.spread.SpreadManager.*
@@ -285,8 +285,8 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
       Mutex[IO].flatMap: mutex =>
         given coordination: Mutex[IO] = mutex
         val manager                   = buildManager(xa)
-        val chapters                  = buildChapterManager(xa)
-        val period                    = ChapterManager.Period.Dates(VisitPeriod(LocalDate.of(2026, 8, 1), days = 2L))
+        val chapters                  = buildChapterMetadataManager(xa)
+        val period                    = ChapterMetadataManager.Period.Dates(VisitPeriod(LocalDate.of(2026, 8, 1), days = 2L))
         val createChapter             =
           chapters.create(albumId, name = "Later trip", countries = NonEmptyList.one(country.id), period, sourceFolder = "/photos/later")
 
@@ -303,9 +303,9 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
             case AddResult.Rejected(Conflict.AtCapacity) => false
             case other                                   => fail(s"Unexpected spread result: $other")
           val chapterWon = chapter match
-            case _: ChapterManager.CreateResult.Created                           => true
-            case ChapterManager.CreateResult.Rejected(ChapterConflict.AtCapacity) => false
-            case other                                                            => fail(s"Unexpected chapter result: $other")
+            case _: ChapterMetadataManager.CreateResult.Created                           => true
+            case ChapterMetadataManager.CreateResult.Rejected(ChapterConflict.AtCapacity) => false
+            case other                                                                    => fail(s"Unexpected chapter result: $other")
           assertEquals(spreadWon, !chapterWon)
           assertEquals(count, InteriorSpreadCapacity.maximum)
 
@@ -360,7 +360,7 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
       textSlot = SpreadSlot.Text(TextSpreadSlotId(new UUID(1L, 11L)), template.textSlot),
       placements = Vector.empty[SpreadPlacement]
     )
-    Album(albumId, year = 2026, title = "Album", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    Album(albumId, year = 2026, title = "Album", synopsis = "", authors = Author.all, Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
 
   private def buildOpening(template: SpreadTemplate.ChapterStart) =
     val photos = template.photoSlots.zipWithIndex.map { case (box, index) =>
@@ -444,7 +444,7 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
       override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
     PhotoInventory.make[IO, ConnectionIO](SqlitePhotoRepository.make, SqlitePhotoPlacementRepository.make, SqliteChapterRepository.make)
 
-  private def buildChapterManager(xa: Transactor[IO])(using Mutex[IO]) =
+  private def buildChapterMetadataManager(xa: Transactor[IO])(using Mutex[IO]) =
     given ids: IdGenerator[IO] = IdGenerator.make[IO]
     given transaction: Transaction[ConnectionIO, IO] with
       override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
@@ -459,7 +459,7 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
       override def suspend(chapter: ChapterId): IO[Unit]                                              = IO.unit
       override def status(chapter: ChapterId): IO[ChapterPhotoImport.ExecutionOutcome]                =
         IO.raiseError[ChapterPhotoImport.ExecutionOutcome](new AssertionError("Unexpected import status"))
-    ChapterManager.make(albums, SqliteChapterRepository.make, ChapterPlanning.make(templates), imports, SqlitePhotoRepository.make)
+    ChapterMetadataManager.make(albums, SqliteChapterRepository.make, ChapterPlanning.make(templates), imports, SqlitePhotoRepository.make)
 
   private def buildTransactor =
     val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "spread-", ".sqlite"))

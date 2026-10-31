@@ -19,7 +19,7 @@ import photography.domain.layout.SpreadTemplateId
 import java.util.UUID
 import photography.ports.photo.{PhotoRepository, ThumbnailStorage}
 import photography.usecases.album.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager}
-import photography.usecases.chapter.ChapterManager
+import photography.usecases.chapter.ChapterMetadataManager
 import photography.usecases.photo.ChapterPhotoImport
 import photography.usecases.photo.{AlbumPhotoEvents, PhotoInventory}
 import photography.usecases.chapter.ChapterPlanning
@@ -30,7 +30,7 @@ import photography.adapters.imageio.ImageIoPhotoThumbnailGenerator
 
 final case class AppManagers[F[_]](
     albums: AlbumManager[F],
-    chapters: ChapterManager[F],
+    chapters: ChapterMetadataManager[F],
     templates: SpreadTemplateManager[F],
     workspaces: AlbumWorkspaceManager[F],
     photoEvents: AlbumPhotoEvents[F],
@@ -67,7 +67,7 @@ object AppManagers:
       val planning = ChapterPlanning.make(templates)
       Resource.eval(AlbumPhotoEvents.make(albums)).flatMap: events =>
         ChapterPhotoImport.make(storage, photoRepository, generator, events).map: imports =>
-          val chapters         = ChapterManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
+          val chapters         = ChapterMetadataManager.make(albumRepository, chapterRepository, planning, imports, photoRepository)
           val workspaces       = AlbumWorkspaceManager.make(albums, countries, inventory, imports, photoRoot)
           val composition      = SqliteAlbumCompositionRepository.make
           val spreadRepository = SqliteSpreadRepository.make

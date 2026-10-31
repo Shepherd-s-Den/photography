@@ -31,7 +31,7 @@ import scala.jdk.CollectionConverters.*
 final class ImageIoPhotoThumbnailGeneratorSeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO] = Slf4jLogger.getLogger[IO]
   private val colors       = Vector(Color.RED, Color.GREEN, Color.BLUE, Color.YELLOW)
-  private val imageIO      = ResourceSuiteLocalFixture("image-io", ImageIOTestResources.acquire)
+  private val imageIO      = ResourceTestLocalFixture("image-io", ImageIOTestResources.acquire)
 
   override def munitFixtures = List(imageIO)
 

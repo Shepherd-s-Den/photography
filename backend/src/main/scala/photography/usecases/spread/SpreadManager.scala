@@ -160,6 +160,12 @@ object SpreadManager:
         val change: PlacementChange = spread =>
           adjustPlacement(values = spread.placements, id, transform).map(values => replacePlacements(spread, values = values))
         change.pure[F]
+      case Edit.SetCaptionCorner(id, corner) =>
+        val change: PlacementChange = spread =>
+          findPlacement(values = spread.placements, id).map: _ =>
+            val values = spread.placements.map(value => if value.id.value === id.value then value.copy(captionCorner = corner) else value)
+            replacePlacements(spread, values = values)
+        change.pure[F]
       case Edit.Move(source, destination) =>
         val change: PlacementChange = spread =>
           movePlacement(slots = collectPlacementSlots(spread), values = spread.placements, source, destination)
@@ -304,6 +310,7 @@ object SpreadManager:
     case Place(slot: PhotoSpreadSlotId, photo: PhotoId)
     case Remove(id: SpreadPlacementId)
     case Adjust(id: SpreadPlacementId, transform: PhotoTransform)
+    case SetCaptionCorner(id: SpreadPlacementId, corner: CaptionCorner)
     case Move(source: SpreadPlacementId, destination: PhotoSpreadSlotId)
 
   enum PlacementReadResult:

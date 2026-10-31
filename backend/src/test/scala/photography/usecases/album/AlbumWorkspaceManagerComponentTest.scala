@@ -1,4 +1,5 @@
 package photography.usecases.album
+import photography.domain.gear.CameraSelection
 
 import photography.usecases.photo.ChapterPhotoImport
 import photography.usecases.photo.PhotoInventory
@@ -33,7 +34,16 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       text,
       placements = Vector.empty[SpreadPlacement]
     )
-    Album(AlbumId(new UUID(0L, 1L)), year = 2026, title = "Our year", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    Album(
+      AlbumId(new UUID(0L, 1L)),
+      year = 2026,
+      title = "Our year",
+      synopsis = "",
+      authors = Author.all,
+      Instant.EPOCH,
+      opening,
+      chapters = Vector.empty[Chapter]
+    )
   private val countries = NonEmptyList.one(
     Country(CountryId(new UUID(0L, 5L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
   )
@@ -48,7 +58,16 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     val opening         = Spread.ChapterStart(openingId, template, photoSlots = emptyPhotos, textSlot, placements = emptyPlacements)
     val destination     = Destination(DestinationId(new UUID(0L, 8L)), name = "Coast", countries)
     val period          = VisitPeriod(LocalDate.of(2026, 1, 1), days = 1)
-    Chapter(id, destination, period, description = "", sourceFolder = "/photos/coast", opening, spreads = emptySpreads)
+    Chapter(
+      id,
+      destination,
+      period,
+      description = "",
+      gear = Vector.empty[CameraSelection],
+      sourceFolder = "/photos/coast",
+      opening,
+      spreads = emptySpreads
+    )
   private val emptyInventory = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty)
   private val idle           = ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
 
@@ -128,6 +147,10 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       execution: ChapterId => IO[ExecutionOutcome] = _ => idle.pure[IO]
   ) =
     val albums = new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
       override def get(id: AlbumId): IO[GetAlbumResult]                              = albumResult.pure[IO]
       override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
       override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] = CreateAlbumResult.Failed.pure[IO]

@@ -7,7 +7,8 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import photography.capabilities.{Clock, IdGenerator}
-import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, Chapter}
+import photography.domain.album.{Album, AlbumAuthors, AlbumId, AlbumTitle, AlbumYear, Author, Chapter}
+import org.typelevel.log4cats.Logger
 import photography.domain.layout.*
 import photography.ports.album.AlbumRepository
 import photography.usecases.album.AlbumManager.*
@@ -20,19 +21,21 @@ trait AlbumManager[F[_]]:
   def create(year: AlbumYear, title: AlbumTitle): F[CreateAlbumResult]
   def get(id: AlbumId): F[GetAlbumResult]
   def rename(id: AlbumId, title: AlbumTitle): F[RenameResult]
+  def saveSynopsis(album: AlbumId, text: String): F[SaveSynopsisResult]
+  def saveAuthors(album: AlbumId, authors: AlbumAuthors): F[SaveAuthorsResult]
   def delete(id: AlbumId): F[DeleteAlbumResult]
 
 type AlbumPageSize = Int :| Positive
 
 object AlbumManager:
-  def make[F[_]: Monad: IdGenerator: Clock](
+  def make[F[_]: Monad: IdGenerator: Clock: Logger](
       repository: AlbumRepository[F],
       spreads: SpreadTemplateManager[F],
       pageSize: AlbumPageSize
   ): AlbumManager[F] =
     new LiveAlbumManager(repository, spreads, pageSize)
 
-  final private class LiveAlbumManager[F[_]: Monad: IdGenerator: Clock](
+  final private class LiveAlbumManager[F[_]: Monad: IdGenerator: Clock: Logger](
       repository: AlbumRepository[F],
       spreads: SpreadTemplateManager[F],
       pageSize: AlbumPageSize
@@ -85,6 +88,24 @@ object AlbumManager:
         case AlbumRepository.DeleteResult.NotFound  => DeleteAlbumResult.NotFound
         case AlbumRepository.DeleteResult.Failed(_) => DeleteAlbumResult.Failed
 
+    override def saveSynopsis(album: AlbumId, text: String): F[SaveSynopsisResult] =
+      repository.saveSynopsis(album, text = text).flatMap:
+        case AlbumRepository.SaveSynopsisResult.Saved(updated) => SaveSynopsisResult.Saved(updated).pure[F]
+        case AlbumRepository.SaveSynopsisResult.NotFound       => SaveSynopsisResult.NotFound.pure[F]
+        case AlbumRepository.SaveSynopsisResult.Failed(reason) =>
+          Logger[F].error(s"Album synopsis save failed for ${album.value}: $reason").as(SaveSynopsisResult.Failed)
+        case AlbumRepository.SaveSynopsisResult.Uncertain =>
+          Logger[F].error(s"Album synopsis save acknowledgement uncertain for ${album.value}").as(SaveSynopsisResult.Uncertain)
+
+    override def saveAuthors(album: AlbumId, authors: AlbumAuthors): F[SaveAuthorsResult] =
+      repository.saveAuthors(album, authors).flatMap:
+        case AlbumRepository.SaveAuthorsResult.Saved(updated) => SaveAuthorsResult.Saved(updated).pure[F]
+        case AlbumRepository.SaveAuthorsResult.NotFound       => SaveAuthorsResult.NotFound.pure[F]
+        case AlbumRepository.SaveAuthorsResult.Failed(reason) =>
+          Logger[F].error(s"Album authors save failed for ${album.value}: $reason").as(SaveAuthorsResult.Failed)
+        case AlbumRepository.SaveAuthorsResult.Uncertain =>
+          Logger[F].error(s"Album authors save acknowledgement uncertain for ${album.value}").as(SaveAuthorsResult.Uncertain)
+
     private def buildInitialComposition(
         year: AlbumYear,
         title: AlbumTitle,
@@ -103,7 +124,8 @@ object AlbumManager:
         createdAt <- Clock[F].readInstant.map(_.truncatedTo(ChronoUnit.MILLIS))
       yield
         val start = Spread.AlbumStart(spreadId, template, photoSlots = photos, textSlot = text, placements = Vector.empty[SpreadPlacement])
-        val album = Album(albumId, year = year, title = title, synopsis = "", createdAt = createdAt, start, chapters = Vector.empty[Chapter])
+        val album =
+          Album(albumId, year = year, title = title, synopsis = "", Author.all, createdAt = createdAt, start, chapters = Vector.empty[Chapter])
         val cover = Cover(albumId, SpineOwner.Front, front = CoverSlot(frontId), back = CoverSlot(backId))
         (album, cover)
 
@@ -130,3 +152,11 @@ object AlbumManager:
     case Deleted
     case NotFound
     case Failed
+
+  enum SaveSynopsisResult derives CanEqual:
+    case Saved(album: Album)
+    case NotFound, Failed, Uncertain
+
+  enum SaveAuthorsResult derives CanEqual:
+    case Saved(album: Album)
+    case NotFound, Failed, Uncertain

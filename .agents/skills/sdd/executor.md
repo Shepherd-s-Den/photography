@@ -37,21 +37,19 @@ Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), t
 
 ## Tests
 
-Before writing tests or production code for each slice, build a short design map in `.agent-work/<slug>/`: module responsibility, consuming boundary and proposed call/signature/result; invariants and enforcing boundary; effects and dependency owners/lifetimes; policy authority; owning suite; exact source/test precedents inspected. Use the blocking questions in [`checklists/code-quality.md`](checklists/code-quality.md), not a proposed file list.
+Before tests or production code, complete [`checklists/code-quality.md`](checklists/code-quality.md#architecture-gate)'s ordered architecture decision gate in `.agent-work/<slug>/design-map.md`. The gate owns the required flow reconstruction, reuse/evolution/separation evidence and whole-architecture assessment. Resolve every blocking condition before recording signatures or projecting tests; apply `SKILL.md`'s adjudication rule for departures.
 
-Derive caller-first APIs from a concrete trigger-to-UI sequence and real callers' available inputs and consumed results; distinguish application operations from driven ports. Before adding a method, try an existing boundary or local derivation. Walk scenarios through every signature and parameter using `reviewer.md`'s seam-definition evidence; prove necessity, not just a possible caller. Source-verify dependency effects, resource lifetimes and transaction guarantees, and apply the stack's API/type conventions.
-
-Check each row against the consuming boundary and applicable stack leaf. Stop on an unanswered question or failed condition; resolve the API or ownership before implementation. Apply `SKILL.md`'s adjudication rule for departures. Update the map when a new module or changed boundary emerges.
+Use the accepted decisions to derive operations, inputs/results, enforcing owners and owning test seams under the applicable stack conventions. Reopen the gate when new evidence changes an owner, acquisition path, retained result or dependency; a proposed caller/signature is not an accepted decision.
 
 Project acceptance scenarios from the merged spec's criteria and enumerated edge cases before implementation. Tests of architectural/type guarantees trace to their governing rule at the owning module or seam; product specs need not restate implementation constraints. Follow `CONTRIBUTING.md`'s testing conventions rather than reverse-engineering tests from the code written.
 
 ## Implementation PR(s)
 
-Implement the approved behavior within the checked design map. Split into multiple PRs on separable seams, or when one PR would exceed a focused review session — never to dodge a gate. Each PR links the merged spec.
+Implement the approved behavior within the checked design map and [`SKILL.md`](SKILL.md#setup)'s implementation sequence. Split further within those stages when needed for a focused review; each PR links the merged spec.
 
 Make the tests pass, then run the gates `AGENTS.md` defines; never weaken a gate to pass one. Self-check the shared quality checklist, stack leaves selected under `SKILL.md` and [`implementation-completeness.md`](checklists/implementation-completeness.md) against this slice. Replace proposed design-map calls with actual symbols and consumption. Run a second whole-diff pass for callable surfaces, declarations, syntax, capabilities and test structure before the review protocol.
 
-Run the slice locally against its real boundaries and obtain the maintainer's behavior confirmation before opening its PR, as required by `SKILL.md`. Keep local runs isolated from production state unless the maintainer explicitly authorizes that access.
+Apply [`SKILL.md`](SKILL.md#setup)'s slice-evidence gate before opening the PR. Keep local runs isolated from production state unless the maintainer explicitly authorizes that access.
 
 The handoff identifies the exact baseline and candidate revision or content manifest, every changed/untracked file, design-map answers, checklist evidence, local confirmation and command results. Missing evidence is an open gate. Follow [`reviewer.md`](reviewer.md) for the independent review, repair verification and missed-rule recovery.
 

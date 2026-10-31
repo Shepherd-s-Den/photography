@@ -15,6 +15,7 @@ import photography.ports.photo.{PhotoRepository, PhotoStorage, ThumbnailStorage}
 import photography.usecases.photo.PhotoManager.*
 
 trait PhotoManager[F[_]]:
+  def saveCaption(photo: PhotoId, text: String): F[SaveCaptionResult]
   def refresh(chapter: ChapterId, source: PhotoSource): F[RefreshResult]
 
 object PhotoManager:
@@ -29,6 +30,15 @@ object PhotoManager:
       photos: PhotoRepository[Db],
       thumbnails: PhotoThumbnailGenerator[F]
   )(using Transaction[Db, F]) extends PhotoManager[F]:
+    override def saveCaption(photo: PhotoId, text: String): F[SaveCaptionResult] =
+      Async[F].uncancelable: _ =>
+        Transaction[Db, F].run(photos.saveCaption(photo, text = text)).flatMap:
+          case PhotoRepository.SaveCaptionResult.Saved         => SaveCaptionResult.Saved.pure[F]
+          case PhotoRepository.SaveCaptionResult.PhotoNotFound => SaveCaptionResult.PhotoNotFound.pure[F]
+          case PhotoRepository.SaveCaptionResult.Failed(cause) => Logger[F].error(cause)("Photo caption write failed").as(SaveCaptionResult.Failed)
+          case PhotoRepository.SaveCaptionResult.Uncertain     => SaveCaptionResult.Uncertain.pure[F]
+        .handleErrorWith(error => Logger[F].error(error)("Photo caption commit acknowledgement failed").as(SaveCaptionResult.Uncertain))
+
     override def refresh(chapter: ChapterId, source: PhotoSource): F[RefreshResult] =
       photoStorage.discoverOriginals(source).flatMap:
         case PhotoStorage.DiscoveryResult.Failed => RefreshResult(unsupportedCount = 0, issues = Vector(Issue.Discovery)).pure[F]
@@ -136,6 +146,9 @@ object PhotoManager:
         case Right(ThumbnailStorage.RemoveResult.Removed) => Vector.empty[Issue].pure[F]
         case Right(ThumbnailStorage.RemoveResult.Failed)  => Vector(Issue.Cleanup(location)).pure[F]
         case Left(error) => Logger[F].error(error)("Photo thumbnail cleanup failed").as(Vector(Issue.Cleanup(location)))
+
+  enum SaveCaptionResult:
+    case Saved, PhotoNotFound, Failed, Uncertain
 
   final case class RefreshResult(unsupportedCount: Int :| GreaterEqual[0], issues: Vector[Issue])
 

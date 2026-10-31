@@ -4,6 +4,7 @@ import cats.data.NonEmptyList
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import org.typelevel.doobie.ConnectionIO
+import org.typelevel.doobie.free.connection
 import org.typelevel.doobie.implicits.*
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.domain.album.*
@@ -15,9 +16,19 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 object SqliteChapterRepository:
-  def make: ChapterRepository[ConnectionIO] = new LiveChapterRepository
+  def make: ChapterRepository.Metadata[ConnectionIO] = new LiveChapterRepository
 
-  final private class LiveChapterRepository extends ChapterRepository[ConnectionIO]:
+  final private class LiveChapterRepository extends ChapterRepository.Metadata[ConnectionIO]:
+    override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): ConnectionIO[SaveDescriptionResult] =
+      albumExists(album).attempt.flatMap:
+        case Right(false) => SaveDescriptionResult.AlbumNotFound.pure[ConnectionIO]
+        case Right(true)  =>
+          writeDescription(album, chapter, text = text).map:
+            case Right(1)    => SaveDescriptionResult.Saved
+            case Right(_)    => SaveDescriptionResult.ChapterNotFound
+            case Left(cause) => SaveDescriptionResult.Failed(cause)
+        case Left(cause) => SaveDescriptionResult.Failed(cause).pure[ConnectionIO]
+
     override def findSource(chapter: ChapterId): ConnectionIO[SourceResult] =
       sql"SELECT album_id, source_folder FROM chapter WHERE id = ${chapter.value}".query[(UUID, String)].option.flatMap:
         case Some((album, source)) =>
@@ -60,6 +71,21 @@ object SqliteChapterRepository:
                     _ <- persistOrder(album, order = order)
                   yield UpdateResult.Saved: UpdateResult
                 countryReferencesExist(countries = countries).ifM(ifTrue = write, ifFalse = UpdateResult.UnknownCountries.pure[ConnectionIO])
+
+    private def writeDescription(album: AlbumId, chapter: ChapterId, text: String) =
+      val update = sql"UPDATE chapter SET description = $text WHERE id = ${chapter.value} AND album_id = ${album.value}".update.run
+        .flatMap(rows => checkDescriptionWrite(album, chapter, rows = rows))
+      sql"SAVEPOINT chapter_description".update.run >> update.attempt.flatTap:
+        case Left(cause) =>
+          val rollback = sql"ROLLBACK TO chapter_description".update.run >> sql"RELEASE chapter_description".update.run.void
+          rollback.handleErrorWith(error => connection.delay(cause.addSuppressed(error)) >> cause.raiseError[ConnectionIO, Unit])
+        case Right(_) => sql"RELEASE chapter_description".update.run.void
+
+    private def checkDescriptionWrite(album: AlbumId, chapter: ChapterId, rows: Int) =
+      if rows === 1 then rows.pure[ConnectionIO]
+      else
+        sql"SELECT EXISTS(SELECT 1 FROM chapter WHERE id = ${chapter.value} AND album_id = ${album.value})".query[Boolean].unique
+          .ensure(new IllegalStateException("Description update did not change the existing chapter"))(!_).as(0)
 
     private def albumExists(album: AlbumId) =
       sql"SELECT EXISTS(SELECT 1 FROM album WHERE id = ${album.value})".query[Boolean].unique

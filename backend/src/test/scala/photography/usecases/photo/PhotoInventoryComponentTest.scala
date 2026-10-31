@@ -89,6 +89,8 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
         )(IO.raiseError[A])
       override def resolve[A](program: Db[A]): IO[A] = program.runA(0)
     val photos = new PhotoRepository[Db]:
+      override def saveCaption(id: PhotoId, text: String): Db[PhotoRepository.SaveCaptionResult] =
+        StateT.liftF(IO.raiseError[PhotoRepository.SaveCaptionResult](new AssertionError("Unexpected caption mutation")))
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
         StateT.modify[IO, Int](_ + 1).as(listed)
       override def save(value: Photo): Db[PhotoRepository.WriteResult] =
@@ -106,7 +108,9 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
         StateT.modify[IO, Int](_ + 1).as(placed)
       override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): Db[PhotoPlacementRepository.InspectResult] =
         StateT.liftF(IO.raiseError[PhotoPlacementRepository.InspectResult](new AssertionError("Unexpected photo inspection")))
-    val chapters = new ChapterRepository[Db]:
+    val chapters = new ChapterRepository.Metadata[Db]:
+      override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): Db[ChapterRepository.SaveDescriptionResult] =
+        StateT.liftF(IO.raiseError[ChapterRepository.SaveDescriptionResult](new AssertionError("Unexpected description mutation")))
       override def findSource(id: ChapterId): Db[ChapterRepository.SourceResult] = StateT.modify[IO, Int](_ + 1).as(source)
       override def create(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId]) =
         StateT.liftF(IO.raiseError[ChapterRepository.CreateResult](new AssertionError("Unexpected chapter creation")))

@@ -1,4 +1,5 @@
 package photography.usecases.chapter
+import photography.domain.gear.CameraSelection
 
 import photography.usecases.spread.SpreadTemplateManager
 
@@ -10,7 +11,7 @@ import munit.FunSuite
 import photography.capabilities.IdGenerator
 import photography.domain.album.*
 import photography.domain.layout.*
-import photography.usecases.chapter.ChapterManager.Period
+import photography.usecases.chapter.ChapterMetadataManager.Period
 import photography.usecases.chapter.ChapterPlanning.{CreationResult, UpdateResult}
 import photography.usecases.spread.SpreadTemplateManager.{ListAlbumStartTemplatesResult, ListChapterStartTemplatesResult}
 import java.nio.file.Path
@@ -39,6 +40,7 @@ final class ChapterPlanningComponentTest extends FunSuite:
       destination,
       period,
       description = "",
+      gear = Vector.empty[CameraSelection],
       sourceFolder = "/photos/kyoto",
       opening,
       spreads = Vector.empty[Spread.PhotosOnly]
