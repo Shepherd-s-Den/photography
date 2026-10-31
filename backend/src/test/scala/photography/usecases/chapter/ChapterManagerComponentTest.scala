@@ -7,6 +7,9 @@ import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import munit.CatsEffectSuite
 import photography.domain.album.*
+import photography.capabilities.Transaction
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.domain.gear.*
 import photography.ports.chapter.ChapterRepository
 import photography.usecases.gear.GearManager
@@ -15,10 +18,11 @@ import java.util.UUID
 import scala.concurrent.duration.*
 
 final class ChapterManagerComponentTest extends CatsEffectSuite:
-  private val album     = AlbumId(new UUID(0L, 1L))
-  private val chapter   = ChapterId(new UUID(0L, 2L))
-  private val selection = Vector(CameraSelection(CameraId(new UUID(0L, 3L)), CameraUse.FixedLens))
-  private val catalog   = GearCatalog(cameras = Vector.empty[Camera], lenses = Vector.empty[Lens])
+  private given Logger[IO] = Slf4jLogger.getLogger[IO]
+  private val album        = AlbumId(new UUID(0L, 1L))
+  private val chapter      = ChapterId(new UUID(0L, 2L))
+  private val selection    = Vector(CameraSelection(CameraId(new UUID(0L, 3L)), CameraUse.FixedLens))
+  private val catalog      = GearCatalog(cameras = Vector.empty[Camera], lenses = Vector.empty[Lens])
 
   test("should read saved chapter gear without disguising missing or failed reads as empty selections"):
     val cases = Vector(
@@ -102,6 +106,17 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         assertEquals(result, GearReplaceResult.Saved)
         assertEquals(after, Vector("catalog", "replace", "catalog", "replace"))
 
+  test("should report failed transaction reads and uncertain write acknowledgements without replay"):
+    val failure = new IllegalStateException("Transaction failed").raiseError[IO, Unit]
+
+    for
+      manager <- buildManager(Refs(), beforeTransaction = failure)
+      read    <- manager.readGear(album, chapter)
+      write   <- manager.replaceGear(album, chapter, selection = selection)
+    yield
+      assertEquals(read, GearReadResult.Failed)
+      assertEquals(write, GearReplaceResult.Uncertain)
+
   final private case class Refs():
     val events: Ref[IO, Vector[String]] = Ref.unsafe(Vector.empty)
 
@@ -113,8 +128,12 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       current: GearManager.CatalogResult = GearManager.CatalogResult.Found(catalog),
       validation: GearManager.ValidationResult = GearManager.ValidationResult.Valid,
       maybeMutex: Option[Mutex[IO]] = None,
-      beforeCatalog: IO[Unit] = IO.unit
+      beforeCatalog: IO[Unit] = IO.unit,
+      beforeTransaction: IO[Unit] = IO.unit
   ) =
+    given Transaction[IO, IO] with
+      override def run[A](program: IO[A]): IO[A]     = beforeTransaction >> program
+      override def resolve[A](program: IO[A]): IO[A] = unexpected
     val chapters = new ChapterRepository[IO]:
       override def readGear(owner: AlbumId, id: ChapterId): IO[ChapterRepository.GearReadResult] =
         IO(assertEquals((owner, id), (album, chapter))).as(read)

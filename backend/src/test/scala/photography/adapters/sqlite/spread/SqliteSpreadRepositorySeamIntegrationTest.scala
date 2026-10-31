@@ -37,7 +37,8 @@ import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
-  private given logger: Logger[IO] = Slf4jLogger.getLogger[IO]
+  private given logger: Logger[IO]   = Slf4jLogger.getLogger[IO]
+  private given Logger[ConnectionIO] = Slf4jLogger.getLogger[ConnectionIO]
 
   private val albumId       = AlbumId(new UUID(1L, 1L))
   private val chapterId     = ChapterId(new UUID(1L, 2L))
@@ -310,14 +311,14 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(count, InteriorSpreadCapacity.maximum)
 
   private def readChapter(xa: Transactor[IO]) =
-    SqliteAlbumRepository.make[IO](xa, composition).get(albumId).map:
+    SqliteAlbumRepository.make[IO](xa, composition, SqliteChapterRepository.make).get(albumId).map:
       case AlbumRepository.GetResult.Found(album) =>
         album.chapters.find(_.id.value === chapterId.value).getOrElse(fail("Missing persisted chapter"))
       case other => fail(s"Expected persisted album, obtained $other")
 
   private def seedChapter(xa: Transactor[IO]) =
     val insertCountry = sql"INSERT INTO country VALUES (${country.id.value}, 'XX', 'Test country', '/flags/xx.svg')".update.run.transact(xa)
-    val repository    = SqliteAlbumRepository.make[IO](xa, composition)
+    val repository    = SqliteAlbumRepository.make[IO](xa, composition, SqliteChapterRepository.make)
     val cover         = Cover(albumId, SpineOwner.Front, CoverSlot(CoverSlotId(new UUID(1L, 12L))), CoverSlot(CoverSlotId(new UUID(1L, 13L))))
     for
       _            <- insertCountry
@@ -450,7 +451,7 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
       override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
       override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
     val templates = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
-    val albums    = SqliteAlbumRepository.make[IO](xa, composition)
+    val albums    = SqliteAlbumRepository.make[IO](xa, composition, SqliteChapterRepository.make)
     val imports   = new ChapterPhotoImport[IO]:
       override def prepare(album: AlbumId, chapter: ChapterId, source: PhotoSource): IO[ChapterPhotoImport.Request] =
         ChapterPhotoImport.Request(album, chapter, source, generation = BigInt(0)).pure[IO]

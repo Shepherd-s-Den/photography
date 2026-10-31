@@ -7,7 +7,9 @@ import cats.effect.testkit.TestControl
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import munit.CatsEffectSuite
-import photography.capabilities.IdGenerator
+import photography.capabilities.{IdGenerator, Transaction}
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.domain.album.*
 import photography.domain.gear.*
 import photography.ports.chapter.ChapterRepository
@@ -17,7 +19,8 @@ import java.util.UUID
 import scala.concurrent.duration.*
 
 final class GearManagerComponentTest extends CatsEffectSuite:
-  private val camera = Camera(
+  private given Logger[IO] = Slf4jLogger.getLogger[IO]
+  private val camera       = Camera(
     CameraId(new UUID(0L, 1L)),
     code = "camera",
     friendlyName = "Camera",
@@ -337,6 +340,22 @@ final class GearManagerComponentTest extends CatsEffectSuite:
           assertEquals(lensDeletes, Vector.empty[LensId])
     }
 
+  test("should fail protected catalog edits before writes when saved selection transaction acquisition fails"):
+    val refs    = Refs()
+    val failure = new IllegalStateException("Selection acquisition failed").raiseError[IO, Unit]
+
+    for
+      manager      <- buildManager(refs, beforeTransaction = failure)
+      cameraResult <- manager.updateCamera(camera)
+      lensResult   <- manager.updateLens(lens)
+      cameras      <- refs.cameras.get
+      lenses       <- refs.lenses.get
+    yield
+      assertEquals(cameraResult, CameraUpdateResult.Failed)
+      assertEquals(lensResult, LensUpdateResult.Failed)
+      assertEquals(cameras, Vector.empty[Camera])
+      assertEquals(lenses, Vector.empty[Lens])
+
   final private case class Refs():
     val cameras: Ref[IO, Vector[Camera]]          = Ref.unsafe(Vector.empty)
     val lenses: Ref[IO, Vector[Lens]]             = Ref.unsafe(Vector.empty)
@@ -356,8 +375,12 @@ final class GearManagerComponentTest extends CatsEffectSuite:
       lensUpdate: GearRepository.LensUpdateResult = GearRepository.LensUpdateResult.Updated,
       lensDelete: GearRepository.LensDeleteResult = GearRepository.LensDeleteResult.Deleted,
       maybeMutex: Option[Mutex[IO]] = None,
-      beforeCatalog: IO[Unit] = IO.unit
+      beforeCatalog: IO[Unit] = IO.unit,
+      beforeTransaction: IO[Unit] = IO.unit
   ) =
+    given Transaction[IO, IO] with
+      override def run[A](program: IO[A]): IO[A]     = beforeTransaction >> program
+      override def resolve[A](program: IO[A]): IO[A] = unexpected
     given IdGenerator[IO] with
       override def generateId: IO[UUID] = generatedId.pure[IO]
     val repository = new GearRepository[IO]:

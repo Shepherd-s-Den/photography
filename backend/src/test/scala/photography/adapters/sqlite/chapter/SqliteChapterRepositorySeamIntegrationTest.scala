@@ -1,5 +1,6 @@
 package photography.adapters.sqlite.chapter
-import photography.domain.gear.{CameraId, CameraSelection, CameraUse}
+import photography.domain.gear.*
+import photography.adapters.sqlite.gear.SqliteGearRepository
 
 import photography.adapters.sqlite.album.SqliteAlbumCompositionRepository
 
@@ -9,8 +10,9 @@ import photography.adapters.sqlite.album.SqliteAlbumRepository
 import photography.adapters.sqlite.photo.SqlitePhotoRepository
 import photography.adapters.sqlite.spread.SqliteSpreadTemplateRepository
 
-import cats.data.NonEmptyList
-import cats.effect.{IO, Ref, Resource}
+import cats.data.{NonEmptyList, NonEmptyVector}
+import cats.effect.{Deferred, IO, Ref, Resource}
+import cats.effect.kernel.MonadCancelThrow
 import cats.effect.std.Mutex
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
@@ -26,11 +28,13 @@ import photography.capabilities.{IdGenerator, Transaction}
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.album.AlbumRepository
+import photography.ports.gear.GearRepository
 import photography.ports.chapter.ChapterRepository
 import photography.ports.photo.PhotoRepository
 import photography.ports.spread.SpreadTemplateRepository
 import photography.syntax.SyncSyntax.*
-import photography.usecases.chapter.{ChapterMetadataManager, ChapterPlanning}
+import photography.usecases.chapter.{ChapterManager, ChapterMetadataManager, ChapterPlanning}
+import photography.usecases.gear.GearManager
 import photography.usecases.photo.{ChapterPhotoImport, PhotoWriteRecovery}
 import photography.usecases.spread.SpreadTemplateManager
 import photography.usecases.photo.ChapterPhotoImport.{ExecutionOutcome, Request, Scheduling, Status}
@@ -40,20 +44,354 @@ import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
-  private given Logger[IO] = Slf4jLogger.getLogger[IO]
-  private val destination  = DestinationId(new UUID(99L, 1L))
-  private val albumId      = AlbumId(new UUID(1L, 1L))
-  private val period       = VisitPeriod(firstDay = LocalDate.of(2026, 6, 1), days = 3L)
+  private given Logger[IO]           = Slf4jLogger.getLogger[IO]
+  private given Logger[ConnectionIO] = Slf4jLogger.getLogger[ConnectionIO]
+  private val destination            = DestinationId(new UUID(99L, 1L))
+  private val albumId                = AlbumId(new UUID(1L, 1L))
+  private val period                 = VisitPeriod(firstDay = LocalDate.of(2026, 6, 1), days = 3L)
   private val country      = Country(CountryId(new UUID(9L, 1L)), code = "XX", name = "Test country", AbsoluteLocation(Path.of("/flags/xx.svg")))
   private val otherCountry = country.copy(id = CountryId(new UUID(9L, 2L)), code = "XY", name = "Other country")
   private val countRows    = sql"""SELECT (SELECT count(*) FROM chapter) + (SELECT count(*) FROM destination) +
     (SELECT count(*) FROM destination_country) + (SELECT count(*) FROM spread) +
     (SELECT count(*) FROM spread_photo_slot) + (SELECT count(*) FROM spread_text_slot)""".query[Long].unique
 
+  private val body =
+    Camera(CameraId(new UUID(12L, 1L)), code = "body", friendlyName = "Body", CameraKind.InterchangeableLens(LensMount.SonyE, SensorFormat.ApsC))
+  private val fixedBody    = body.copy(id = CameraId(new UUID(12L, 2L)), code = "fixed", kind = CameraKind.FixedLens)
+  private val selectedLens = Lens(LensId(new UUID(12L, 3L)), code = "lens", friendlyName = "Lens", LensMount.SonyE, SensorFormat.FullFrame)
+  private val otherLens    = selectedLens.copy(id = LensId(new UUID(12L, 4L)), code = "other-lens")
+  private val orderedGear  = Vector(
+    CameraSelection(fixedBody.id, CameraUse.FixedLens),
+    CameraSelection(body.id, CameraUse.Interchangeable(lenses = NonEmptyVector.of(otherLens.id, selectedLens.id)))
+  )
+
+  test("should acquire and completely replace ordered chapter selections including empty gear and retain aggregate state"):
+    buildTransactor.use: xa =>
+      val chapters = SqliteChapterRepository.make
+      val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, chapters)
+      val catalog  = SqliteGearRepository.make[IO](xa)
+
+      for
+        _        <- seedAlbum(xa)
+        first    <- buildChapter(xa, index = 1)
+        second   <- buildChapter(xa, index = 2)
+        _        <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+        _        <- chapters.create(albumId, second, order = NonEmptyList.of(first.id, second.id)).transact(xa)
+        _        <- Vector(body, fixedBody).traverse_(catalog.createCamera)
+        _        <- Vector(selectedLens, otherLens).traverse_(catalog.createLens)
+        before   <- albums.get(albumId)
+        saved    <- chapters.replaceGear(albumId, first.id, selection = orderedGear).transact(xa)
+        read     <- chapters.readGear(albumId, first.id).transact(xa)
+        all      <- chapters.readSelections.transact(xa)
+        after    <- albums.get(albumId)
+        cleared  <- chapters.replaceGear(albumId, first.id, selection = Vector.empty[CameraSelection]).transact(xa)
+        empty    <- chapters.readGear(albumId, first.id).transact(xa)
+        restored <- albums.get(albumId)
+      yield
+        val expectedSelections =
+          Vector(ChapterGearSelection(first.id, selection = orderedGear), ChapterGearSelection(second.id, selection = Vector.empty[CameraSelection]))
+        val expectedAlbum = before match
+          case AlbumRepository.GetResult.Found(album) =>
+            AlbumRepository.GetResult.Found(album.copy(chapters =
+              album.chapters.map(value => if value.id.value === first.id.value then value.copy(gear = orderedGear) else value)
+            ))
+          case result => fail(s"Expected complete album: $result")
+
+        assertEquals(saved, ChapterRepository.GearWriteResult.Saved)
+        assertEquals(read, ChapterRepository.GearReadResult.Found(selection = orderedGear))
+        assertEquals(all, ChapterRepository.SelectionsReadResult.Found(selections = expectedSelections))
+        assertEquals(after, expectedAlbum)
+        assertEquals(cleared, ChapterRepository.GearWriteResult.Saved)
+        assertEquals(empty, ChapterRepository.GearReadResult.Found(selection = Vector.empty[CameraSelection]))
+        assertEquals(restored, before)
+
+  test("should reject missing scoped targets and invalid references or cardinality without changing saved gear"):
+    buildTransactor.use: xa =>
+      val chapters         = SqliteChapterRepository.make
+      val catalog          = SqliteGearRepository.make[IO](xa)
+      val missingAlbum     = AlbumId(new UUID(99L, 99L))
+      val missingChapter   = ChapterId(new UUID(99L, 99L))
+      val insertOtherAlbum = sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
+        VALUES (${missingAlbum.value}, 2099, 'Other', '', 0)""".update.run
+      val invalid = Vector(
+        orderedGear ++ orderedGear,
+        Vector(CameraSelection(CameraId(new UUID(99L, 99L)), CameraUse.FixedLens)),
+        Vector(CameraSelection(body.id, CameraUse.Interchangeable(lenses = NonEmptyVector.one(LensId(new UUID(99L, 99L)))))),
+        Vector(CameraSelection(body.id, CameraUse.Interchangeable(lenses = NonEmptyVector.of(selectedLens.id, selectedLens.id))))
+      )
+
+      for
+        _          <- seedAlbum(xa)
+        _          <- insertOtherAlbum.transact(xa)
+        first      <- buildChapter(xa, index = 1)
+        _          <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+        _          <- Vector(body, fixedBody).traverse_(catalog.createCamera)
+        _          <- Vector(selectedLens, otherLens).traverse_(catalog.createLens)
+        _          <- chapters.replaceGear(albumId, first.id, selection = orderedGear).transact(xa)
+        wrongOwner <- chapters.replaceGear(missingAlbum, first.id, selection = orderedGear).transact(xa)
+        wrongRead  <- chapters.readGear(missingAlbum, first.id).transact(xa)
+        missing    <- chapters.readGear(albumId, missingChapter).transact(xa)
+        rejected   <- invalid.traverse(selection => chapters.replaceGear(albumId, first.id, selection = selection).transact(xa))
+        saved      <- chapters.readGear(albumId, first.id).transact(xa)
+      yield
+        assertEquals(wrongOwner, ChapterRepository.GearWriteResult.NotFound)
+        assertEquals(wrongRead, ChapterRepository.GearReadResult.NotFound)
+        assertEquals(missing, ChapterRepository.GearReadResult.NotFound)
+        assertEquals(rejected, Vector.fill(invalid.size)(ChapterRepository.GearWriteResult.Failed))
+        assertEquals(saved, ChapterRepository.GearReadResult.Found(selection = orderedGear))
+
+  test("should roll back complete replacements after failed or ignored writes and caller transaction failures"):
+    Vector("ABORT", "FAIL", "IGNORE").traverse_ { rejection =>
+      buildTransactor.use: xa =>
+        val chapters = SqliteChapterRepository.make
+        val catalog  = SqliteGearRepository.make[IO](xa)
+        val trigger  = s"""CREATE TRIGGER reject_gear BEFORE INSERT ON chapter_camera_lens BEGIN
+          UPDATE chapter SET description = 'Partial'; SELECT RAISE($rejection${if rejection === "IGNORE" then "" else ", 'Rejected'"}); END"""
+
+        (seedAlbum(xa) >> buildChapter(xa, index = 1)).flatMap: first =>
+          val replacement    = chapters.replaceGear(albumId, first.id, selection = orderedGear)
+          val abortCaller    = replacement >> new IllegalStateException("Abort caller").raiseError[ConnectionIO, Unit]
+          val cancelCaller   = replacement >> MonadCancelThrow[ConnectionIO].canceled
+          val fixedSelection = Vector(CameraSelection(fixedBody.id, CameraUse.FixedLens))
+
+          for
+            _               <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+            _               <- Vector(body, fixedBody).traverse_(catalog.createCamera)
+            _               <- Vector(selectedLens, otherLens).traverse_(catalog.createLens)
+            _               <- chapters.replaceGear(albumId, first.id, selection = fixedSelection).transact(xa)
+            before          <- chapters.readSelections.transact(xa)
+            _               <- Fragment.const(trigger).update.run.transact(xa)
+            failed          <- replacement.transact(xa)
+            after           <- chapters.readSelections.transact(xa)
+            description     <- sql"SELECT description FROM chapter".query[String].unique.transact(xa)
+            _               <- sql"DROP TRIGGER reject_gear".update.run.transact(xa)
+            aborted         <- abortCaller.transact(xa).attempt
+            canceled        <- cancelCaller.transact(xa).start
+            cancellation    <- canceled.join
+            finalSelections <- chapters.readSelections.transact(xa)
+          yield
+            assertEquals(failed, ChapterRepository.GearWriteResult.Failed)
+            assertEquals(after, before)
+            assertEquals(description, first.description)
+            assert(aborted.isLeft)
+            assert(cancellation.isCanceled)
+            assertEquals(finalSelections, before)
+    }
+
+  test("should reject malformed saved use cardinality and missing references without empty or partial successful reads"):
+    Vector(
+      "DELETE FROM chapter_camera_lens",
+      "UPDATE chapter_camera SET use_kind = 'fixed_lens'",
+      "UPDATE chapter_camera SET use_kind = 'unknown'",
+      "UPDATE chapter_camera SET camera_id = '00000000-0000-0000-0000-000000000099'",
+      "UPDATE chapter_camera_lens SET lens_id = '00000000-0000-0000-0000-000000000099'"
+    ).traverse_ { corrupt =>
+      buildTransactor.use: xa =>
+        val chapters       = SqliteChapterRepository.make
+        val catalog        = SqliteGearRepository.make[IO](xa)
+        val savedSelection = Vector(CameraSelection(body.id, CameraUse.Interchangeable(lenses = NonEmptyVector.one(selectedLens.id))))
+        val corruption     = sql"PRAGMA ignore_check_constraints = ON".update.run >> Fragment.const(corrupt).update.run
+        val unconstrained  = Transactor.before.set(xa, sql"PRAGMA foreign_keys = OFF".update.run >> xa.strategy.before)
+
+        for
+          _     <- seedAlbum(xa)
+          first <- buildChapter(xa, index = 1)
+          _     <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          _     <- catalog.createCamera(body)
+          _     <- catalog.createLens(selectedLens)
+          _     <- chapters.replaceGear(albumId, first.id, selection = savedSelection).transact(xa)
+          _     <- corruption.transact(unconstrained)
+          read  <- chapters.readGear(albumId, first.id).transact(xa)
+          all   <- chapters.readSelections.transact(xa)
+        yield
+          assertEquals(read, ChapterRepository.GearReadResult.Failed)
+          assertEquals(all, ChapterRepository.SelectionsReadResult.Failed)
+    }
+
+  test("should protect catalog edits against actual shared saved selections through the same coordination capability"):
+    buildTransactor.use: xa =>
+      val chapters   = SqliteChapterRepository.make
+      val catalog    = SqliteGearRepository.make[IO](xa)
+      val secondBody = body.copy(id = CameraId(new UUID(12L, 5L)), code = "second-body")
+      val unusedBody = body.copy(id = CameraId(new UUID(12L, 6L)), code = "unused-body")
+      val shared     =
+        Vector(body, secondBody).map(camera => CameraSelection(camera.id, CameraUse.Interchangeable(lenses = NonEmptyVector.one(selectedLens.id))))
+      given Transaction[ConnectionIO, IO] with
+        override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
+        override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
+      given IdGenerator[IO] with
+        override def generateId: IO[UUID] = new AssertionError("Unexpected allocation").raiseError[IO, UUID]
+
+      Mutex[IO].flatMap: mutex =>
+        given Mutex[IO] = mutex
+        val gear        = GearManager.make(catalog, chapters)
+        val manager     = ChapterManager.make(chapters, gear)
+
+        for
+          _          <- seedAlbum(xa)
+          first      <- buildChapter(xa, index = 1)
+          _          <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          _          <- Vector(body, secondBody, unusedBody).traverse_(catalog.createCamera)
+          _          <- Vector(selectedLens, otherLens).traverse_(catalog.createLens)
+          saved      <- manager.replaceGear(albumId, first.id, selection = shared)
+          wrongMount <- gear.updateLens(selectedLens.copy(mount = LensMount.NikonZ))
+          wrongKind  <- gear.updateCamera(body.copy(kind = CameraKind.FixedLens))
+          unused     <- gear.updateCamera(unusedBody.copy(kind = CameraKind.FixedLens))
+          unusedLens <- gear.updateLens(otherLens.copy(mount = LensMount.NikonZ))
+          narrowed   <- gear.updateLens(selectedLens.copy(coverage = SensorFormat.ApsC))
+          fullFrame  <- gear.updateCamera(secondBody.copy(kind = CameraKind.InterchangeableLens(LensMount.SonyE, SensorFormat.FullFrame)))
+          read       <- manager.readGear(albumId, first.id)
+          used       <- gear.deleteLens(selectedLens.id)
+          actual     <- catalog.readCatalog
+        yield
+          val expectedCatalog = GearCatalog(
+            cameras = Vector(body, secondBody, unusedBody.copy(kind = CameraKind.FixedLens)),
+            lenses = Vector(selectedLens.copy(coverage = SensorFormat.ApsC), otherLens.copy(mount = LensMount.NikonZ))
+          )
+
+          assertEquals(saved, ChapterManager.GearReplaceResult.Saved)
+          assertEquals(wrongMount, GearManager.LensUpdateResult.InvalidatesSelection)
+          assertEquals(wrongKind, GearManager.CameraUpdateResult.InvalidatesSelection)
+          assertEquals(unused, GearManager.CameraUpdateResult.Updated)
+          assertEquals(unusedLens, GearManager.LensUpdateResult.Updated)
+          assertEquals(narrowed, GearManager.LensUpdateResult.Updated)
+          assertEquals(fullFrame, GearManager.CameraUpdateResult.InvalidatesSelection)
+          assertEquals(read, ChapterManager.GearReadResult.Found(selection = shared))
+          assertEquals(used, GearManager.LensDeleteResult.Used)
+          assertEquals(actual, GearRepository.CatalogReadResult.Found(expectedCatalog))
+
+  test("should serialize concurrent catalog decisions with selection writes and read only complete committed selections"):
+    buildTransactor.use: xa =>
+      val chapters       = SqliteChapterRepository.make
+      val catalog        = SqliteGearRepository.make[IO](xa)
+      val savedSelection = Vector(CameraSelection(body.id, CameraUse.Interchangeable(lenses = NonEmptyVector.one(selectedLens.id))))
+      given Transaction[ConnectionIO, IO] with
+        override def run[A](program: ConnectionIO[A]): IO[A]     = program.transact(xa)
+        override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
+      given IdGenerator[IO] with
+        override def generateId: IO[UUID] = new AssertionError("Unexpected allocation").raiseError[IO, UUID]
+
+      Mutex[IO].flatMap: mutex =>
+        given Mutex[IO] = mutex
+        val gear        = GearManager.make(catalog, chapters)
+        val manager     = ChapterManager.make(chapters, gear)
+
+        (seedAlbum(xa) >> buildChapter(xa, index = 1)).flatMap: first =>
+          val decideAndWrite = (
+            manager.replaceGear(albumId, first.id, selection = savedSelection),
+            gear.updateLens(selectedLens.copy(mount = LensMount.NikonZ))
+          ).parTupled
+          val replaceAndRead = (
+            chapters.replaceGear(albumId, first.id, selection = orderedGear.take(1)).transact(xa),
+            Vector.fill(20)(()).traverse(_ => manager.readGear(albumId, first.id))
+          ).parTupled
+
+          for
+            _        <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+            _        <- catalog.createCamera(body)
+            _        <- catalog.createCamera(fixedBody)
+            _        <- catalog.createLens(selectedLens)
+            outcomes <- decideAndWrite
+            read     <- manager.readGear(albumId, first.id)
+            changes  <- replaceAndRead
+          yield
+            val validOutcomes = Vector(
+              (ChapterManager.GearReplaceResult.Saved, GearManager.LensUpdateResult.InvalidatesSelection),
+              (ChapterManager.GearReplaceResult.Rejected(GearManager.Failure.IncompatibleLens), GearManager.LensUpdateResult.Updated)
+            )
+            val expectedRead = outcomes match
+              case (ChapterManager.GearReplaceResult.Saved, _) => savedSelection
+              case _                                           => Vector.empty[CameraSelection]
+            val (savedChange, concurrentReads) = changes
+            val completeReads                  = Vector(read, ChapterManager.GearReadResult.Found(selection = orderedGear.take(1)))
+
+            assert(validOutcomes.contains(outcomes))
+            assertEquals(read, ChapterManager.GearReadResult.Found(selection = expectedRead))
+            assertEquals(savedChange, ChapterRepository.GearWriteResult.Saved)
+            concurrentReads.foreach(actual => assert(completeReads.contains(actual)))
+
+  test("should expose uncertain commit acknowledgements and retain selections after reopening without replay"):
+    Vector(false, true).traverse_ { committed =>
+      buildDatabase.use: path =>
+        val write = buildConnection(path).use: xa =>
+          val chapters = SqliteChapterRepository.make
+          val catalog  = SqliteGearRepository.make[IO](xa)
+          given Transaction[ConnectionIO, IO] with
+            override def run[A](program: ConnectionIO[A]): IO[A] =
+              val lost = new IllegalStateException("Lost acknowledgement").raiseError[IO, A]
+              if committed then program.transact(xa) >> lost else lost
+            override def resolve[A](program: ConnectionIO[A]): IO[A] = new AssertionError("Unexpected retry").raiseError[IO, A]
+          given IdGenerator[IO] with
+            override def generateId: IO[UUID] = new AssertionError("Unexpected allocation").raiseError[IO, UUID]
+
+          Mutex[IO].flatMap: mutex =>
+            given Mutex[IO] = mutex
+            val gear        = GearManager.make(catalog, chapters)
+            val manager     = ChapterManager.make(chapters, gear)
+            val selection   = Vector(CameraSelection(fixedBody.id, CameraUse.FixedLens))
+
+            for
+              _      <- seedAlbum(xa)
+              first  <- buildChapter(xa, index = 1)
+              _      <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+              _      <- catalog.createCamera(fixedBody)
+              result <- manager.replaceGear(albumId, first.id, selection = selection)
+            yield
+              assertEquals(result, ChapterManager.GearReplaceResult.Uncertain)
+              (first.id, if committed then selection else Vector.empty[CameraSelection])
+
+        write.flatMap { case (chapter, expected) =>
+          buildConnection(path).use: xa =>
+            SqliteChapterRepository.make.readGear(albumId, chapter).transact(xa)
+              .map(actual => assertEquals(actual, ChapterRepository.GearReadResult.Found(selection = expected)))
+        }
+    }
+
+  test("should keep coordination acquisition cancelable and finish an acquired real SQLite replacement before releasing its lock"):
+    buildTransactor.use: xa =>
+      val chapters  = SqliteChapterRepository.make
+      val catalog   = SqliteGearRepository.make[IO](xa)
+      val selection = Vector(CameraSelection(fixedBody.id, CameraUse.FixedLens))
+      given IdGenerator[IO] with
+        override def generateId: IO[UUID] = new AssertionError("Unexpected allocation").raiseError[IO, UUID]
+
+      val coordination = (Mutex[IO], Deferred[IO, Unit], Deferred[IO, Unit]).tupled
+      val chapter      = seedAlbum(xa) >> buildChapter(xa, index = 1)
+
+      (chapter, coordination).tupled.flatMap { case (first, (mutex, entered, release)) =>
+        given Mutex[IO] = mutex
+        given Transaction[ConnectionIO, IO] with
+          override def run[A](program: ConnectionIO[A]): IO[A]     = entered.complete(()).void >> release.get >> program.transact(xa)
+          override def resolve[A](program: ConnectionIO[A]): IO[A] = program.transact(xa)
+        val gear    = GearManager.make(catalog, chapters)
+        val manager = ChapterManager.make(chapters, gear)
+
+        for
+          _              <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          _              <- catalog.createCamera(fixedBody)
+          pending        <- manager.replaceGear(albumId, first.id, selection = selection).start
+          _              <- entered.get
+          cancellation   <- pending.cancel.start
+          waiting        <- gear.updateCamera(fixedBody.copy(friendlyName = "Waiting")).start
+          _              <- waiting.cancel
+          waitingOutcome <- waiting.join
+          before         <- chapters.readGear(albumId, first.id).transact(xa)
+          _              <- release.complete(())
+          _              <- pending.join
+          _              <- cancellation.joinWithNever
+          saved          <- chapters.readGear(albumId, first.id).transact(xa)
+          subsequent     <- gear.updateCamera(fixedBody.copy(friendlyName = "Updated"))
+        yield
+          assert(waitingOutcome.isCanceled)
+          assertEquals(before, ChapterRepository.GearReadResult.Found(selection = Vector.empty[CameraSelection]))
+          assertEquals(saved, ChapterRepository.GearReadResult.Found(selection = selection))
+          assertEquals(subsequent, GearManager.CameraUpdateResult.Updated)
+      }
+
   test("should save exact scoped chapter descriptions and clear while retaining all metadata and composition"):
     buildTransactor.use: xa =>
       val chapters = SqliteChapterRepository.make
-      val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, chapters)
       val camera   = new UUID(12L, 1L)
       val lens     = new UUID(12L, 2L)
       val gear     = sql"""SELECT c.chapter_id, c.camera_id, c.use_kind, l.lens_id FROM chapter_camera c
@@ -109,7 +447,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
   test("should reject cross-album description edits and roll back failed statements and surrounding transactions"):
     buildTransactor.use: xa =>
       val chapters   = SqliteChapterRepository.make
-      val albums     = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val albums     = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, chapters)
       val otherAlbum = AlbumId(new UUID(0L, 99L))
       val reject     = sql"""CREATE TRIGGER reject_description BEFORE UPDATE OF description ON chapter BEGIN
         UPDATE chapter SET source_folder = '/partial' WHERE id = OLD.id;
@@ -170,7 +508,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     Vector(false, true).traverse_ { committed =>
       buildTransactor.use: xa =>
         val chapters  = SqliteChapterRepository.make
-        val albums    = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val albums    = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, chapters)
         val templates = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
         val imports   = new ChapterPhotoImport[IO]:
           override def prepare(parent: AlbumId, chapter: ChapterId, source: PhotoSource): IO[Request] =
@@ -259,7 +597,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     "should persist complete openings and supplied order, isolate shared destinations and preserve description, gear and composition on metadata edits"
   ):
     buildTransactor.use: xa =>
-      val albums                   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val albums                   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val chapters                 = SqliteChapterRepository.make
       val newName: DestinationName = "Changed"
       val newCountries             = NonEmptyList.of(otherCountry, country)
@@ -353,7 +691,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       "CREATE TRIGGER fail_write BEFORE UPDATE OF position ON chapter WHEN NEW.position = 0 BEGIN SELECT RAISE(ABORT, 'order failure'); END"
     ).traverse_ { trigger =>
       buildTransactor.use: xa =>
-        val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
         val chapters = SqliteChapterRepository.make
 
         for
@@ -400,7 +738,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should report missing ownership and roll back metadata when the final ordering write fails"):
     buildTransactor.use: xa =>
-      val albums                       = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val albums                       = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make)
       val chapters                     = SqliteChapterRepository.make
       val missing                      = AlbumId(new UUID(2L, 2L))
       val revisedName: DestinationName = "Changed"
@@ -465,7 +803,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val slots = sql"SELECT id, x, y, width, height FROM spread_photo_slot ORDER BY id".query[(String, Double, Double, Double, Double)].to[Vector]
         val coverSlots = sql"SELECT id, side FROM cover_slot ORDER BY id".query[(String, String)].to[Vector]
         val change     = buildConnection(path).use: xa =>
-          val albums             = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+          val albums             = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, chapters)
           val templateRepository = SqliteSpreadTemplateRepository.make[IO](xa)
           val templates          = SpreadTemplateManager.make(templateRepository)
           val calls              = Ref.unsafe[IO, Int](0)
@@ -646,7 +984,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       case SpreadTemplateRepository.ListAlbumStartTemplatesResult.Listed(values) =>
         val (album, cover) = buildAlbum(values.head)
         for
-          saved <- SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make).create(album, cover)
+          saved <- SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make, SqliteChapterRepository.make).create(album, cover)
           _     <- IO(assertEquals(saved, AlbumRepository.CreateResult.Created))
           _     <- insertCountries.update.run.transact(xa)
         yield ()
