@@ -1,6 +1,6 @@
 package photography.ports.album
 
-import photography.domain.album.{Album, AlbumId, AlbumTitle}
+import photography.domain.album.{Album, AlbumAuthors, AlbumId, AlbumTitle}
 import photography.domain.layout.Cover
 
 trait AlbumRepository[F[_]]:
@@ -8,9 +8,21 @@ trait AlbumRepository[F[_]]:
   def create(album: Album, cover: Cover): F[AlbumRepository.CreateResult]
   def get(id: AlbumId): F[AlbumRepository.GetResult]
   def rename(id: AlbumId, title: AlbumTitle): F[AlbumRepository.RenameResult]
+  def saveSynopsis(album: AlbumId, text: String): F[AlbumRepository.SaveSynopsisResult]
+  def saveAuthors(album: AlbumId, authors: AlbumAuthors): F[AlbumRepository.SaveAuthorsResult]
   def delete(id: AlbumId): F[AlbumRepository.DeleteResult]
 
 object AlbumRepository:
+  enum SaveSynopsisResult derives CanEqual:
+    case Saved(album: Album)
+    case NotFound, Uncertain
+    case Failed(reason: Failure)
+
+  enum SaveAuthorsResult derives CanEqual:
+    case Saved(album: Album)
+    case NotFound, Uncertain
+    case Failed(reason: Failure)
+
   enum ListResult derives CanEqual:
     case Listed(slice: AlbumPageSlice)
     case Failed(reason: Failure)

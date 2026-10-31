@@ -14,6 +14,7 @@ type CameraExifCode = String :| Not[Empty]
 type CameraName = String :| Not[Empty]
 
 enum CameraKind derives CanEqual:
-  case FixedLens, InterchangeableLens
+  case FixedLens
+  case InterchangeableLens(mount: LensMount, sensor: SensorFormat)
 
 final case class Camera(id: CameraId, code: CameraExifCode, friendlyName: CameraName, kind: CameraKind)

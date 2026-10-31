@@ -10,7 +10,7 @@ import photography.capabilities.IdGenerator
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.ports.chapter.ChapterRepository
-import photography.usecases.chapter.ChapterManager.Period
+import photography.usecases.chapter.ChapterMetadataManager.Period
 import photography.usecases.chapter.ChapterPlanning.*
 import photography.usecases.spread.SpreadTemplateManager.ListChapterStartTemplatesResult
 import java.time.{LocalDate, Year}

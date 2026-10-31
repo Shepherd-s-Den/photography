@@ -15,7 +15,7 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.doobie.ConnectionIO
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import photography.adapters.filesystem.FileThumbnailStorage
+import photography.adapters.filesystem.{FilePhotoStorage, FileThumbnailStorage}
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.app.config.SqliteConfig
 import photography.capabilities.{IdGenerator, Transaction}
@@ -47,6 +47,130 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
   private val content     = PhotoContent(Vector(1.toByte).refineEither[MinLength[1]].fold(message => fail(message), identity))
   private val imageBytes  = Vector(1.toByte).refineEither[ThumbnailBytesConstraint].fold(message => fail(message), identity)
   private val image       = EncodedThumbnail(imageBytes, thumbnail.dimensions, thumbnail.quality)
+
+  test("should retain current authored captions when a stale import snapshot updates every source and thumbnail field"):
+    buildDatabase.use: path =>
+      val repository = SqlitePhotoRepository.make
+      val placements = sql"""SELECT id, photo_id, kind, spread_photo_slot_id, cover_slot_id, shift_x, shift_y, mirrored, zoom, caption_corner
+        FROM placement ORDER BY id""".query[(String, String, String, Option[String], Option[String], Double, Double, Int, Double, Option[String])]
+        .to[Vector]
+      val replacement = photo.copy(
+        original = photo.original.copy(filename = "changed.jpg"),
+        metadata = metadata.copy(hash = "new hash", maybeCapturedLocal = none[LocalDateTime], dimensions = PhotoDimensions(width = 30, height = 40)),
+        thumbnail = thumbnail.copy(
+          location = ThumbnailLocation(new UUID(0L, 10L)),
+          version = "new version",
+          dimensions = ThumbnailDimensions(width = 15, height = 20),
+          quality = ThumbnailQuality.High,
+          bytes = 12
+        )
+      )
+
+      val persist = buildTransactor(path).use: xa =>
+        val seededPhoto = seed >> repository.save(photo) >> insertCoverPlacement
+
+        for
+          _                <- seededPhoto.transact(xa)
+          snapshot         <- repository.listChapter(chapter).transact(xa)
+          beforePlacements <- placements.transact(xa)
+          edited           <- repository.saveCaption(photoId, text = "日本\nVacanță").transact(xa)
+          captionOnly      <- repository.listChapter(chapter).transact(xa)
+          regenerated      <- repository.save(replacement).transact(xa)
+          listed           <- repository.listChapter(chapter).transact(xa)
+          cleared          <- repository.saveCaption(photoId, text = "").transact(xa)
+          replayed         <- repository.save(replacement).transact(xa)
+          finalPhotos      <- repository.listChapter(chapter).transact(xa)
+          missing          <- repository.saveCaption(PhotoId(new UUID(0L, 99L)), text = "missing").transact(xa)
+          afterPlacements  <- placements.transact(xa)
+        yield
+          assertEquals(snapshot, ListResult.Listed(photos = Vector(photo)))
+          assertEquals(edited, SaveCaptionResult.Saved)
+          assertEquals(captionOnly, ListResult.Listed(photos = Vector(photo.copy(maybeCaption = "日本\nVacanță".some))))
+          assertEquals(regenerated, WriteResult.Applied)
+          assertEquals(listed, ListResult.Listed(photos = Vector(replacement.copy(maybeCaption = "日本\nVacanță".some))))
+          assertEquals(cleared, SaveCaptionResult.Saved)
+          assertEquals(replayed, WriteResult.Applied)
+          assertEquals(finalPhotos, ListResult.Listed(photos = Vector(replacement.copy(maybeCaption = None))))
+          assertEquals(missing, SaveCaptionResult.PhotoNotFound)
+          assertEquals(afterPlacements, beforePlacements)
+
+      persist >> buildTransactor(path).use: xa =>
+        repository.listChapter(chapter).transact(xa).map(assertEquals(_, ListResult.Listed(photos = Vector(replacement.copy(maybeCaption = None)))))
+
+  test("should roll back failed caption statements and composed transactions without touching complete photo state"):
+    buildDatabase.use: path =>
+      buildTransactor(path).use: xa =>
+        val repository = SqlitePhotoRepository.make
+        val reject     = sql"""CREATE TRIGGER reject_caption BEFORE UPDATE OF caption ON photo BEGIN
+          UPDATE photo SET source_hash = 'partial' WHERE id = OLD.id;
+          SELECT RAISE(FAIL, 'Rejected caption');
+        END""".update.run
+        val ignore = sql"""CREATE TRIGGER reject_caption BEFORE UPDATE OF caption ON photo BEGIN
+          UPDATE photo SET source_hash = 'partial' WHERE id = OLD.id;
+          SELECT RAISE(IGNORE);
+        END""".update.run
+        val abortTransaction = sql"""CREATE TRIGGER reject_caption BEFORE UPDATE OF caption ON photo BEGIN
+          SELECT RAISE(ROLLBACK, 'Caption transaction aborted');
+        END""".update.run
+        val abortedCaption = repository.saveCaption(photoId, text = "") >>
+          new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]
+
+        for
+          _             <- (seed >> repository.save(photo)).transact(xa)
+          _             <- reject.transact(xa)
+          failed        <- repository.saveCaption(photoId, text = "Rejected").transact(xa)
+          retained      <- repository.listChapter(chapter).transact(xa)
+          _             <- sql"DROP TRIGGER reject_caption".update.run.transact(xa)
+          _             <- ignore.transact(xa)
+          ignored       <- repository.saveCaption(photoId, text = "").transact(xa)
+          ignoredPhotos <- repository.listChapter(chapter).transact(xa)
+          _             <- sql"DROP TRIGGER reject_caption".update.run.transact(xa)
+          rolledBack    <- abortedCaption.transact(xa).attempt
+          finalPhotos   <- repository.listChapter(chapter).transact(xa)
+          _             <- abortTransaction.transact(xa)
+          uncertain     <- repository.saveCaption(photoId, text = "").transact(xa).attempt
+        yield
+          failed match
+            case SaveCaptionResult.Failed(cause) => assert(cause.getMessage.contains("Rejected caption"))
+            case result                          => fail(s"Expected rejected caption cause, obtained $result")
+          assertEquals(retained, ListResult.Listed(photos = Vector(photo)))
+          ignored match
+            case SaveCaptionResult.Failed(cause) => assertEquals(cause.getMessage, "Caption update did not change the existing photo")
+            case result                          => fail(s"Expected ignored caption cause, obtained $result")
+          assertEquals(ignoredPhotos, ListResult.Listed(photos = Vector(photo)))
+          assert(rolledBack.isLeft)
+          assertEquals(finalPhotos, ListResult.Listed(photos = Vector(photo)))
+          uncertain match
+            case Left(cause) =>
+              assert(cause.getMessage.contains("Caption transaction aborted"))
+              assert(cause.getSuppressed.toVector.exists(_.getMessage.contains("savepoint")))
+            case result => fail(s"Expected uncertain rollback acknowledgement with both causes, obtained $result")
+
+  test("should expose uncertain caption acknowledgements while authoritative SQLite state retains the actual commit"):
+    Vector(false, true).traverse_ { committed =>
+      buildDatabase.use: path =>
+        buildTransactor(path).use: xa =>
+          val repository = SqlitePhotoRepository.make
+          given Transaction[ConnectionIO, IO] with
+            override def run[A](program: ConnectionIO[A]): IO[A] =
+              val lost = new IllegalStateException("Lost acknowledgement").raiseError[IO, A]
+              if committed then program.transact(xa) >> lost else lost
+            override def resolve[A](program: ConnectionIO[A]): IO[A] =
+              IO.raiseError[A](new AssertionError("Unexpected automatic reconciliation"))
+
+          val thumbnails = FileThumbnailStorage.make[IO](path.getParent)
+          val originals  = FilePhotoStorage.make[IO](thumbnails)
+          val manager    = PhotoManager.make(originals, repository, buildGenerator)
+          val expected   = if committed then photo.copy(maybeCaption = "日本\nVacanță".some) else photo
+
+          for
+            _      <- (seed >> repository.save(photo)).transact(xa)
+            result <- manager.saveCaption(photoId, text = "日本\nVacanță")
+            actual <- repository.listChapter(chapter).transact(xa)
+          yield
+            assertEquals(result, PhotoManager.SaveCaptionResult.Uncertain)
+            assertEquals(actual, ListResult.Listed(photos = Vector(expected)))
+    }
 
   test("should retain complete photos and write evidence across database reopening"):
     buildDatabase.use: path =>
@@ -338,7 +462,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
       sql"INSERT INTO placement VALUES ('placed', ${photoId.value}, 'cover', NULL, 'slot', 0, 0, 0, 1, NULL)".update.run.void
 
   private def seed =
-    sql"INSERT INTO album VALUES ('a', 2026, 'Album', '', 0)".update.run >>
+    sql"INSERT INTO album (id, year, title, synopsis, created_at_ms) VALUES ('a', 2026, 'Album', '', 0)".update.run >>
       sql"INSERT INTO destination VALUES ('d', 'Trip')".update.run >>
       sql"INSERT INTO chapter VALUES (${chapter.value}, 'a', 'd', '', 0, 1, 0, '/photos')".update.run.void
 

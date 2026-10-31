@@ -1,5 +1,6 @@
 package photography.domain.gear
 
+import cats.Eq
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.util.UUID
@@ -13,4 +14,16 @@ type LensExifCode = String :| Not[Empty]
 
 type LensName = String :| Not[Empty]
 
-final case class Lens(id: LensId, code: LensExifCode, friendlyName: LensName, camera: CameraId)
+enum LensMount derives CanEqual:
+  case SonyE, NikonZ
+
+object LensMount:
+  given Eq[LensMount] = Eq.by(_.ordinal)
+
+enum SensorFormat derives CanEqual:
+  case ApsC, FullFrame
+
+object SensorFormat:
+  given Eq[SensorFormat] = Eq.by(_.ordinal)
+
+final case class Lens(id: LensId, code: LensExifCode, friendlyName: LensName, mount: LensMount, coverage: SensorFormat)

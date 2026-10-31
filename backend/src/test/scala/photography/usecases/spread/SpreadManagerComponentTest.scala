@@ -1,4 +1,5 @@
 package photography.usecases.spread
+import photography.domain.gear.CameraSelection
 
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
@@ -74,6 +75,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     Destination(DestinationId(buildUuid(index = 21L)), name = "Asian capitals", countries = NonEmptyList.one(country)),
     VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2),
     description = "",
+    gear = Vector.empty[CameraSelection],
     sourceFolder = "/photos/capitals",
     chapterOpening,
     spreads = Vector(first, second)
@@ -89,6 +91,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     year = 2026,
     title = "A year abroad",
     synopsis = "",
+    authors = Author.all,
     Instant.EPOCH,
     albumOpening,
     chapters = Vector(chapter, otherChapter)
@@ -226,6 +229,25 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
       assertEquals(missingAlbum, MoveResult.AlbumNotFound)
       assertEquals(unknown, MoveResult.SpreadNotFound)
       assertEquals(foreign, MoveResult.Rejected(Conflict.NoNeighbour))
+
+  test("should change every caption corner without changing placement identity, photo, crop or transform"):
+    CaptionCorner.values.toVector.traverse_ { corner =>
+      val refs               = Refs()
+      val occupied           = buildAlbumWithSpreads(spreads = Vector(firstOccupied, second))
+      val selected           = firstOccupied.placements.headOption.getOrElse(fail("Expected occupied spread"))
+      val expectedPlacements = firstOccupied.placements.map { value =>
+        if value.id.value === selected.id.value then value.copy(captionCorner = corner) else value
+      }
+      val expected = firstOccupied.copy(placements = expectedPlacements)
+
+      for
+        manager      <- buildManager(refs, maybeAlbum = occupied.some)
+        result       <- manager.editPlacements(album.id, first.id, Edit.SetCaptionCorner(selected.id, corner))
+        replacements <- refs.replacements.get
+      yield
+        assertEquals(result, PlacementResult.Saved(expected))
+        assertEquals(replacements, Vector(expected))
+    }
 
   test("should change an unoccupied photo spread to a same-context layout with fresh slots"):
     val refs = Refs()
@@ -473,6 +495,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     val requests  = Vector(
       Edit.Place(staleSlot, PhotoId(buildUuid(index = 572L))) -> Failure.SlotNotFound,
       Edit.Remove(stale)                                      -> Failure.PlacementNotFound,
+      Edit.SetCaptionCorner(stale, CaptionCorner.TopLeft)     -> Failure.PlacementNotFound,
       Edit.Move(stale, source.slot)                           -> Failure.PlacementNotFound,
       Edit.Move(source.id, staleSlot)                         -> Failure.SlotNotFound,
       Edit.Adjust(stale, untouched)                           -> Failure.PlacementNotFound,
@@ -482,6 +505,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
 
     requests.traverse_ { case (request, failure) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, maybeAlbum = occupied.some)
         result  <- manager.editPlacements(album.id, first.id, request)

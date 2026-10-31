@@ -13,10 +13,10 @@ import org.http4s.dsl.Http4sDsl
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
-import photography.usecases.chapter.ChapterManager
+import photography.usecases.chapter.ChapterMetadataManager
 import photography.usecases.album.AlbumManager.GetAlbumResult
 import photography.usecases.album.AlbumWorkspaceManager.GetResult
-import photography.usecases.chapter.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.chapter.ChapterMetadataManager.{CreateResult, Period, UpdateResult}
 import photography.usecases.photo.{ChapterPhotoImport, PhotoManager, PhotoWriteRecovery}
 import photography.usecases.album.AlbumWorkspaceManager.{ChapterPhotos, ChapterResult}
 import photography.usecases.photo.ChapterPhotoImport.Scheduling
@@ -32,14 +32,14 @@ object AlbumWorkspaceApi:
   def make[F[_]: Async](
       workspaces: AlbumWorkspaceManager[F],
       albums: AlbumManager[F],
-      chapters: ChapterManager[F]
+      chapters: ChapterMetadataManager[F]
   ): AlbumWorkspaceApi[F] =
     new LiveAlbumWorkspaceApi(workspaces, albums, chapters)
 
   final private class LiveAlbumWorkspaceApi[F[_]: Async](
       workspaces: AlbumWorkspaceManager[F],
       albums: AlbumManager[F],
-      chapters: ChapterManager[F]
+      chapters: ChapterMetadataManager[F]
   ) extends AlbumWorkspaceApi[F] with Http4sDsl[F]:
     override def routes: HttpRoutes[F] =
       HttpRoutes.of[F] {
@@ -108,10 +108,10 @@ object AlbumWorkspaceApi:
 
     private def refresh(chapter: ChapterId) =
       chapters.refresh(chapter).flatMap:
-        case ChapterManager.RefreshResult.Scheduled(scheduling @ (Scheduling.Queued | Scheduling.Coalesced)) =>
+        case ChapterMetadataManager.RefreshResult.Scheduled(scheduling @ (Scheduling.Queued | Scheduling.Coalesced)) =>
           Accepted(Map("scheduling" -> encodeScheduling(scheduling)))
-        case ChapterManager.RefreshResult.ChapterNotFound => chapterNotFound
-        case _                                            => serviceFailure
+        case ChapterMetadataManager.RefreshResult.ChapterNotFound => chapterNotFound
+        case _                                                    => serviceFailure
 
     private def decode[A](request: Request[F], decoder: Decoder[A]) =
       request.as[Json].map(value => decoder.decodeJson(value).leftMap(_.getMessage))

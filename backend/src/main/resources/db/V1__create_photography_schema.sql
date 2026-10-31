@@ -23,6 +23,7 @@ CREATE TABLE album (
     year INTEGER NOT NULL UNIQUE CHECK (year BETWEEN 1900 AND 2100),
     title TEXT NOT NULL CHECK (length(trim(title)) > 0),
     synopsis TEXT NOT NULL,
+    authors INTEGER NOT NULL DEFAULT 7 CHECK (typeof(authors) = 'integer' AND authors BETWEEN 1 AND 7),
     created_at_ms INTEGER NOT NULL
 ) STRICT;
 

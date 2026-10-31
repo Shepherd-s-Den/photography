@@ -186,7 +186,8 @@ class SqliteCoverRepositorySeamIntegrationTest extends CatsEffectSuite:
   private def seedComposition =
     val template = new UUID(2L, 22L)
     val textSlot = new UUID(0L, 23L)
-    sql"INSERT INTO album VALUES (${album.value}, 2026, 'Album', 'Synopsis', 0), (${foreignAlbum.value}, 2027, 'Other', '', 0)".update.run >>
+    sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
+          VALUES (${album.value}, 2026, 'Album', 'Synopsis', 0), (${foreignAlbum.value}, 2027, 'Other', '', 0)""".update.run >>
       sql"INSERT INTO destination VALUES ('d', 'Trip')".update.run >>
       sql"INSERT INTO chapter VALUES ('c', ${album.value}, 'd', '', 0, 1, 0, '/photos')".update.run >>
       sql"INSERT INTO cover VALUES (${album.value}, 'back'), (${foreignAlbum.value}, 'front')".update.run >>

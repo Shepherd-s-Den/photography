@@ -18,13 +18,13 @@ object PhotoInventory:
   def make[F[_]: MonadThrow: Logger, Db[_]: Monad](
       photos: PhotoRepository[Db],
       placements: PhotoPlacementRepository[Db],
-      chapters: ChapterRepository[Db]
+      chapters: ChapterRepository.Metadata[Db]
   )(using Transaction[Db, F]): PhotoInventory[F] = new LivePhotoInventory(photos, placements, chapters)
 
   final private class LivePhotoInventory[F[_]: MonadThrow: Logger, Db[_]: Monad](
       photos: PhotoRepository[Db],
       placements: PhotoPlacementRepository[Db],
-      chapters: ChapterRepository[Db]
+      chapters: ChapterRepository.Metadata[Db]
   )(using Transaction[Db, F]) extends PhotoInventory[F]:
     override def listChapter(chapter: ChapterId): F[ListResult] =
       val snapshot = (photos.listChapter(chapter), placements.findPlacedPhotos(chapter)).mapN:

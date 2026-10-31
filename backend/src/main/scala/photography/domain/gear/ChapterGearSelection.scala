@@ -1,13 +1,15 @@
 package photography.domain.gear
 
-import cats.data.{NonEmptyMap, NonEmptySet}
+import cats.data.NonEmptyVector
 import photography.domain.album.ChapterId
 
 enum CameraUse:
   case FixedLens
-  case Interchangeable(lenses: NonEmptySet[LensId])
+  case Interchangeable(lenses: NonEmptyVector[LensId])
 
-type GearSelection = NonEmptyMap[CameraId, CameraUse]
+final case class CameraSelection(camera: CameraId, use: CameraUse)
+
+type GearSelection = Vector[CameraSelection]
 
 final case class GearCatalog(cameras: Vector[Camera], lenses: Vector[Lens])
 

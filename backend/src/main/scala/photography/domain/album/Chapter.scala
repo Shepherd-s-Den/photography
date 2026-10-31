@@ -3,6 +3,7 @@ package photography.domain.album
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import photography.domain.layout.Spread
+import photography.domain.gear.GearSelection
 
 import java.time.LocalDate
 import java.util.UUID
@@ -25,6 +26,7 @@ final case class Chapter(
     destination: Destination,
     period: VisitPeriod,
     description: String,
+    gear: GearSelection,
     sourceFolder: PhotoSource,
     opening: Spread.ChapterStart,
     spreads: Vector[Spread.PhotosOnly]

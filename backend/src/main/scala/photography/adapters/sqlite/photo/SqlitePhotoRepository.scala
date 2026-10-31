@@ -4,6 +4,7 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import org.typelevel.doobie.{ConnectionIO, Meta, Read}
+import org.typelevel.doobie.free.connection
 import org.typelevel.doobie.implicits.*
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.domain.album.*
@@ -17,6 +18,12 @@ object SqlitePhotoRepository:
   def make: PhotoRepository[ConnectionIO] = new LiveSqlitePhotoRepository
 
   final private class LiveSqlitePhotoRepository extends PhotoRepository[ConnectionIO]:
+    override def saveCaption(photo: PhotoId, text: String): ConnectionIO[SaveCaptionResult] =
+      writeCaption(photo, maybeCaption = Option.when(text.nonEmpty)(text)).map:
+        case Right(1)    => SaveCaptionResult.Saved
+        case Right(_)    => SaveCaptionResult.PhotoNotFound
+        case Left(cause) => SaveCaptionResult.Failed(cause)
+
     override def listChapter(chapter: ChapterId): ConnectionIO[ListResult] =
       sql"""
         SELECT
@@ -87,8 +94,7 @@ object SqlitePhotoRepository:
           thumbnail_width = excluded.thumbnail_width,
           thumbnail_height = excluded.thumbnail_height,
           thumbnail_quality = excluded.thumbnail_quality,
-          thumbnail_bytes = excluded.thumbnail_bytes,
-          caption = excluded.caption
+          thumbnail_bytes = excluded.thumbnail_bytes
         WHERE photo.chapter_id = excluded.chapter_id
       """.update.run.map:
         case 1 => WriteResult.Applied
@@ -112,6 +118,21 @@ object SqlitePhotoRepository:
       sql"SELECT id, chapter_id, photo_id, kind, location, previous FROM photo_write_intent ORDER BY id"
         .query[(UUID, UUID, UUID, String, UUID, Option[UUID])].to[Vector].flatMap(rows => rows.traverse(decodeIntent).liftTo[ConnectionIO])
         .map(intents => ListUnfinishedWritesResult.Listed(intents = intents))
+
+    private def writeCaption(photo: PhotoId, maybeCaption: Option[String]) =
+      val update = sql"UPDATE photo SET caption = $maybeCaption WHERE id = ${photo.value}".update.run
+        .flatMap(rows => checkCaptionWrite(photo, rows = rows))
+      sql"SAVEPOINT photo_caption".update.run >> update.attempt.flatTap:
+        case Left(cause) =>
+          val rollback = sql"ROLLBACK TO photo_caption".update.run >> sql"RELEASE photo_caption".update.run.void
+          rollback.handleErrorWith(error => connection.delay(cause.addSuppressed(error)) >> cause.raiseError[ConnectionIO, Unit])
+        case Right(_) => sql"RELEASE photo_caption".update.run.void
+
+    private def checkCaptionWrite(photo: PhotoId, rows: Int) =
+      if rows === 1 then rows.pure[ConnectionIO]
+      else
+        sql"SELECT EXISTS(SELECT 1 FROM photo WHERE id = ${photo.value})".query[Boolean].unique
+          .ensure(new IllegalStateException("Caption update did not change the existing photo"))(!_).as(0)
 
     private def decodeIntent(row: (UUID, UUID, UUID, String, UUID, Option[UUID])) =
       val (id, chapter, photo, kind, location, maybePrevious) = row
