@@ -1,0 +1,247 @@
+package photography.adapters.http
+
+import cats.data.NonEmptyList
+import cats.effect.Async
+import cats.syntax.all.*
+import io.circe.{Decoder, DecodingFailure, HCursor, Json}
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+import org.http4s.{CacheDirective, HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.headers.`Cache-Control`
+import org.http4s.circe.CirceEntityCodec.*
+import org.http4s.dsl.Http4sDsl
+import photography.domain.album.*
+import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
+import photography.usecases.chapter.ChapterMetadataManager
+import photography.usecases.album.AlbumManager.GetAlbumResult
+import photography.usecases.chapter.ChapterMetadataManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.photo.ChapterPhotoImport.Scheduling
+import java.time.{DateTimeException, LocalDate}
+import java.time.temporal.ChronoUnit
+import java.util.UUID
+import cats.data.NonEmptyVector
+import photography.domain.gear.*
+import photography.usecases.chapter.ChapterManager
+import photography.usecases.chapter.ChapterManager.*
+import photography.usecases.gear.GearManager
+
+trait ChapterApi[F[_]]:
+  def routes: HttpRoutes[F]
+
+object ChapterApi:
+  def make[F[_]: Async](
+      workspaces: AlbumWorkspaceManager[F],
+      albums: AlbumManager[F],
+      chapters: ChapterMetadataManager[F],
+      gear: ChapterManager[F]
+  ): ChapterApi[F] =
+    new LiveChapterApi(workspaces, albums, chapters, gear)
+
+  final private class LiveChapterApi[F[_]: Async](
+      workspaces: AlbumWorkspaceManager[F],
+      albums: AlbumManager[F],
+      chapters: ChapterMetadataManager[F],
+      gear: ChapterManager[F]
+  ) extends ChapterApi[F] with Http4sDsl[F]:
+    override def routes: HttpRoutes[F] =
+      HttpRoutes.of[F] {
+        case GET -> Root / "api" / "albums" / CanonicalId(album) / "chapters" / CanonicalId(chapter) / "gear" =>
+          readGear(AlbumId(value = album), ChapterId(value = chapter))
+        case request @ PUT -> Root / "api" / "albums" / CanonicalId(album) / "chapters" / CanonicalId(chapter) / "gear" =>
+          replaceGear(AlbumId(value = album), ChapterId(value = chapter), request)
+        case (GET | PUT) -> Root / "api" / "albums" / CanonicalId(_) / "chapters" / _ / "gear" => respondChapterNotFound
+        case (GET | PUT) -> Root / "api" / "albums" / _ / "chapters" / _ / "gear"              => NotFound(body = Map("code" -> "album_not_found"))
+        case request @ POST -> Root / "api" / "albums" / CanonicalId(id) / "chapters"          =>
+          create(AlbumId(id), request)
+        case request @ PUT -> Root / "api" / "albums" / CanonicalId(id) / "chapters" / CanonicalId(chapter) =>
+          update(AlbumId(id), ChapterId(chapter), request)
+        case GET -> Root / "api" / "chapters" / CanonicalId(chapter) / "photos" =>
+          listChapter(ChapterId(chapter))
+        case POST -> Root / "api" / "chapters" / CanonicalId(chapter) / "photos" / "refresh" =>
+          refresh(ChapterId(chapter))
+        case GET -> Root / "api" / "chapters" / _ / "photos"                  => chapterNotFound
+        case POST -> Root / "api" / "chapters" / _ / "photos" / "refresh"     => chapterNotFound
+        case POST -> Root / "api" / "albums" / _ / "chapters"                 => albumNotFound
+        case PUT -> Root / "api" / "albums" / CanonicalId(_) / "chapters" / _ => chapterNotFound
+        case PUT -> Root / "api" / "albums" / _ / "chapters" / _              => albumNotFound
+      }
+
+    private def create(id: AlbumId, request: Request[F]) =
+      decode(request, creationDecoder).flatMap {
+        case Left(message)                            => BadRequest(Map("message" -> message))
+        case Right((name, countries, period, folder)) =>
+          chapters.create(id, name, countries, period, folder).flatMap:
+            case created: CreateResult.Created =>
+              Created(Map("id" -> created.id.value.toString, "scheduling" -> encodeScheduling(created.scheduling)))
+            case CreateResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
+            case CreateResult.AlbumNotFound    => albumNotFound
+            case CreateResult.Failed           => serviceFailure
+      }
+
+    private def update(id: AlbumId, target: ChapterId, request: Request[F]) =
+      albums.get(id).flatMap:
+        case GetAlbumResult.Found(album) =>
+          album.chapters.find(_.id.value === target.value) match
+            case None          => chapterNotFound
+            case Some(chapter) => saveUpdate(id, target, request, chapter.destination.isHome)
+        case GetAlbumResult.NotFound => albumNotFound
+        case GetAlbumResult.Failed   => serviceFailure
+
+    private def saveUpdate(id: AlbumId, target: ChapterId, request: Request[F], isHome: Boolean) =
+      decode(request, detailsDecoder(isHome)).flatMap {
+        case Left(message)                            => BadRequest(Map("message" -> message))
+        case Right((name, countries, period, folder)) =>
+          chapters.update(id, target, name, countries, period, folder).flatMap:
+            case updated: UpdateResult.Updated => Ok(Map("id" -> target.value.toString, "scheduling" -> encodeScheduling(updated.scheduling)))
+            case UpdateResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
+            case UpdateResult.ChapterNotFound  => chapterNotFound
+            case UpdateResult.AlbumNotFound    => albumNotFound
+            case UpdateResult.Failed           => serviceFailure
+      }
+
+    private def listChapter(chapter: ChapterId) =
+      workspaces.listChapter(chapter).flatMap:
+        case AlbumWorkspaceManager.ChapterResult.Found(snapshot) =>
+          Ok(ChapterPhotoJson.encodePhotos(snapshot)).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
+        case AlbumWorkspaceManager.ChapterResult.ChapterNotFound => chapterNotFound
+        case AlbumWorkspaceManager.ChapterResult.Failed          => serviceFailure
+
+    private def refresh(chapter: ChapterId) =
+      chapters.refresh(chapter).flatMap:
+        case ChapterMetadataManager.RefreshResult.Scheduled(scheduling @ (Scheduling.Queued | Scheduling.Coalesced)) =>
+          Accepted(Map("scheduling" -> encodeScheduling(scheduling)))
+        case ChapterMetadataManager.RefreshResult.ChapterNotFound => chapterNotFound
+        case _                                                    => serviceFailure
+
+    private def decode[A](request: Request[F], decoder: Decoder[A]) =
+      request.as[Json].map(value => decoder.decodeJson(value).leftMap(_.getMessage))
+        .recover { case _: MessageBodyFailure => "Supply a valid JSON chapter object".asLeft[A] }
+
+    private def albumNotFound   = NotFound(Map("code" -> "album_not_found"))
+    private def chapterNotFound = NotFound(Map("code" -> "chapter_not_found"))
+    private def serviceFailure  = InternalServerError(Map("code" -> "service_failure"))
+
+    private def encodeScheduling(scheduling: Scheduling) = scheduling match
+      case Scheduling.Queued       => "queued"
+      case Scheduling.Coalesced    => "coalesced"
+      case Scheduling.NotRequested => "not-requested"
+      case Scheduling.Failed       => "failed"
+
+    private def explain(conflict: ChapterConflict) = conflict match
+      case ChapterConflict.AtCapacity         => "An album can contain at most 65 interior spreads"
+      case ChapterConflict.HomeExists         => "This album already has a Home chapter"
+      case ChapterConflict.HomePeriodMismatch => "Home must span the album year"
+      case ChapterConflict.FolderAssigned     => "Another chapter already uses that source folder"
+      case ChapterConflict.TypeChange         => "A chapter's type cannot change"
+      case ChapterConflict.UnknownCountries   => "Select countries from the country catalog"
+
+    private object CanonicalId:
+      def unapply(value: String): Option[UUID] =
+        Either.catchOnly[IllegalArgumentException](UUID.fromString(value)).toOption.filter(_.toString === value)
+
+    private given Decoder[CountryId] = Decoder.decodeString.emap: value =>
+      CanonicalId.unapply(value).map(CountryId(_)).toRight("Country IDs must be canonical UUIDs")
+
+    private val countryDecoder = Decoder.decodeList[CountryId].emap: values =>
+      val distinct = values.map(_.value).distinct.size === values.size
+      val nonEmpty = NonEmptyList.fromList(values).toRight("Select at least one country")
+      Either.cond(distinct, (), "Select each country only once").flatMap(_ => nonEmpty)
+
+    private val dateDecoder = Decoder.decodeString.emap: value =>
+      val isCalendarDay = value.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")
+      Either.cond(isCalendarDay, value, "Use calendar dates in YYYY-MM-DD format").flatMap: date =>
+        Either.catchOnly[DateTimeException](LocalDate.parse(date)).leftMap(_ => "Supply a valid calendar date")
+
+    private val periodDecoder = Decoder.instance: cursor =>
+      val invalidPeriod = DecodingFailure("End must not precede start", cursor.history)
+      for
+        start <- cursor.get[LocalDate]("start")(using dateDecoder)
+        end   <- cursor.get[LocalDate]("end")(using dateDecoder)
+        days  <- (ChronoUnit.DAYS.between(start, end) + 1L).refineEither[Positive].leftMap(_ => invalidPeriod)
+      yield Period.Dates(VisitPeriod(start, days))
+
+    private val folderDecoder = Decoder.decodeString.emap: value =>
+      value.refineEither[PhotoSourceConstraint].leftMap(_ => "Supply an absolute source folder without traversal")
+
+    private val creationDecoder = Decoder.instance: cursor =>
+      cursor.get[String]("kind").flatMap:
+        case "home"     => detailsDecoder(isHome = true)(cursor)
+        case "vacation" => detailsDecoder(isHome = false)(cursor)
+        case _ => DecodingFailure("Choose vacation or home", cursor.history).asLeft[(DestinationName, NonEmptyList[CountryId], Period, PhotoSource)]
+
+    private def detailsDecoder(isHome: Boolean) =
+      Decoder.instance[(DestinationName, NonEmptyList[CountryId], Period, PhotoSource)]: cursor =>
+        for
+          name      <- decodeName(cursor, isHome)
+          countries <- cursor.get[NonEmptyList[CountryId]]("countries")(using countryDecoder)
+          period    <- if isHome then Period.AlbumYear.asRight else periodDecoder(cursor)
+          folder    <- cursor.get[PhotoSource]("sourceFolder")(using folderDecoder)
+        yield (name, countries, period, folder)
+
+    private def decodeName(cursor: HCursor, isHome: Boolean) =
+      val raw = if isHome then "Home".asRight[DecodingFailure] else cursor.get[String]("name").map(_.trim)
+      raw.flatMap: name =>
+        val reservedName = !isHome && name === "Home"
+        val valid        =
+          if reservedName then "Choose a vacation name other than Home".asLeft[DestinationName] else name.refineEither[Not[Empty] & Not[Blank]]
+        valid.leftMap(message => DecodingFailure(message, cursor.history))
+
+    private def readGear(album: AlbumId, chapter: ChapterId) =
+      gear.readGear(album, chapter).flatMap:
+        case GearReadResult.Found(selection) =>
+          Ok(encodeSelection(selection = selection)).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
+        case GearReadResult.NotFound => respondChapterNotFound
+        case GearReadResult.Failed   => respondServiceFailure
+
+    private def replaceGear(album: AlbumId, chapter: ChapterId, request: Request[F]) =
+      decodeGear(request).flatMap:
+        case Left(message)    => BadRequest(body = Map("message" -> message))
+        case Right(selection) =>
+          gear.replaceGear(album, chapter, selection = selection).flatMap:
+            case GearReplaceResult.Saved            => NoContent()
+            case GearReplaceResult.NotFound         => respondChapterNotFound
+            case GearReplaceResult.Rejected(reason) => BadRequest(body = Map("message" -> explainGear(reason)))
+            case GearReplaceResult.Failed           => respondServiceFailure
+            case GearReplaceResult.Uncertain        => InternalServerError(body = Map("code" -> "mutation_uncertain"))
+
+    private def decodeGear(request: Request[F]) =
+      request.as[Json].map(value => selectionDecoder.decodeJson(value).leftMap(_.getMessage))
+        .recover { case _: MessageBodyFailure => "Supply a valid JSON gear selection".asLeft[GearSelection] }
+
+    private def respondChapterNotFound = NotFound(body = Map("code" -> "chapter_not_found"))
+    private def respondServiceFailure  = InternalServerError(body = Map("code" -> "service_failure"))
+
+    private val idDecoder = Decoder.decodeString.emap(value => CanonicalId.unapply(value).toRight(left = "Gear IDs must be canonical UUIDs"))
+    private given Decoder[CameraId]        = idDecoder.map(value => CameraId(value = value))
+    private given Decoder[LensId]          = idDecoder.map(value => LensId(value = value))
+    private given Decoder[CameraSelection] = Decoder.instance: cursor =>
+      for
+        camera <- cursor.get[CameraId](k = "cameraId")
+        lenses <- cursor.get[Vector[LensId]](k = "lensIds")
+      yield CameraSelection(
+        camera,
+        NonEmptyVector.fromVector(vector = lenses).fold[CameraUse](CameraUse.FixedLens)(values =>
+          CameraUse.Interchangeable(lenses = values)
+        )
+      )
+
+    private val selectionDecoder = Decoder.decodeVector[CameraSelection].prepare(_.downField(k = "cameras"))
+
+    private def encodeSelection(selection: GearSelection) =
+      val cameras = selection.map: entry =>
+        val lenses = entry.use match
+          case CameraUse.FixedLens               => Vector.empty[LensId]
+          case CameraUse.Interchangeable(values) => values.toVector
+        Json.obj(
+          "cameraId" -> Json.fromString(value = entry.camera.value.toString),
+          "lensIds"  -> Json.arr(lenses.map(id => Json.fromString(value = id.value.toString))*)
+        )
+      Json.obj("cameras" -> Json.arr(cameras*))
+
+    private def explainGear(reason: GearManager.Failure) = reason match
+      case GearManager.Failure.DuplicateCamera    => "Select each camera only once"
+      case GearManager.Failure.UnknownCamera      => "Select a camera from the current catalog"
+      case GearManager.Failure.CameraKindMismatch => "Select lenses only for interchangeable cameras"
+      case GearManager.Failure.DuplicateLens      => "Select each lens only once per camera"
+      case GearManager.Failure.UnknownLens        => "Select a lens from the current catalog"
+      case GearManager.Failure.IncompatibleLens   => "Select lenses with a compatible mount and coverage"

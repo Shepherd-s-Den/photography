@@ -1,5 +1,10 @@
 package photography.adapters.http
 
+import cats.data.NonEmptyList
+import photography.domain.album.{AlbumAuthors, AlbumTitle, AlbumYear, CountryId, DestinationName, PhotoSource}
+import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
+import photography.usecases.chapter.ChapterMetadataManager
+
 import cats.data.NonEmptyVector
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
@@ -15,7 +20,7 @@ import photography.usecases.chapter.ChapterManager.*
 import photography.usecases.gear.GearManager
 import java.util.UUID
 
-final class ChapterGearApiSeamIntegrationTest extends CatsEffectSuite:
+final class ChapterApiGearSeamIntegrationTest extends CatsEffectSuite:
   private val album     = AlbumId(value = new UUID(0L, 1L))
   private val chapter   = ChapterId(value = new UUID(0L, 2L))
   private val fixed     = CameraId(value = new UUID(0L, 3L))
@@ -208,7 +213,7 @@ final class ChapterGearApiSeamIntegrationTest extends CatsEffectSuite:
       override def readGear(album: AlbumId, chapter: ChapterId): IO[GearReadResult] = refs.calls.update(_ :+ Call.Read(album, chapter)).as(readResult)
       override def replaceGear(album: AlbumId, chapter: ChapterId, selection: GearSelection): IO[GearReplaceResult] =
         refs.calls.update(_ :+ Call.Replace(album, chapter, selection = selection)).as(replaceResult)
-    ChapterGearApi.make(chapters).routes.orNotFound
+    ChapterApi.make(buildUnusedWorkspaces, buildUnusedAlbums, buildUnusedMetadata, chapters).routes.orNotFound
   // scalafix:on DisableSyntax.defaultArgs
 
   private def send(server: HttpApp[IO], method: Method, path: String, body: String) =
@@ -234,3 +239,51 @@ final class ChapterGearApiSeamIntegrationTest extends CatsEffectSuite:
     case GearManager.Failure.DuplicateLens      => "Select each lens only once per camera"
     case GearManager.Failure.UnknownLens        => "Select a lens from the current catalog"
     case GearManager.Failure.IncompatibleLens   => "Select lenses with a compatible mount and coverage"
+
+  private def buildUnusedAlbums =
+    new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
+      override def get(id: AlbumId): IO[AlbumManager.GetAlbumResult] =
+        IO.raiseError[AlbumManager.GetAlbumResult](new AssertionError("Unexpected album read"))
+      override def list(page: Int): IO[AlbumManager.ListAlbumsResult] =
+        IO.raiseError[AlbumManager.ListAlbumsResult](new AssertionError("Unexpected album list"))
+      override def create(year: AlbumYear, title: AlbumTitle): IO[AlbumManager.CreateAlbumResult] =
+        IO.raiseError[AlbumManager.CreateAlbumResult](new AssertionError("Unexpected album creation"))
+      override def rename(id: AlbumId, title: AlbumTitle): IO[AlbumManager.RenameResult] =
+        IO.raiseError[AlbumManager.RenameResult](new AssertionError("Unexpected album rename"))
+      override def delete(id: AlbumId): IO[AlbumManager.DeleteAlbumResult] =
+        IO.raiseError[AlbumManager.DeleteAlbumResult](new AssertionError("Unexpected album deletion"))
+
+  private def buildUnusedWorkspaces =
+    new AlbumWorkspaceManager[IO]:
+      override def get(id: AlbumId): IO[AlbumWorkspaceManager.GetResult] =
+        IO.raiseError[AlbumWorkspaceManager.GetResult](new AssertionError("Unexpected workspace read"))
+      override def listChapter(id: ChapterId): IO[AlbumWorkspaceManager.ChapterResult] =
+        IO.raiseError[AlbumWorkspaceManager.ChapterResult](new AssertionError("Unexpected photo inventory read"))
+
+  private def buildUnusedMetadata =
+    new ChapterMetadataManager[IO]:
+      override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): IO[ChapterMetadataManager.SaveDescriptionResult] =
+        IO.raiseError[ChapterMetadataManager.SaveDescriptionResult](new AssertionError("Unexpected description mutation"))
+      override def refresh(chapter: ChapterId): IO[ChapterMetadataManager.RefreshResult] =
+        IO.raiseError[ChapterMetadataManager.RefreshResult](new AssertionError("Unexpected photo refresh"))
+      override def create(
+          album: AlbumId,
+          name: DestinationName,
+          countries: NonEmptyList[CountryId],
+          period: ChapterMetadataManager.Period,
+          folder: PhotoSource
+      ): IO[ChapterMetadataManager.CreateResult] =
+        IO.raiseError[ChapterMetadataManager.CreateResult](new AssertionError("Unexpected chapter creation"))
+      override def update(
+          album: AlbumId,
+          chapter: ChapterId,
+          name: DestinationName,
+          countries: NonEmptyList[CountryId],
+          period: ChapterMetadataManager.Period,
+          folder: PhotoSource
+      ): IO[ChapterMetadataManager.UpdateResult] =
+        IO.raiseError[ChapterMetadataManager.UpdateResult](new AssertionError("Unexpected chapter update"))
