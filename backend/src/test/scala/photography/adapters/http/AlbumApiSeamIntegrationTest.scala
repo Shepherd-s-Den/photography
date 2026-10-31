@@ -25,18 +25,10 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
     val emptyPlacements = Vector.empty[SpreadPlacement]
     Spread.AlbumStart(SpreadId(new UUID(0L, 3L)), templateId, photoSlots = emptyPhotoSlots, textSlot, placements = emptyPlacements)
   private val album =
-    val createdAt     = Instant.parse("2026-10-24T10:00:00.123Z")
-    val emptyChapters = Vector.empty[Chapter]
-    Album(
-      id,
-      year = 2026,
-      title = "Journey of the Shepherds 2026",
-      synopsis = "A synopsis",
-      authors = Author.all,
-      createdAt,
-      start,
-      chapters = emptyChapters
-    )
+    val createdAt         = Instant.parse("2026-10-24T10:00:00.123Z")
+    val emptyChapters     = Vector.empty[Chapter]
+    val title: AlbumTitle = "Journey of the Shepherds 2026"
+    Album(id, year = 2026, title, synopsis = "A synopsis", authors = Author.all, createdAt, start, chapters = emptyChapters)
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some

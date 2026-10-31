@@ -1,3 +1,5 @@
+UPDATE album SET authors = CASE WHEN year <= 2025 THEN 3 ELSE 7 END;
+
 INSERT INTO spread_template (id, name, kind) VALUES
     ('00000000-0000-0000-0000-000000000001', '2 x (L/L) + Text', 'album_start'),
     ('00000000-0000-0000-0000-000000000002', 'L + Text', 'album_start'),

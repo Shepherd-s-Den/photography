@@ -2,7 +2,6 @@ package photography.adapters.sqlite.album
 
 import photography.adapters.sqlite.FlywayMigrator
 import photography.adapters.sqlite.SqliteConnection
-import photography.adapters.sqlite.SqliteCodecs.given
 
 import cats.data.NonEmptyList
 import cats.effect.{IO, Resource}
@@ -14,7 +13,6 @@ import org.typelevel.doobie.*
 import org.typelevel.doobie.implicits.*
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import org.flywaydb.core.Flyway
 import org.sqlite.{SQLiteErrorCode, SQLiteException}
 import photography.app.config.SqliteConfig
 import photography.domain.album.*
@@ -514,28 +512,26 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         assert(failures.forall(_.isLeft))
         assertEquals(retained, GetResult.Found(album))
 
-  test("should initialize historical credits once and retain saved authors and composition across restart"):
+  test("should retain authored album content and composition across connection reopening"):
     val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "album-history-", ".sqlite"))
+    val database        = Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void)
+      .evalTap(path => FlywayMigrator.make[IO](path).use(_.migrate).void)
 
-    Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void).use: path =>
-      val original          = buildAlbum(index = 1).copy(year = 2025, synopsis = "Retained Ș\n日本")
-      val later             = buildAlbum(index = 2).copy(year = 2026, synopsis = original.synopsis)
-      val albums            = Vector(original, later)
-      val historicalAuthors = Set(Author.Cosmin, Author.Mara).refineUnsafe[MinLength[1]]
-      val selected          = Set(Author.Iacob).refineUnsafe[MinLength[1]]
-      val oldMigration      = IO.blocking:
-        Flyway.configure().dataSource(s"jdbc:sqlite:${path.toAbsolutePath}", "", "").table("flyway").locations("db").target("2").load().migrate()
-      val initializeHistoricalAlbums = buildConnection(path).use(xa => albums.traverse_(album => insertHistoricalAlbum(album).transact(xa)))
-      val migrateAuthors             = FlywayMigrator.make[IO](path).use(_.migrate)
-      val saveHistoricalAuthors      = buildConnection(path).use: xa =>
+    database.use: path =>
+      val original    = buildAlbum(index = 1).copy(year = 2025, synopsis = "Retained Ș\n日本")
+      val later       = buildAlbum(index = 2).copy(year = 2026, synopsis = original.synopsis)
+      val albums      = Vector(original, later)
+      val selected    = Set(Author.Iacob).refineUnsafe[MinLength[1]]
+      val saveAuthors = buildConnection(path).use: xa =>
         val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
 
         for
+          _       <- albums.traverse_(album => repository.create(album, buildCover(album)))
           first   <- repository.get(original.id)
           current <- repository.get(later.id)
           saved   <- repository.saveAuthors(original.id, selected)
         yield
-          assertEquals(first, GetResult.Found(original.copy(authors = historicalAuthors)))
+          assertEquals(first, GetResult.Found(original))
           assertEquals(current, GetResult.Found(later))
           assertEquals(saved, SaveAuthorsResult.Saved(original.copy(authors = selected)))
       val verifyRestartRetention = buildConnection(path).use: xa =>
@@ -552,14 +548,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(cleared, SaveSynopsisResult.Saved(original.copy(title = changedTitle, synopsis = "", authors = selected)))
           assertEquals(deleted, DeleteResult.Deleted)
 
-      for
-        _ <- oldMigration
-        _ <- initializeHistoricalAlbums
-        _ <- migrateAuthors
-        _ <- saveHistoricalAuthors
-        _ <- migrateAuthors
-        _ <- verifyRestartRetention
-      yield ()
+      saveAuthors >> verifyRestartRetention
 
   test("should report lost commit acknowledgement as uncertain without replaying the field mutation"):
     val acknowledgements = Vector[Throwable](
@@ -587,32 +576,6 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(renamed, RenameResult.Failed(Failure.DatabaseFailure))
           assertEquals(found, GetResult.Found(album.copy(title = changedTitle, synopsis = "Saved once", authors = selected)))
     }
-
-  private def insertHistoricalAlbum(album: Album) =
-    val opening     = album.opening
-    val cover       = buildCover(album)
-    val text        = opening.textSlot
-    val insertAlbum = sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
-                           VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, ${album.createdAt.toEpochMilli})"""
-    val insertOpening = sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
-                             VALUES (${opening.id.value}, ${opening.template.value}, 'album_start', ${album.id.value}, 0)"""
-    val insertPhotos = opening.photoSlots.traverse_ { slot =>
-      val box = slot.box
-      sql"""INSERT INTO spread_photo_slot (id, spread_id, x, y, width, height)
-            VALUES (${slot.id.value}, ${opening.id.value}, $box)""".update.run.void
-    }
-    val insertText = sql"""INSERT INTO spread_text_slot (id, spread_id, x, y, width, height)
-                          VALUES (${text.id.value}, ${opening.id.value}, ${text.box})"""
-
-    for
-      _ <- insertAlbum.update.run
-      _ <- insertOpening.update.run
-      _ <- insertPhotos
-      _ <- insertText.update.run
-      _ <- sql"INSERT INTO cover (album_id, spine_owner) VALUES (${album.id.value}, 'front')".update.run
-      _ <- sql"INSERT INTO cover_slot (id, album_id, side) VALUES (${cover.front.id.value}, ${album.id.value}, 'front')".update.run
-      _ <- sql"INSERT INTO cover_slot (id, album_id, side) VALUES (${cover.back.id.value}, ${album.id.value}, 'back')".update.run
-    yield ()
 
   private def buildConnection(path: Path) =
     SqliteConnection.make[IO](SqliteConfig(path, connectionAcquisitionThreads = 2, maxSessions = 2)).buildTransactor

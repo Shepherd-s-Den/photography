@@ -99,6 +99,10 @@ Every product change follows the [SDD skill](.agents/skills/sdd/SKILL.md). Its p
 - Keep test names in the vocabulary of the behavior exposed by the tested boundary.
 - Keep `for` comprehension generators contiguous, without blank lines. Separate Arrange / Act / Assert outside the comprehension rather than interrupting its sequence.
 
+## SQLite evolution
+
+Until the first NAS deployment, evolve schema declarations in V1 and data mutations in V2. Disposable development databases can be recreated; retained spike data requires explicit authorization. Prove the resulting persistence through repository-based seam integration tests using ordinary migrated database setup, rather than explicit Flyway migration/version tests.
+
 ## Definition of done
 
 A change is done when its proposal is reviewed, tests projected from its acceptance criteria pass, applicable component gates pass, living documents named in Doc Sync are updated, and the completed spec is archived.

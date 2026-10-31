@@ -37,6 +37,61 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
   private val read         = PhotoStorage.ReadResult.Read(content, metadata)
   private val error        = new RuntimeException("boundary failed")
 
+  test("should save exact captions and clear through the photo owner without import or read work"):
+    val cases = Vector(
+      PhotoRepository.SaveCaptionResult.Saved         -> SaveCaptionResult.Saved,
+      PhotoRepository.SaveCaptionResult.PhotoNotFound -> SaveCaptionResult.PhotoNotFound,
+      PhotoRepository.SaveCaptionResult.Failed(error) -> SaveCaptionResult.Failed,
+      PhotoRepository.SaveCaptionResult.Uncertain     -> SaveCaptionResult.Uncertain
+    )
+
+    cases.traverse_ { case (response, expected) =>
+      Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
+        val caption        = (id: PhotoId, text: String) => events.update(_ :+ s"caption:${id.value}:$text").as(response)
+        val manager        = buildManager(events, caption = caption)
+        val texts          = Vector("日本\nVacanță", "", " ")
+        val expectedEvents = texts.flatMap(text => Vector("transaction", s"caption:${existing.id.value}:$text"))
+
+        for
+          results <- texts.traverse(text => manager.saveCaption(existing.id, text = text))
+          actual  <- events.get
+        yield
+          assertEquals(results, Vector.fill(texts.size)(expected))
+          assertEquals(actual, expectedEvents)
+    }
+
+  test("should expose uncertain caption acknowledgement without reading or retrying"):
+    Ref.of[IO, Vector[String]](Vector.empty).flatMap: events =>
+      val caption = (_: PhotoId, _: String) => events.update(_ :+ "caption") >> error.raiseError[IO, PhotoRepository.SaveCaptionResult]
+      val manager = buildManager(events, caption = caption)
+
+      for
+        result <- manager.saveCaption(existing.id, text = "Saved?")
+        actual <- events.get
+      yield
+        assertEquals(result, SaveCaptionResult.Uncertain)
+        assertEquals(actual, Vector("transaction", "caption"))
+
+  test("should finish the caption transaction handoff before honoring cancellation"):
+    TestControl.executeEmbed:
+      val signals = (Ref.of[IO, Vector[String]](Vector.empty), Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit]).tupled
+
+      signals.flatMap { case (events, entered, release, committed, cancelStarted) =>
+        val caption = (_: PhotoId, _: String) =>
+          entered.complete(()).void >> release.get >> committed.complete(()).as(PhotoRepository.SaveCaptionResult.Saved)
+        val manager = buildManager(events, caption = caption)
+
+        for
+          worker       <- manager.saveCaption(existing.id, text = "Caption").start
+          _            <- entered.get
+          cancellation <- (cancelStarted.complete(()).void >> worker.cancel).start
+          _            <- cancelStarted.get >> IO.cede
+          _            <- release.complete(())
+          _            <- cancellation.join
+          completed    <- committed.tryGet
+        yield assertEquals(completed, ().some)
+      }
+
   test("should await publication, preserve identity and caption, and retire only the previous thumbnail"):
     Vector(
       (metadata.copy(hash = "changed"), ThumbnailQuality.Standard),
@@ -292,7 +347,9 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
       recording: IO[PhotoRepository.RecordWriteResult] = PhotoRepository.RecordWriteResult.Recorded.pure[IO],
       completing: IO[PhotoRepository.CompleteWriteResult] = PhotoRepository.CompleteWriteResult.Completed.pure[IO],
       resolving: IO[Unit] = IO.unit,
-      nextId: IO[UUID] = new UUID(0L, 9L).pure[IO]
+      nextId: IO[UUID] = new UUID(0L, 9L).pure[IO],
+      caption: (PhotoId, String) => IO[PhotoRepository.SaveCaptionResult] =
+        (_, _) => IO.raiseError[PhotoRepository.SaveCaptionResult](new AssertionError("Unexpected caption mutation"))
   ) =
     given IdGenerator[IO] with
       override def generateId: IO[UUID] = nextId
@@ -313,12 +370,8 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
     val writePhoto  = save
     val removePhoto = remove
     val repository  = new PhotoRepository[Db]:
-      override def saveCaption(id: PhotoId, maybeCaption: Option[String]): Db[PhotoRepository.SaveCaptionResult] =
-        Kleisli.liftF[
-          IO,
-          Unit,
-          PhotoRepository.SaveCaptionResult
-        ](IO.raiseError[PhotoRepository.SaveCaptionResult](new AssertionError("Unexpected caption mutation")))
+      override def saveCaption(id: PhotoId, text: String): Db[PhotoRepository.SaveCaptionResult] =
+        Kleisli.liftF[IO, Unit, PhotoRepository.SaveCaptionResult](caption(id, text))
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
         val listed = maybeListed.getOrElse(current.get.map(photos => PhotoRepository.ListResult.Listed(photos)))
         Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](IO(assertEquals(id, chapter)) >> listed)

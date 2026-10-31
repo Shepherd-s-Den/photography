@@ -18,8 +18,8 @@ object SqlitePhotoRepository:
   def make: PhotoRepository[ConnectionIO] = new LiveSqlitePhotoRepository
 
   final private class LiveSqlitePhotoRepository extends PhotoRepository[ConnectionIO]:
-    override def saveCaption(photo: PhotoId, maybeCaption: Option[String]): ConnectionIO[SaveCaptionResult] =
-      writeCaption(photo, maybeCaption = maybeCaption).map:
+    override def saveCaption(photo: PhotoId, text: String): ConnectionIO[SaveCaptionResult] =
+      writeCaption(photo, maybeCaption = Option.when(text.nonEmpty)(text)).map:
         case Right(1)    => SaveCaptionResult.Saved
         case Right(_)    => SaveCaptionResult.PhotoNotFound
         case Left(cause) => SaveCaptionResult.Failed(cause)

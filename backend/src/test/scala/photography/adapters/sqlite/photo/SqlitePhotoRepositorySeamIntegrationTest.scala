@@ -5,7 +5,6 @@ import photography.adapters.sqlite.SqliteConnection
 
 import cats.Eq
 import cats.effect.{IO, Ref, Resource}
-import cats.effect.std.Mutex
 import cats.syntax.all.*
 import io.github.iltotore.iron.autoRefine
 import io.github.iltotore.iron.*
@@ -16,7 +15,7 @@ import org.typelevel.doobie.implicits.*
 import org.typelevel.doobie.ConnectionIO
 import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
-import photography.adapters.filesystem.FileThumbnailStorage
+import photography.adapters.filesystem.{FilePhotoStorage, FileThumbnailStorage}
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.app.config.SqliteConfig
 import photography.capabilities.{IdGenerator, Transaction}
@@ -24,7 +23,7 @@ import photography.domain.album.*
 import photography.ports.photo.PhotoRepository.*
 import photography.ports.photo.{PhotoStorage, ThumbnailStorage}
 import photography.syntax.SyncSyntax.*
-import photography.usecases.photo.{PhotoCaptionManager, PhotoManager, PhotoWriteRecovery}
+import photography.usecases.photo.{PhotoManager, PhotoWriteRecovery}
 import photography.ports.photo.PhotoThumbnailGenerator
 import java.nio.file.{Files, Path}
 import java.time.LocalDateTime
@@ -74,14 +73,14 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           _                <- seededPhoto.transact(xa)
           snapshot         <- repository.listChapter(chapter).transact(xa)
           beforePlacements <- placements.transact(xa)
-          edited           <- repository.saveCaption(photoId, maybeCaption = "日本\nVacanță".some).transact(xa)
+          edited           <- repository.saveCaption(photoId, text = "日本\nVacanță").transact(xa)
           captionOnly      <- repository.listChapter(chapter).transact(xa)
           regenerated      <- repository.save(replacement).transact(xa)
           listed           <- repository.listChapter(chapter).transact(xa)
-          cleared          <- repository.saveCaption(photoId, maybeCaption = None).transact(xa)
+          cleared          <- repository.saveCaption(photoId, text = "").transact(xa)
           replayed         <- repository.save(replacement).transact(xa)
           finalPhotos      <- repository.listChapter(chapter).transact(xa)
-          missing          <- repository.saveCaption(PhotoId(new UUID(0L, 99L)), maybeCaption = "missing".some).transact(xa)
+          missing          <- repository.saveCaption(PhotoId(new UUID(0L, 99L)), text = "missing").transact(xa)
           afterPlacements  <- placements.transact(xa)
         yield
           assertEquals(snapshot, ListResult.Listed(photos = Vector(photo)))
@@ -113,23 +112,23 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
         val abortTransaction = sql"""CREATE TRIGGER reject_caption BEFORE UPDATE OF caption ON photo BEGIN
           SELECT RAISE(ROLLBACK, 'Caption transaction aborted');
         END""".update.run
-        val abortedCaption = repository.saveCaption(photoId, maybeCaption = None) >>
+        val abortedCaption = repository.saveCaption(photoId, text = "") >>
           new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]
 
         for
           _             <- (seed >> repository.save(photo)).transact(xa)
           _             <- reject.transact(xa)
-          failed        <- repository.saveCaption(photoId, maybeCaption = "Rejected".some).transact(xa)
+          failed        <- repository.saveCaption(photoId, text = "Rejected").transact(xa)
           retained      <- repository.listChapter(chapter).transact(xa)
           _             <- sql"DROP TRIGGER reject_caption".update.run.transact(xa)
           _             <- ignore.transact(xa)
-          ignored       <- repository.saveCaption(photoId, maybeCaption = None).transact(xa)
+          ignored       <- repository.saveCaption(photoId, text = "").transact(xa)
           ignoredPhotos <- repository.listChapter(chapter).transact(xa)
           _             <- sql"DROP TRIGGER reject_caption".update.run.transact(xa)
           rolledBack    <- abortedCaption.transact(xa).attempt
           finalPhotos   <- repository.listChapter(chapter).transact(xa)
           _             <- abortTransaction.transact(xa)
-          uncertain     <- repository.saveCaption(photoId, maybeCaption = None).transact(xa).attempt
+          uncertain     <- repository.saveCaption(photoId, text = "").transact(xa).attempt
         yield
           failed match
             case SaveCaptionResult.Failed(cause) => assert(cause.getMessage.contains("Rejected caption"))
@@ -159,18 +158,18 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
             override def resolve[A](program: ConnectionIO[A]): IO[A] =
               IO.raiseError[A](new AssertionError("Unexpected automatic reconciliation"))
 
-          Mutex[IO].flatMap: mutex =>
-            given Mutex[IO] = mutex
-            val manager     = PhotoCaptionManager.make[IO, ConnectionIO](repository)
-            val expected    = if committed then photo.copy(maybeCaption = "日本\nVacanță".some) else photo
+          val thumbnails = FileThumbnailStorage.make[IO](path.getParent)
+          val originals  = FilePhotoStorage.make[IO](thumbnails)
+          val manager    = PhotoManager.make(originals, repository, buildGenerator)
+          val expected   = if committed then photo.copy(maybeCaption = "日本\nVacanță".some) else photo
 
-            for
-              _      <- (seed >> repository.save(photo)).transact(xa)
-              result <- manager.save(photoId, text = "日本\nVacanță")
-              actual <- repository.listChapter(chapter).transact(xa)
-            yield
-              assertEquals(result, PhotoCaptionManager.SaveResult.Uncertain)
-              assertEquals(actual, ListResult.Listed(photos = Vector(expected)))
+          for
+            _      <- (seed >> repository.save(photo)).transact(xa)
+            result <- manager.saveCaption(photoId, text = "日本\nVacanță")
+            actual <- repository.listChapter(chapter).transact(xa)
+          yield
+            assertEquals(result, PhotoManager.SaveCaptionResult.Uncertain)
+            assertEquals(actual, ListResult.Listed(photos = Vector(expected)))
     }
 
   test("should retain complete photos and write evidence across database reopening"):

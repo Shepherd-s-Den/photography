@@ -32,7 +32,7 @@ import scala.jdk.CollectionConverters.*
 final class FilePhotoStorageSeamIntegrationTest extends CatsEffectSuite:
   private given Logger[IO]     = Slf4jLogger.getLogger[IO]
   private lazy val undatedJpeg = buildJpeg(maybeDate = None, orientation = 1, maybeFraction = None)
-  private val imageIO          = ResourceSuiteLocalFixture("image-io", ImageIOTestResources.acquire)
+  private val imageIO          = ResourceTestLocalFixture("image-io", ImageIOTestResources.acquire)
 
   override def munitFixtures = List(imageIO)
 
