@@ -11,6 +11,9 @@ base=$(git rev-parse --verify "$1^{commit}")
 merge_base=$(git merge-base "$base" HEAD)
 cd "$TOP"
 
+python3 .agents/skills/sdd/scripts/check_guidance.py
+python3 -m unittest discover -s .agents/skills/sdd/scripts -p 'test_guidance.py'
+
 git diff --name-only --diff-filter=ACMR -z "$merge_base" HEAD -- '*.md' |
   while IFS= read -r -d '' file; do
     python3 .agents/skills/sdd/scripts/check_markdown_wrapping.py "$file"

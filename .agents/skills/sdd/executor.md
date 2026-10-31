@@ -1,68 +1,56 @@
-# SDD executor
-
-Does the work for one phase at a time, in order, as sequenced by [`SKILL.md`](SKILL.md). Each phase below names its checklist or template — read that file; do not restate it here.
+# Execution
 
 ## Classify
 
-Decide `feature` (planned change, refactor, migration — you already know the new behavior) or `investigation` (bug/incident — the spec is a trail toward a root cause). Name the branch `feature/<slug>` or `investigation/<slug>` and record the classification in `.agent-work/<slug>/checklist.md`.
+- Record feature or investigation, approved scope, baseline and affected owners in ignored repository-root `.agent-work/<slug>/state.md`; use the matching branch prefix.
+- Before each phase and after interruption, read work state and resolve earlier open gates.
+- Draft the durable knowledge delta using [context policy](context.md). A nonempty delta requires a reviewed spec; otherwise record preserved behavior and engineering rules as the review basis and skip Spec/Archive PRs. Only the maintainer may waive a required spec.
+- Reclassify when scope changes. Investigations establish the root cause from evidence before selecting a repair.
+- Investigations record each tested hypothesis and the evidence accepting or rejecting it.
+- Record phase timing separately for exploration, implementation, automated checks, review/repairs and approval waiting; this is evidence, not a diary.
 
-Then decide whether a spec is required: draft the Doc Sync knowledge delta first — one line naming the owning doc, section and durable change. Apply `SKILL.md`'s living-context policy when deciding what belongs there. A non-empty entry means write the spec; a pure refactor or internal cleanup with nothing to put there doesn't need one. Only the maintainer may waive this requirement, explicitly and for a specific change — record the decision (or waiver) in `.agent-work/<slug>/checklist.md`.
+## Precedent and optional experiment
 
-Also make the complexity call here, before the spec (`DESIGN-PRINCIPLES.md` §7): whether this behavior is served by growing an existing flow or needs new machinery, and whether a unit the change will cross grows past a single responsibility and must split as part of it. "You don't need this" and "split this first" are valid, in-scope outcomes. Record the call in `.agent-work/<slug>/checklist.md`; by spec time it is already decided, and the spec only reflects it.
+- Read the closest complete implementation, concrete caller and owning suite for each distinct seam. Record what stays the same and the precise contract gap.
+- Reuse sufficient contracts; evolve their existing owner when insufficient; separate only an independently changing responsibility. A new endpoint or caller alone establishes neither necessity nor ownership.
+- Expand investigation only to answer a named question affecting behavior, ownership or feasibility. Settled decisions remain settled unless new evidence contradicts them.
+- Default to no spike. Existing UX is inspected or demonstrated in the current application.
+- For material uncertainty, propose question, smallest experiment, evidence and budget; obtain approval before execution.
+- An approved disposable experiment defaults to Haiku 5.5, targets 10 minutes and stops at 15 minutes of active work. Continuing, model substitution or escalation needs approval; if that model is unavailable, report it.
+- Validate the experiment once against its question using relevant product checks; coverage may be skipped.
+- Keep experiments isolated and uncommitted; retain them only for an identified comparison, then stop owned services and remove only their resolved worktree.
 
-## Spike
+## Spec
 
-Follow the Spike workflow in [`SKILL.md`](SKILL.md). This file adds no separate spike procedure.
+- Use [the template](templates/change-spec.md), current living sources and confirmed evidence. Describe behavior and contracts, not signatures or code layout.
+- Project normal, failure and boundary outcomes; distinguish database constraints from application decisions. Include only useful diagrams or unique prose.
+- Review with the spec template before publication; implementation follows its authorized merge.
 
-## Spec PR
+## Design approval
 
-For a feature, wait until the user has run the local spike and confirmed the intended behavior before preparing or finalizing the proposal. Carry that confirmed behavior into the spec; a review pass over an unconfirmed draft does not satisfy the Spec PR gate.
+- Before tests or production changes, present [the delta map](templates/design-map.md) in chat for explicit maintainer approval.
+- Account for every changed domain model, use case and driving/driven port, including existing APIs; signatures follow source-backed ownership decisions.
+- Bypass only when all three layers are unchanged, with source evidence. Spike, spec and previous slice approvals do not substitute.
+- When later evidence changes an approved owner or contract, reopen the affected map before implementation; approved spec amendments also require authorization.
+- After an authorized spec amendment, update its criteria before their tests or implementation.
+- Include that amendment in the current slice's independent review.
 
-Read [`templates/change-spec.md`](templates/change-spec.md) fresh — never recreate it from memory. Read the closest approved precedent when one exists; the current template and `spec-quality.md` govern altitude and density. Derive current facts from living docs and confirmed findings.
+## Implement and test
 
-**Behavior/contract first.** Trace the concrete trigger through observable outcomes, committed state, failure order and UI delivery. Use diagrams or tables where they resolve a flow or contract question; add only prose that clarifies remaining guarantees.
+- Adapt the precedent within the approved current slice.
+- For new behavior, batch its tests and run one red check before the production change.
+- Finish a coherent code-and-test change before running its targeted validation; do not compile or test after each edited file.
+- Other early checks require a named compiler/type uncertainty.
+- Rerun checks after a meaningful repair, not after unrelated edits; publication still requires all applicable gates.
+- Map acceptance criteria and enumerated edges to owning tests/slices; deferred guarantees retain explicit owners. Adapt existing scenarios unless their observable contract changes.
+- Core tests substitute ports; adapters cross their real HTTP/database/filesystem/process/configuration seam; frontend exercises delivered boundaries and accessibility.
+- Follow [conventions](conventions.md). Run the smallest existing checks covering the change, then required publication gates; preserve compiler, formatter, lint and coverage enforcement.
+- Perform one template-guided self-check, then [independent review](reviewer.md). A correction reopens affected decisions and consequences, not unrelated settled work.
+- Demonstrate the delivered layer with isolated state and obtain maintainer confirmation before its PR; core/adapters do not require an unfinished UI.
 
-State changed domain, persisted-data and boundary guarantees and who enforces them. Distinguish database constraints from application rules and verify constraint mechanisms against current sources.
+## Complete
 
-Keep signatures, module/file layouts, adapter internals and slice execution notes in the ignored implementation design map. The proposal owns agreed behavior and domain contracts; its structure follows intent rather than a diff walkthrough.
-
-Draft Doc Sync as the change to the enduring system model, boundary ownership, testing strategy or operating model. Link precise contract/data changes to their authoritative artifact. The proposal's acceptance criteria remain feature evidence, not the outline of a new living-doc section.
-
-When a spike preceded this phase, ground design notes and any real alternatives in its findings.
-
-- **Feature:** current → new behavior, acceptance criteria, invariants, tradeoffs, Doc Sync.
-- **Investigation:** hypotheses and evidence for/against each, narrowing to a proven root cause — the spec's `What & Why` ends up stating that root cause and the hypotheses it ruled out.
-
-Self-check against [`checklists/spec-quality.md`](checklists/spec-quality.md), then satisfy `SKILL.md`'s PR-opening gate before publishing the proposal. Execution notes remain ignored; implementation starts only after the Spec PR is reviewed and merged.
-
-## Tests
-
-Before writing tests or production code for each slice, build a short design map in `.agent-work/<slug>/`: module responsibility, consuming boundary and proposed call/signature/result; invariants and enforcing boundary; effects and dependency owners/lifetimes; policy authority; owning suite; exact source/test precedents inspected. Use the blocking questions in [`checklists/code-quality.md`](checklists/code-quality.md), not a proposed file list.
-
-Derive caller-first APIs from a concrete trigger-to-UI sequence and real callers' available inputs and consumed results; distinguish application operations from driven ports. Before adding a method, try an existing boundary or local derivation. Walk scenarios through every signature and parameter using `reviewer.md`'s seam-definition evidence; prove necessity, not just a possible caller. Source-verify dependency effects, resource lifetimes and transaction guarantees, and apply the stack's API/type conventions.
-
-Check each row against the consuming boundary and applicable stack leaf. Stop on an unanswered question or failed condition; resolve the API or ownership before implementation. Apply `SKILL.md`'s adjudication rule for departures. Update the map when a new module or changed boundary emerges.
-
-Project acceptance scenarios from the merged spec's criteria and enumerated edge cases before implementation. Tests of architectural/type guarantees trace to their governing rule at the owning module or seam; product specs need not restate implementation constraints. Follow `CONTRIBUTING.md`'s testing conventions rather than reverse-engineering tests from the code written.
-
-## Implementation PR(s)
-
-Implement the approved behavior within the checked design map. Split into multiple PRs on separable seams, or when one PR would exceed a focused review session — never to dodge a gate. Each PR links the merged spec.
-
-Make the tests pass, then run the gates `AGENTS.md` defines; never weaken a gate to pass one. Self-check the shared quality checklist, stack leaves selected under `SKILL.md` and [`implementation-completeness.md`](checklists/implementation-completeness.md) against this slice. Replace proposed design-map calls with actual symbols and consumption. Run a second whole-diff pass for callable surfaces, declarations, syntax, capabilities and test structure before the review protocol.
-
-Run the slice locally against its real boundaries and obtain the maintainer's behavior confirmation before opening its PR, as required by `SKILL.md`. Keep local runs isolated from production state unless the maintainer explicitly authorizes that access.
-
-The handoff identifies the exact baseline and candidate revision or content manifest, every changed/untracked file, design-map answers, checklist evidence, local confirmation and command results. Missing evidence is an open gate. Follow [`reviewer.md`](reviewer.md) for the independent review, repair verification and missed-rule recovery.
-
-## Archive PR
-
-Before archiving, run the implemented journey locally and compare it with the approved spec and the user's spike confirmation. Resolve any mismatch first.
-
-After every Implementation PR has merged, read `SKILL.md`'s living-context policy, each affected template and the complete current owning document. Verify current facts against merged source before writing.
-
-Integrate each `Doc Sync` knowledge delta into its owning section (`specs/*.md`, or `ci/specs/*.md` for pipeline changes). Synthesize at the document's strategic altitude rather than copying proposal text. Preserve precise details in their authoritative contracts or source, and prune stale explanations. Keep a local ledger mapping every delta to its integrated section or authoritative pointer.
-
-Read the resulting documents as a new contributor: the system model and operating decisions must be clear without reconstructing the feature history. Apply the living-doc publication check to the whole affected documents, then move the spec to `specs/changes/archive/YYYY-MM-DD-<slug>/`.
-
-Before opening this PR, self-check [`checklists/implementation-completeness.md`](checklists/implementation-completeness.md) against the **complete merged change**, not just the last PR, then satisfy `SKILL.md`'s PR-opening gate. This PR introduces no new product behavior.
+- After all implementation merges, verify the integrated local journey against the approved review basis and obtain confirmation; resolve discrepancies.
+- For spec-backed work, integrate every Doc Sync delta at its owning section, prune superseded content and archive under `specs/changes/archive/YYYY-MM-DD-<slug>/`.
+- The archive introduces no behavior; apply the archive/context review to the complete merged change and resulting documents.
+- Persist the candidate, approvals, test mapping, command results, findings and reviewer channel in state; resume from that state after interruption.
