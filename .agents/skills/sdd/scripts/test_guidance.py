@@ -79,7 +79,7 @@ class GuidanceTest(unittest.TestCase):
             self.inspect()
 
     def test_should_check_cli_peer_parity_and_drift(self):
-        command = [sys.executable, str(Path(__file__).with_name("check_guidance.py")),
+        command = [sys.executable, "-B", str(Path(__file__).with_name("check_guidance.py")),
                    "--root", str(self.root), "--peer", str(self.root)]
         self.assertEqual(subprocess.run(command, capture_output=True).returncode, 0)
         with tempfile.TemporaryDirectory() as directory:
