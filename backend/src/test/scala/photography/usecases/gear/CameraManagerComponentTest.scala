@@ -43,22 +43,14 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
   test("should protect every saved camera use when editing kind, mount or sensor"):
     val cases = Vector(
       (camera, Usage.Interchangeable(lenses = NonEmptyVector.one(lens)), true),
-      (
-        camera.copy(kind = fullFrameKind),
-        Usage.Interchangeable(lenses = NonEmptyVector.one(lens)),
-        false
-      ),
+      (camera.copy(kind = fullFrameKind), Usage.Interchangeable(lenses = NonEmptyVector.one(lens)), false),
       (
         camera.copy(kind = fullFrameKind),
         Usage.Interchangeable(lenses = NonEmptyVector.of(lens.copy(coverage = SensorFormat.FullFrame), lens)),
         false
       ),
       (camera, Usage.Interchangeable(lenses = NonEmptyVector.one(lens.copy(coverage = SensorFormat.FullFrame))), true),
-      (
-        camera.copy(kind = nikonKind),
-        Usage.Interchangeable(lenses = NonEmptyVector.one(lens)),
-        false
-      ),
+      (camera.copy(kind = nikonKind), Usage.Interchangeable(lenses = NonEmptyVector.one(lens)), false),
       (camera.copy(kind = CameraKind.FixedLens), Usage.Interchangeable(lenses = NonEmptyVector.one(lens)), false),
       (camera.copy(kind = CameraKind.FixedLens), Usage.FixedLens, true),
       (camera, Usage.FixedLens, false),
