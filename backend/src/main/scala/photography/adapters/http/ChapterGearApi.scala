@@ -28,54 +28,54 @@ object ChapterGearApi:
           read(AlbumId(value = album), ChapterId(value = chapter))
         case request @ PUT -> Root / "api" / "albums" / CanonicalId(album) / "chapters" / CanonicalId(chapter) / "gear" =>
           replace(AlbumId(value = album), ChapterId(value = chapter), request)
-        case (GET | PUT) -> Root / "api" / "albums" / CanonicalId(_) / "chapters" / _ / "gear" => chapterNotFound
-        case (GET | PUT) -> Root / "api" / "albums" / _ / "chapters" / _ / "gear"              => NotFound(Map("code" -> "album_not_found"))
+        case (GET | PUT) -> Root / "api" / "albums" / CanonicalId(_) / "chapters" / _ / "gear" => respondChapterNotFound
+        case (GET | PUT) -> Root / "api" / "albums" / _ / "chapters" / _ / "gear"              => NotFound(body = Map("code" -> "album_not_found"))
       }
 
     private def read(album: AlbumId, chapter: ChapterId) =
       chapters.readGear(album, chapter).flatMap:
         case GearReadResult.Found(selection) =>
           Ok(encodeSelection(selection = selection)).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
-        case GearReadResult.NotFound => chapterNotFound
-        case GearReadResult.Failed   => serviceFailure
+        case GearReadResult.NotFound => respondChapterNotFound
+        case GearReadResult.Failed   => respondServiceFailure
 
     private def replace(album: AlbumId, chapter: ChapterId, request: Request[F]) =
       decode(request).flatMap:
-        case Left(message)    => BadRequest(Map("message" -> message))
+        case Left(message)    => BadRequest(body = Map("message" -> message))
         case Right(selection) =>
           chapters.replaceGear(album, chapter, selection = selection).flatMap:
             case GearReplaceResult.Saved            => NoContent()
-            case GearReplaceResult.NotFound         => chapterNotFound
-            case GearReplaceResult.Rejected(reason) => BadRequest(Map("message" -> explain(reason)))
-            case GearReplaceResult.Failed           => serviceFailure
-            case GearReplaceResult.Uncertain        => InternalServerError(Map("code" -> "mutation_uncertain"))
+            case GearReplaceResult.NotFound         => respondChapterNotFound
+            case GearReplaceResult.Rejected(reason) => BadRequest(body = Map("message" -> explain(reason)))
+            case GearReplaceResult.Failed           => respondServiceFailure
+            case GearReplaceResult.Uncertain        => InternalServerError(body = Map("code" -> "mutation_uncertain"))
 
     private def decode(request: Request[F]) =
       request.as[Json].map(value => selectionDecoder.decodeJson(value).leftMap(_.getMessage))
         .recover { case _: MessageBodyFailure => "Supply a valid JSON gear selection".asLeft[GearSelection] }
 
-    private def chapterNotFound = NotFound(Map("code" -> "chapter_not_found"))
-    private def serviceFailure  = InternalServerError(Map("code" -> "service_failure"))
+    private def respondChapterNotFound = NotFound(body = Map("code" -> "chapter_not_found"))
+    private def respondServiceFailure  = InternalServerError(body = Map("code" -> "service_failure"))
 
     private object CanonicalId:
       def unapply(value: String): Option[UUID] =
         Either.catchOnly[IllegalArgumentException](UUID.fromString(value)).toOption.filter(_.toString === value)
 
-    private val idDecoder           = Decoder.decodeString.emap(value => CanonicalId.unapply(value).toRight("Gear IDs must be canonical UUIDs"))
-    private given Decoder[CameraId] = idDecoder.map(value => CameraId(value = value))
-    private given Decoder[LensId]   = idDecoder.map(value => LensId(value = value))
+    private val idDecoder = Decoder.decodeString.emap(value => CanonicalId.unapply(value).toRight(left = "Gear IDs must be canonical UUIDs"))
+    private given Decoder[CameraId]        = idDecoder.map(value => CameraId(value = value))
+    private given Decoder[LensId]          = idDecoder.map(value => LensId(value = value))
     private given Decoder[CameraSelection] = Decoder.instance: cursor =>
       for
-        camera <- cursor.get[CameraId]("cameraId")
-        lenses <- cursor.get[Vector[LensId]]("lensIds")
+        camera <- cursor.get[CameraId](k = "cameraId")
+        lenses <- cursor.get[Vector[LensId]](k = "lensIds")
       yield CameraSelection(
         camera,
-        NonEmptyVector.fromVector(lenses).fold[CameraUse](CameraUse.FixedLens)(values =>
+        NonEmptyVector.fromVector(vector = lenses).fold[CameraUse](CameraUse.FixedLens)(values =>
           CameraUse.Interchangeable(lenses = values)
         )
       )
 
-    private val selectionDecoder = Decoder.decodeVector[CameraSelection].prepare(_.downField("cameras"))
+    private val selectionDecoder = Decoder.decodeVector[CameraSelection].prepare(_.downField(k = "cameras"))
 
     private def encodeSelection(selection: GearSelection) =
       val cameras = selection.map: entry =>
@@ -83,8 +83,8 @@ object ChapterGearApi:
           case CameraUse.FixedLens               => Vector.empty[LensId]
           case CameraUse.Interchangeable(values) => values.toVector
         Json.obj(
-          "cameraId" -> Json.fromString(entry.camera.value.toString),
-          "lensIds"  -> Json.arr(lenses.map(id => Json.fromString(id.value.toString))*)
+          "cameraId" -> Json.fromString(value = entry.camera.value.toString),
+          "lensIds"  -> Json.arr(lenses.map(id => Json.fromString(value = id.value.toString))*)
         )
       Json.obj("cameras" -> Json.arr(cameras*))
 

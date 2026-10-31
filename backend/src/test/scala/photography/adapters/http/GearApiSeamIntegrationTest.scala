@@ -3,7 +3,6 @@ package photography.adapters.http
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import io.circe.Json
-import io.circe.jawn.parse
 import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
 import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
@@ -36,7 +35,7 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
     val catalog  = GearCatalog(cameras = cameras, lenses = lenses)
     val refs     = Refs()
     val server   = buildGearApi(refs, catalogResult = CatalogResult.Found(catalog))
-    val expected = Json.obj("cameras" -> Json.arr(cameras.map(cameraJson)*), "lenses" -> Json.arr(lenses.map(lensJson)*))
+    val expected = Json.obj("cameras" -> Json.arr(cameras.map(encodeCamera)*), "lenses" -> Json.arr(lenses.map(encodeLens)*))
 
     for
       response <- send(server, Method.GET, path = "/api/gear", body = "")
@@ -45,7 +44,7 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
     yield
       assertEquals(response, (Status.Ok, expected.noSpaces, MediaType.application.json.some, "no-store".some))
       assertEquals(empty, (Status.Ok, """{"cameras":[],"lenses":[]}""", MediaType.application.json.some, "no-store".some))
-      assertEquals(calls, Vector(Call.Read))
+      assertEquals(calls, expected = Vector(Call.Read))
 
   test("should create and completely edit typed optics without trimming or reading after acknowledgement"):
     val cameras = Vector(camera) ++ LensMount.values.toVector.flatMap: mount =>
@@ -61,23 +60,23 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       )
       val (path, input, expected, expectedCalls) = entry match
         case Left(value) =>
-          val json = cameraJson(value)
+          val json = encodeCamera(value)
           (
             cameraPath,
-            json.mapObject(_.remove("id")),
+            json.mapObject(_.remove(key = "id")),
             json,
             Vector(Call.CreateCamera(value.code, value.friendlyName, value.kind), Call.UpdateCamera(value))
           )
         case Right(value) =>
-          val json = lensJson(value)
+          val json = encodeLens(value)
           (
             lensPath,
-            json.mapObject(_.remove("id")),
+            json.mapObject(_.remove(key = "id")),
             json,
             Vector(Call.CreateLens(value.code, value.friendlyName, value.mount, value.coverage), Call.UpdateLens(value))
           )
       val collectionPath     = entry.fold(_ => "/api/cameras", _ => "/api/lenses")
-      val misleadingIdentity = input.deepMerge(Json.obj("id" -> Json.fromString(new UUID(0L, 99L).toString)))
+      val misleadingIdentity = input.deepMerge(Json.obj("id" -> Json.fromString(value = new UUID(0L, 99L).toString)))
 
       for
         created <- send(server, Method.POST, path = collectionPath, body = input.noSpaces)
@@ -124,8 +123,8 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
         lensResponse   <- send(server, Method.POST, path = "/api/lenses", body = lensInput)
         calls          <- refs.calls.get
       yield
-        assertEquals(cameraResponse, errorResponse(status, code = code))
-        assertEquals(lensResponse, errorResponse(status, code = code))
+        assertEquals(cameraResponse, encodeErrorResponse(status, code = code))
+        assertEquals(lensResponse, encodeErrorResponse(status, code = code))
         assertEquals(calls, expectedCalls)
     }
     val checkUpdates = updates.traverse_ { case (cameraResult, lensResult, status, code) =>
@@ -137,9 +136,9 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
         lensResponse   <- send(server, Method.PUT, path = lensPath, body = lensInput)
         calls          <- refs.calls.get
       yield
-        assertEquals(cameraResponse, mutationResponse(status, code = code, resource = "camera"))
-        assertEquals(lensResponse, mutationResponse(status, code = code, resource = "lens"))
-        assertEquals(calls, Vector(Call.UpdateCamera(camera), Call.UpdateLens(lens)))
+        assertEquals(cameraResponse, encodeMutationResponse(status, code = code, resource = "camera"))
+        assertEquals(lensResponse, encodeMutationResponse(status, code = code, resource = "lens"))
+        assertEquals(calls, expected = Vector(Call.UpdateCamera(camera), Call.UpdateLens(lens)))
     }
     val checkDeletions = deletions.traverse_ { case (cameraResult, lensResult, status, code) =>
       val refs   = Refs()
@@ -150,25 +149,25 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
         lensResponse   <- send(server, Method.DELETE, path = lensPath, body = "")
         calls          <- refs.calls.get
       yield
-        assertEquals(cameraResponse, mutationResponse(status, code = code, resource = "camera"))
-        assertEquals(lensResponse, mutationResponse(status, code = code, resource = "lens"))
-        assertEquals(calls, Vector(Call.DeleteCamera(camera.id), Call.DeleteLens(lens.id)))
+        assertEquals(cameraResponse, encodeMutationResponse(status, code = code, resource = "camera"))
+        assertEquals(lensResponse, encodeMutationResponse(status, code = code, resource = "lens"))
+        assertEquals(calls, expected = Vector(Call.DeleteCamera(camera.id), Call.DeleteLens(lens.id)))
     }
 
     checkCreations >> checkUpdates >> checkDeletions
 
   test("should reject malformed bodies and contradictory fixed optics before calling the application"):
     val common = Vector("{", "[]", "null", "{}", """{"code":"","name":"Name"}""", """{"code":1,"name":"Name"}""", """{"code":"code","name":null}""")
-    val fixedJson          = cameraJson(camera).mapObject(_.remove("id"))
-    val lensJsonInput      = lensJson(lens).mapObject(_.remove("id"))
+    val fixedJson          = encodeCamera(camera).mapObject(_.remove(key = "id"))
+    val lensJsonInput      = encodeLens(lens).mapObject(_.remove(key = "id"))
     val invalidFixedFields = Vector("code", "name", "kind").flatMap { field =>
-      Vector(fixedJson.mapObject(_.remove(field))) ++ Vector(Json.Null, Json.fromInt(1), Json.fromString("")).map(value =>
-        fixedJson.mapObject(_.add(field, value))
+      Vector(fixedJson.mapObject(_.remove(key = field))) ++ Vector(Json.Null, Json.fromInt(value = 1), Json.fromString(value = "")).map(value =>
+        fixedJson.mapObject(_.add(key = field, value = value))
       )
     }.map(_.noSpaces)
     val invalidLensFields = Vector("code", "name", "mount", "coverage").flatMap { field =>
-      Vector(lensJsonInput.mapObject(_.remove(field))) ++ Vector(Json.Null, Json.fromInt(1), Json.fromString("")).map(value =>
-        lensJsonInput.mapObject(_.add(field, value))
+      Vector(lensJsonInput.mapObject(_.remove(key = field))) ++ Vector(Json.Null, Json.fromInt(value = 1), Json.fromString(value = "")).map(value =>
+        lensJsonInput.mapObject(_.add(key = field, value = value))
       )
     }.map(_.noSpaces)
     val invalidCameras = common ++ invalidFixedFields ++ Vector(
@@ -178,6 +177,10 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       """{"code":"code","name":"Name","kind":"fixed_lens","mount":null}""",
       """{"code":"code","name":"Name","kind":"fixed_lens","sensorFormat":"aps_c"}""",
       """{"code":"code","name":"Name","kind":"interchangeable_lens"}""",
+      """{"code":"code","name":"Name","kind":"interchangeable_lens","sensorFormat":"aps_c"}""",
+      """{"code":"code","name":"Name","kind":"interchangeable_lens","mount":null,"sensorFormat":"aps_c"}""",
+      """{"code":"code","name":"Name","kind":"interchangeable_lens","mount":"sony_e"}""",
+      """{"code":"code","name":"Name","kind":"interchangeable_lens","mount":"sony_e","sensorFormat":null}""",
       """{"code":"code","name":"Name","kind":"interchangeable_lens","mount":"bad","sensorFormat":"aps_c"}""",
       """{"code":"code","name":"Name","kind":"interchangeable_lens","mount":1,"sensorFormat":"aps_c"}""",
       """{"code":"code","name":"Name","kind":"interchangeable_lens","mount":"sony_e","sensorFormat":false}""",
@@ -194,6 +197,63 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
     val requests = Vector(Method.POST, Method.PUT).flatMap: method =>
       invalidCameras.map(body => (method, if method === Method.POST then "/api/cameras" else cameraPath, body)) ++
         invalidLenses.map(body => (method, if method === Method.POST then "/api/lenses" else lensPath, body))
+    val commonMessages = Vector(
+      "Supply a valid JSON gear object",
+      "DecodingFailure at .code: Missing required field",
+      "DecodingFailure at .code: Missing required field",
+      "DecodingFailure at .code: Missing required field",
+      "DecodingFailure at .code: !(Should be empty)",
+      "DecodingFailure at .code: Got value '1' with wrong type, expecting string",
+      "DecodingFailure at .name: Got value 'null' with wrong type, expecting string"
+    )
+    val fixedFieldMessages = Vector("code", "name", "kind").flatMap: field =>
+      val emptyMessage =
+        if field === "kind" then "DecodingFailure at : Choose fixed_lens or interchangeable_lens"
+        else s"DecodingFailure at .$field: !(Should be empty)"
+      Vector(
+        s"DecodingFailure at .$field: Missing required field",
+        s"DecodingFailure at .$field: Got value 'null' with wrong type, expecting string",
+        s"DecodingFailure at .$field: Got value '1' with wrong type, expecting string",
+        emptyMessage
+      )
+    val cameraMessages = commonMessages ++ fixedFieldMessages ++ Vector(
+      "DecodingFailure at : Choose fixed_lens or interchangeable_lens",
+      "DecodingFailure at .kind: Got value '1' with wrong type, expecting string",
+      "DecodingFailure at .name: !(Should be empty)",
+      "DecodingFailure at : Fixed-lens cameras must omit mount and sensorFormat",
+      "DecodingFailure at : Fixed-lens cameras must omit mount and sensorFormat",
+      "DecodingFailure at .mount: Missing required field",
+      "DecodingFailure at .mount: Missing required field",
+      "DecodingFailure at .mount: Got value 'null' with wrong type, expecting string",
+      "DecodingFailure at .sensorFormat: Missing required field",
+      "DecodingFailure at .sensorFormat: Got value 'null' with wrong type, expecting string",
+      "DecodingFailure at .mount: Choose sony_e or nikon_z",
+      "DecodingFailure at .mount: Got value '1' with wrong type, expecting string",
+      "DecodingFailure at .sensorFormat: Got value 'false' with wrong type, expecting string",
+      "DecodingFailure at .sensorFormat: Choose aps_c or full_frame"
+    )
+    val lensFieldMessages = Vector("code", "name", "mount", "coverage").flatMap: field =>
+      val emptyMessage = field match
+        case "mount"    => "DecodingFailure at .mount: Choose sony_e or nikon_z"
+        case "coverage" => "DecodingFailure at .coverage: Choose aps_c or full_frame"
+        case _          => s"DecodingFailure at .$field: !(Should be empty)"
+      Vector(
+        s"DecodingFailure at .$field: Missing required field",
+        s"DecodingFailure at .$field: Got value 'null' with wrong type, expecting string",
+        s"DecodingFailure at .$field: Got value '1' with wrong type, expecting string",
+        emptyMessage
+      )
+    val lensMessages = commonMessages ++ lensFieldMessages ++ Vector(
+      "DecodingFailure at .name: !(Should be empty)",
+      "DecodingFailure at .coverage: Missing required field",
+      "DecodingFailure at .mount: Got value 'null' with wrong type, expecting string",
+      "DecodingFailure at .mount: Choose sony_e or nikon_z",
+      "DecodingFailure at .coverage: Got value '1' with wrong type, expecting string",
+      "DecodingFailure at .coverage: Choose aps_c or full_frame"
+    )
+    val expectedResponses = Vector(Method.POST, Method.PUT).flatMap: _ =>
+      (cameraMessages ++ lensMessages).map: message =>
+        (Status.BadRequest, Json.obj("message" -> Json.fromString(value = message)).noSpaces, MediaType.application.json.some, None)
     val refs   = Refs()
     val server = buildGearApi(refs)
 
@@ -201,12 +261,8 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       responses <- requests.traverse { case (method, path, body) => send(server, method, path = path, body = body) }
       calls     <- refs.calls.get
     yield
-      assert(responses.forall { case (status, body, contentType, _) =>
-        val json = parse(body).fold(error => fail(error.message), identity)
-        status === Status.BadRequest && contentType.contains(MediaType.application.json) &&
-        json.asObject.exists(_.keys.toSet === Set("message")) && json.hcursor.get[String]("message").toOption.exists(_.nonEmpty)
-      })
-      assertEquals(calls, Vector.empty)
+      assertEquals(responses, expectedResponses)
+      assertEquals(calls, expected = Vector.empty[Call])
 
   test("should reject noncanonical route identities and keep read failure distinct from empty success"):
     val refs     = Refs()
@@ -216,7 +272,9 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       ids.flatMap(id => Vector((method, s"/api/cameras/$id", "camera"), (method, s"/api/lenses/$id", "lens")))
     )
     val readMissingTargets = requests.traverse { case (method, path, resource) =>
-      send(server, method, path = path, body = "{}").map(response => (response, errorResponse(Status.NotFound, code = s"${resource}_not_found")))
+      send(server, method, path = path, body = "{}").map(response =>
+        (response, encodeErrorResponse(Status.NotFound, code = s"${resource}_not_found"))
+      )
     }
 
     for
@@ -225,8 +283,8 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       calls     <- refs.calls.get
     yield
       responses.foreach { case (actual, expected) => assertEquals(actual, expected) }
-      assertEquals(failed, errorResponse(Status.InternalServerError, code = "service_failure"))
-      assertEquals(calls, Vector(Call.Read))
+      assertEquals(failed, encodeErrorResponse(Status.InternalServerError, code = "service_failure"))
+      assertEquals(calls, expected = Vector(Call.Read))
 
   private enum Call:
     case Read
@@ -238,7 +296,7 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
     case DeleteLens(id: LensId)
 
   final private case class Refs():
-    val calls: Ref[IO, Vector[Call]] = Ref.unsafe(Vector.empty)
+    val calls: Ref[IO, Vector[Call]] = Ref.unsafe(a = Vector.empty[Call])
 
   // scalafix:off DisableSyntax.defaultArgs
   private def buildGearApi(
@@ -262,12 +320,12 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       override def updateLens(value: Lens): IO[LensUpdateResult] = refs.calls.update(_ :+ Call.UpdateLens(value)).as(lensUpdate)
       override def deleteLens(id: LensId): IO[LensDeleteResult]  = refs.calls.update(_ :+ Call.DeleteLens(id)).as(lensDelete)
       override def validateSelection(catalog: GearCatalog, selection: GearSelection): ValidationResult =
-        fail("HTTP must not validate business selections")
+        fail(message = "HTTP must not validate business selections")
     GearApi.make(manager).routes.orNotFound
   // scalafix:on DisableSyntax.defaultArgs
 
   private def send(server: HttpApp[IO], method: Method, path: String, body: String) =
-    val request = Request[IO](method, Uri.unsafeFromString(path)).withEntity(body).putHeaders(`Content-Type`(MediaType.application.json))
+    val request = Request[IO](method, Uri.unsafeFromString(s = path)).withEntity(b = body).putHeaders(`Content-Type`(MediaType.application.json))
 
     for
       response <- server.run(request)
@@ -276,38 +334,38 @@ final class GearApiSeamIntegrationTest extends CatsEffectSuite:
       response.status,
       text,
       response.contentType.map(_.mediaType),
-      response.headers.get(CIString("Cache-Control")).map(_.head.value)
+      response.headers.get(CIString(value = "Cache-Control")).map(_.head.value)
     )
 
-  private def mutationResponse(status: Status, code: String, resource: String) =
+  private def encodeMutationResponse(status: Status, code: String, resource: String) =
     if status === Status.NoContent then (status, "", None, None)
-    else errorResponse(status, code = if code === "not_found" || code === "used" then s"${resource}_$code" else code)
+    else encodeErrorResponse(status, code = if code === "not_found" || code === "used" then s"${resource}_$code" else code)
 
-  private def errorResponse(status: Status, code: String) =
-    (status, Json.obj("code" -> Json.fromString(code)).noSpaces, MediaType.application.json.some, None)
+  private def encodeErrorResponse(status: Status, code: String) =
+    (status, Json.obj("code" -> Json.fromString(value = code)).noSpaces, MediaType.application.json.some, None)
 
-  private def cameraJson(value: Camera) =
+  private def encodeCamera(value: Camera) =
     val optics = value.kind match
-      case CameraKind.FixedLens                          => Vector("kind" -> Json.fromString("fixed_lens"))
+      case CameraKind.FixedLens                          => Vector("kind" -> Json.fromString(value = "fixed_lens"))
       case CameraKind.InterchangeableLens(mount, sensor) =>
         Vector(
-          "kind"         -> Json.fromString("interchangeable_lens"),
-          "mount"        -> Json.fromString(encodeMount(mount)),
-          "sensorFormat" -> Json.fromString(encodeSensor(sensor))
+          "kind"         -> Json.fromString(value = "interchangeable_lens"),
+          "mount"        -> Json.fromString(value = encodeMount(mount)),
+          "sensorFormat" -> Json.fromString(value = encodeSensor(sensor))
         )
     Json.obj((Vector(
-      "id"   -> Json.fromString(value.id.value.toString),
-      "code" -> Json.fromString(value.code),
-      "name" -> Json.fromString(value.friendlyName)
+      "id"   -> Json.fromString(value = value.id.value.toString),
+      "code" -> Json.fromString(value = value.code),
+      "name" -> Json.fromString(value = value.friendlyName)
     ) ++ optics)*)
 
-  private def lensJson(value: Lens) =
+  private def encodeLens(value: Lens) =
     Json.obj(
-      "id"       -> Json.fromString(value.id.value.toString),
-      "code"     -> Json.fromString(value.code),
-      "name"     -> Json.fromString(value.friendlyName),
-      "mount"    -> Json.fromString(encodeMount(value.mount)),
-      "coverage" -> Json.fromString(encodeSensor(value.coverage))
+      "id"       -> Json.fromString(value = value.id.value.toString),
+      "code"     -> Json.fromString(value = value.code),
+      "name"     -> Json.fromString(value = value.friendlyName),
+      "mount"    -> Json.fromString(value = encodeMount(value.mount)),
+      "coverage" -> Json.fromString(value = encodeSensor(value.coverage))
     )
 
   private def encodeMount(value: LensMount) = value match

@@ -52,13 +52,15 @@ final class AppManagersIntegrationTest extends CatsEffectSuite:
           arrange.flatMap { case (album, chapter, description, camera, second, lens, unused, independent, before) =>
             val sharedUse     = CameraUse.Interchangeable(lenses = NonEmptyVector.one(lens.id))
             val selection     = Vector(CameraSelection(camera.id, sharedUse), CameraSelection(second.id, sharedUse))
+            val editedCamera  = camera.copy(friendlyName = "Renamed")
+            val editedLens    = lens.copy(friendlyName = "Renamed lens")
             val expectedAlbum = before match
               case AlbumManager.GetAlbumResult.Found(value) =>
                 AlbumManager.GetAlbumResult.Found(value.copy(chapters = value.chapters.map(_.copy(gear = selection))))
-              case value => fail(s"Expected album: $value")
+              case value => fail(message = s"Expected album: $value")
             val expectedCatalog = GearCatalog(
-              cameras = Vector(camera.copy(friendlyName = "Renamed"), second),
-              lenses = Vector(lens.copy(friendlyName = "Renamed lens"), independent)
+              cameras = Vector(editedCamera, second),
+              lenses = Vector(editedLens, independent)
             )
 
             for
@@ -68,8 +70,8 @@ final class AppManagersIntegrationTest extends CatsEffectSuite:
               protectedLens      <- managers.gear.updateLens(lens.copy(mount = LensMount.NikonZ))
               usedCamera         <- managers.gear.deleteCamera(camera.id)
               usedLens           <- managers.gear.deleteLens(lens.id)
-              editedCamera       <- managers.gear.updateCamera(camera.copy(friendlyName = "Renamed"))
-              editedLens         <- managers.gear.updateLens(lens.copy(friendlyName = "Renamed lens"))
+              cameraUpdated      <- managers.gear.updateCamera(editedCamera)
+              lensUpdated        <- managers.gear.updateLens(editedLens)
               editedUnused       <- managers.gear.updateCamera(unused.copy(kind = CameraKind.FixedLens))
               deletedUnused      <- managers.gear.deleteCamera(unused.id)
               after              <- managers.albums.get(album.id)
@@ -87,8 +89,8 @@ final class AppManagersIntegrationTest extends CatsEffectSuite:
               assertEquals(protectedLens, GearManager.LensUpdateResult.InvalidatesSelection)
               assertEquals(usedCamera, GearManager.CameraDeleteResult.Used)
               assertEquals(usedLens, GearManager.LensDeleteResult.Used)
-              assertEquals(editedCamera, GearManager.CameraUpdateResult.Updated)
-              assertEquals(editedLens, GearManager.LensUpdateResult.Updated)
+              assertEquals(cameraUpdated, GearManager.CameraUpdateResult.Updated)
+              assertEquals(lensUpdated, GearManager.LensUpdateResult.Updated)
               assertEquals(editedUnused, GearManager.CameraUpdateResult.Updated)
               assertEquals(deletedUnused, GearManager.CameraDeleteResult.Deleted)
               assertEquals(after, expectedAlbum)
@@ -141,7 +143,7 @@ final class AppManagersIntegrationTest extends CatsEffectSuite:
                   GearManager.CatalogResult.Found(GearCatalog(cameras = Vector(camera), lenses = Vector(lens.copy(mount = LensMount.NikonZ))))
                 )
 
-                assert(Set(selectionFirst, editFirst).contains(actual))
+                assert(cond = Set(selectionFirst, editFirst).contains(actual))
             }
           }
 
@@ -159,27 +161,27 @@ final class AppManagersIntegrationTest extends CatsEffectSuite:
   private def createAlbum(managers: AppManagers[IO]) =
     managers.albums.create(year = 2026, title = "Runtime album").map:
       case AlbumManager.CreateAlbumResult.Created(album) => album
-      case value                                         => fail(s"Expected runtime album: $value")
+      case value                                         => fail(message = s"Expected runtime album: $value")
 
   private def createChapter(managers: AppManagers[IO], album: AlbumId, workspace: AlbumWorkspaceManager.GetResult, source: PhotoSource) =
     val countries = workspace match
       case found: AlbumWorkspaceManager.GetResult.Found => NonEmptyList.one(found.countries.head.id)
-      case value                                        => fail(s"Expected country catalog: $value")
+      case value                                        => fail(message = s"Expected country catalog: $value")
     managers.chapters.create(album, name = "Home", countries = countries, ChapterMetadataManager.Period.AlbumYear, source).map:
       case ChapterMetadataManager.CreateResult.Created(id, _) => id
-      case value                                              => fail(s"Expected runtime chapter: $value")
+      case value                                              => fail(message = s"Expected runtime chapter: $value")
 
   private def createCamera(managers: AppManagers[IO], code: String) =
     val exif: CameraExifCode = code.refineUnsafe
     managers.gear.createCamera(exif, name = "Body", CameraKind.InterchangeableLens(LensMount.SonyE, SensorFormat.ApsC)).map:
       case GearManager.CameraCreateResult.Created(value) => value
-      case value                                         => fail(s"Expected runtime camera: $value")
+      case value                                         => fail(message = s"Expected runtime camera: $value")
 
   private def createLens(managers: AppManagers[IO], code: String) =
     val exif: LensExifCode = code.refineUnsafe
     managers.gear.createLens(exif, name = "Lens", LensMount.SonyE, SensorFormat.FullFrame).map:
       case GearManager.LensCreateResult.Created(value) => value
-      case value                                       => fail(s"Expected runtime lens: $value")
+      case value                                       => fail(message = s"Expected runtime lens: $value")
 
   private def buildDirectory =
     val acquire = IO.blocking:
