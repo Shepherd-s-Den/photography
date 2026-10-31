@@ -25,13 +25,13 @@ object SqliteChapterRepository:
     override def readGear(album: AlbumId, chapter: ChapterId): ConnectionIO[GearReadResult] =
       chapterExists(album, chapter).flatMap:
         case false => GearReadResult.NotFound.pure[ConnectionIO]
-        case true  => loadGear(chapter).map(GearReadResult.Found(_))
+        case true  => loadGear(chapter).map(selection => GearReadResult.Found(selection = selection))
       .handleErrorWith(error => Logger[ConnectionIO].error(error)("Chapter gear read failed").as(GearReadResult.Failed))
 
     override def readSelections: ConnectionIO[SelectionsReadResult] =
       sql"SELECT id FROM chapter ORDER BY rowid".query[UUID].to[Vector]
-        .flatMap(_.traverse(id => loadGear(ChapterId(id)).map(ChapterGearSelection(ChapterId(id), _))))
-        .map(SelectionsReadResult.Found(_))
+        .flatMap(_.traverse(id => loadGear(ChapterId(id)).map(selection => ChapterGearSelection(ChapterId(id), selection = selection))))
+        .map(selections => SelectionsReadResult.Found(selections = selections))
         .handleErrorWith(error => Logger[ConnectionIO].error(error)("Saved chapter selections read failed").as(SelectionsReadResult.Failed))
 
     override def replaceGear(album: AlbumId, chapter: ChapterId, selection: GearSelection): ConnectionIO[GearWriteResult] =
@@ -119,7 +119,7 @@ object SqliteChapterRepository:
         LEFT JOIN chapter_camera c ON c.chapter_id = s.chapter_id AND c.camera_id = s.camera_id
         WHERE s.chapter_id = ${chapter.value} AND (l.id IS NULL OR c.camera_id IS NULL))""".query[Boolean].unique
       orphaned.ensure(new IllegalArgumentException("Invalid saved gear references"))(!_) >>
-        cameras.query[(UUID, String)].to[Vector].flatMap(_.traverse { case (camera, kind) => loadCameraUse(chapter, camera, kind = kind) })
+        cameras.query[(UUID, String)].to[Vector].flatMap(_.traverse { case (camera, kind) => loadCameraUse(chapter, camera = camera, kind = kind) })
 
     private def loadCameraUse(chapter: ChapterId, camera: UUID, kind: String) =
       val lenses = sql"SELECT lens_id FROM chapter_camera_lens WHERE chapter_id = ${chapter.value} AND camera_id = $camera ORDER BY rowid"
