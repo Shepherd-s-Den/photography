@@ -38,7 +38,7 @@
 ## Implement and test
 
 - Adapt the precedent within the approved current slice.
-- For new behavior, batch its tests and run one red check before the production change.
+- For new behavior, batch its tests and confirm they fail for the intended missing behavior before the production change.
 - Finish a coherent code-and-test change before running its targeted validation; do not compile or test after each edited file.
 - Other early checks require a named compiler/type uncertainty.
 - Rerun checks after a meaningful repair, not after unrelated edits; publication still requires all applicable gates.
