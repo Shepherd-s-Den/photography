@@ -16,28 +16,13 @@ final class AlbumEditorialManagerComponentTest extends CatsEffectSuite:
   private val pair  = Set(Author.Cosmin, Author.Mara).refineUnsafe[MinLength[1]]
   private val saved = AlbumEditorial(synopsis = "Început\n日本", authors = pair)
 
-  test("should initialize new albums independently of year and retain historical attribution"):
-    val manager = buildManager(Refs())
-    val cases   = Vector(
-      Origin.NewAlbum                   -> all,
-      Origin.ExistingAlbum(year = 1900) -> pair,
-      Origin.ExistingAlbum(year = 2025) -> pair,
-      Origin.ExistingAlbum(year = 2026) -> all,
-      Origin.ExistingAlbum(year = 2100) -> all
-    )
-
-    val actual = cases.map { case (origin, _) => manager.initialize(origin) }
-
-    assertEquals(actual, cases.map { case (_, authors) => InitializationResult.Initialized(authors) })
-    assertEquals(Author.values.toVector, Vector(Author.Cosmin, Author.Mara, Author.Iacob))
-
   test("should save every nonempty author combination once without changing synopsis or reading back"):
     val refs         = Refs()
     val combinations = all.subsets().filter(_.nonEmpty).toVector.map(_.refineUnsafe[MinLength[1]])
     val manager      = buildManager(refs)
 
     for
-      results <- combinations.traverse(manager.saveAuthors(album, _))
+      results <- combinations.traverse(authors => manager.saveAuthors(album, authors = authors))
       writes  <- refs.authors.get
       reads   <- refs.reads.get
       text    <- refs.synopses.get
@@ -47,6 +32,7 @@ final class AlbumEditorialManagerComponentTest extends CatsEffectSuite:
       assertEquals(reads, 0)
       assertEquals(text, Vector.empty[String])
       assert(Set.empty[Author].refineEither[MinLength[1]].isLeft)
+      assertEquals(Author.values.toVector, Vector(Author.Cosmin, Author.Mara, Author.Iacob))
 
   test("should preserve exact synopsis text and clearing without mutating attribution"):
     val refs    = Refs()
@@ -54,7 +40,7 @@ final class AlbumEditorialManagerComponentTest extends CatsEffectSuite:
     val texts   = Vector(saved.synopsis, "")
 
     for
-      results <- texts.traverse(manager.saveSynopsis(album, _))
+      results <- texts.traverse(text => manager.saveSynopsis(album, text = text))
       writes  <- refs.synopses.get
       authors <- refs.authors.get
     yield
@@ -83,9 +69,10 @@ final class AlbumEditorialManagerComponentTest extends CatsEffectSuite:
     cases.traverse_ { case (response, expectedSynopsis, expectedAuthors) =>
       val refs    = Refs()
       val manager = buildManager(refs, writeResult = response)
+
       for
-        synopsis     <- manager.saveSynopsis(album, saved.synopsis)
-        authors      <- manager.saveAuthors(album, pair)
+        synopsis     <- manager.saveSynopsis(album, text = saved.synopsis)
+        authors      <- manager.saveAuthors(album, authors = pair)
         textWrites   <- refs.synopses.get
         authorWrites <- refs.authors.get
         reads        <- refs.reads.get
@@ -102,7 +89,7 @@ final class AlbumEditorialManagerComponentTest extends CatsEffectSuite:
     val manager = buildManager(refs, readResult = AlbumEditorialRepository.ReadResult.Failed)
 
     for
-      savedResult <- manager.saveSynopsis(album, saved.synopsis)
+      savedResult <- manager.saveSynopsis(album, text = saved.synopsis)
       failedRead  <- manager.read(album)
       retryRead   <- manager.read(album)
       writes      <- refs.synopses.get

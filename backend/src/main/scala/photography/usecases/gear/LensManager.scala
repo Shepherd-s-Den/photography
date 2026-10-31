@@ -19,7 +19,7 @@ object LensManager:
   final private class LiveLensManager[F[_]: MonadCancelThrow: Mutex: IdGenerator](repository: LensRepository[F]) extends LensManager[F]:
     override def create(code: LensExifCode, name: LensName, mount: LensMount, coverage: SensorFormat): F[CreateResult] =
       IdGenerator[F].generateId.flatMap: id =>
-        val lens = Lens(LensId(id), code, name, mount, coverage)
+        val lens = Lens(LensId(id), code, name, mount = mount, coverage = coverage)
         repository.create(lens).map:
           case LensRepository.CreateResult.Created   => CreateResult.Created(lens)
           case LensRepository.CreateResult.Conflict  => CreateResult.Conflict
@@ -33,7 +33,13 @@ object LensManager:
             case LensRepository.ReferencesResult.NotFound       => UpdateResult.NotFound.pure[F]
             case LensRepository.ReferencesResult.Failed         => UpdateResult.Failed.pure[F]
             case LensRepository.ReferencesResult.Found(cameras) =>
-              if cameras.forall(_.accepts(lens)) then persistLens(lens)
+              if cameras.forall(_.accepts(lens)) then
+                repository.update(lens).map:
+                  case LensRepository.UpdateResult.Updated   => UpdateResult.Updated
+                  case LensRepository.UpdateResult.NotFound  => UpdateResult.NotFound
+                  case LensRepository.UpdateResult.Conflict  => UpdateResult.Conflict
+                  case LensRepository.UpdateResult.Failed    => UpdateResult.Failed
+                  case LensRepository.UpdateResult.Uncertain => UpdateResult.Uncertain
               else UpdateResult.InvalidatesSelection.pure[F]
 
     override def delete(id: LensId): F[DeleteResult] =
@@ -45,14 +51,6 @@ object LensManager:
             case LensRepository.DeleteResult.Used      => DeleteResult.Used
             case LensRepository.DeleteResult.Failed    => DeleteResult.Failed
             case LensRepository.DeleteResult.Uncertain => DeleteResult.Uncertain
-
-    private def persistLens(lens: Lens) =
-      repository.update(lens).map:
-        case LensRepository.UpdateResult.Updated   => UpdateResult.Updated
-        case LensRepository.UpdateResult.NotFound  => UpdateResult.NotFound
-        case LensRepository.UpdateResult.Conflict  => UpdateResult.Conflict
-        case LensRepository.UpdateResult.Failed    => UpdateResult.Failed
-        case LensRepository.UpdateResult.Uncertain => UpdateResult.Uncertain
 
   enum CreateResult:
     case Created(lens: Lens)

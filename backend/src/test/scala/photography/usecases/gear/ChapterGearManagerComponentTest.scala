@@ -30,9 +30,9 @@ final class ChapterGearManagerComponentTest extends CatsEffectSuite:
 
   test("should read authoritative selections without replacing missing or failed reads with empty gear"):
     val cases = Vector(
-      ChapterGearRepository.ReadResult.Found(selection) -> ReadResult.Found(selection),
-      ChapterGearRepository.ReadResult.NotFound         -> ReadResult.NotFound,
-      ChapterGearRepository.ReadResult.Failed           -> ReadResult.Failed
+      ChapterGearRepository.ReadResult.Found(selection = selection) -> ReadResult.Found(selection = selection),
+      ChapterGearRepository.ReadResult.NotFound                     -> ReadResult.NotFound,
+      ChapterGearRepository.ReadResult.Failed                       -> ReadResult.Failed
     )
 
     cases.traverse_ { case (response, expected) =>
@@ -49,6 +49,7 @@ final class ChapterGearManagerComponentTest extends CatsEffectSuite:
 
     cases.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, writeResult = response)
         result  <- manager.replace(album, chapter, selection = selection)
@@ -67,6 +68,7 @@ final class ChapterGearManagerComponentTest extends CatsEffectSuite:
 
     cases.traverse_ { case (reading, validation, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, catalogResult = reading, validation = validation)
         result  <- manager.replace(album, chapter, selection = selection)
@@ -87,6 +89,7 @@ final class ChapterGearManagerComponentTest extends CatsEffectSuite:
   test("should coordinate the entire decision and replacement across callers and finish a handed-off mutation before cancellation"):
     TestControl.executeEmbed:
       val refs = Refs()
+
       for
         mutex      <- Mutex[IO]
         reading    <- Deferred[IO, Unit]
@@ -115,7 +118,7 @@ final class ChapterGearManagerComponentTest extends CatsEffectSuite:
   // scalafix:off DisableSyntax.defaultArgs
   private def buildManager(
       refs: Refs,
-      readResult: ChapterGearRepository.ReadResult = ChapterGearRepository.ReadResult.Found(selection),
+      readResult: ChapterGearRepository.ReadResult = ChapterGearRepository.ReadResult.Found(selection = selection),
       writeResult: ChapterGearRepository.WriteResult = ChapterGearRepository.WriteResult.Saved,
       catalogResult: GearCatalogRepository.ReadResult = GearCatalogRepository.ReadResult.Found(catalog),
       validation: GearCompatibility.ValidationResult = GearCompatibility.ValidationResult.Accepted,

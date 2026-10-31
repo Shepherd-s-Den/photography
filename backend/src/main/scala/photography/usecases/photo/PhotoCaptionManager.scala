@@ -16,7 +16,7 @@ object PhotoCaptionManager:
   final private class LivePhotoCaptionManager[F[_]: Functor](repository: PhotoCaptionRepository[F]) extends PhotoCaptionManager[F]:
     override def read(photo: PhotoId): F[ReadResult] =
       repository.read(photo).map:
-        case PhotoCaptionRepository.ReadResult.Found(value) => ReadResult.Found(value)
+        case PhotoCaptionRepository.ReadResult.Found(value) => ReadResult.Found(maybeCaption = value)
         case PhotoCaptionRepository.ReadResult.NotFound     => ReadResult.NotFound
         case PhotoCaptionRepository.ReadResult.Failed       => ReadResult.Failed
 

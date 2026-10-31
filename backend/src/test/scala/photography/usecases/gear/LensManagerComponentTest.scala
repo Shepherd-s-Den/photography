@@ -12,9 +12,8 @@ import photography.usecases.gear.LensManager.*
 import java.util.UUID
 
 final class LensManagerComponentTest extends CatsEffectSuite:
-  private val lens   = Lens(LensId(new UUID(0L, 1L)), code = "lens", friendlyName = "Lens", mount = "Sony E", SensorFormat.FullFrame)
-  private val camera =
-    Camera(CameraId(new UUID(0L, 2L)), code = "body", friendlyName = "Body", CameraKind.InterchangeableLens("Sony E", SensorFormat.FullFrame))
+  private val lens      = Lens(LensId(new UUID(0L, 1L)), code = "lens", friendlyName = "Lens", mount = "Sony E", coverage = SensorFormat.FullFrame)
+  private val fullFrame = new CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.FullFrame)
 
   test("should create an independently identified shared lens without a camera owner"):
     val cases = Vector(
@@ -26,6 +25,7 @@ final class LensManagerComponentTest extends CatsEffectSuite:
 
     cases.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, createResult = response)
         result  <- manager.create(lens.code, lens.friendlyName, lens.mount, lens.coverage)
@@ -36,21 +36,21 @@ final class LensManagerComponentTest extends CatsEffectSuite:
     }
 
   test("should reject edits invalidating any referencing body while allowing coverage expansion and unused edits"):
-    val apsC  = camera.copy(kind = CameraKind.InterchangeableLens("Sony E", SensorFormat.ApsC))
+    val apsC  = new CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.ApsC)
     val cases = Vector(
-      (lens, Vector(camera, apsC), true),
-      (lens.copy(coverage = SensorFormat.ApsC), Vector(apsC, camera), false),
+      (lens, Vector(fullFrame, apsC), true),
+      (lens.copy(coverage = SensorFormat.ApsC), Vector(apsC, fullFrame), false),
       (lens.copy(coverage = SensorFormat.ApsC), Vector(apsC), true),
-      (lens.copy(mount = "Nikon Z"), Vector(camera), false),
-      (lens.copy(mount = "Nikon Z"), Vector.empty[Camera], true),
-      (lens, Vector(camera.copy(kind = CameraKind.FixedLens)), false)
+      (lens.copy(mount = "Nikon Z"), Vector(fullFrame), false),
+      (lens.copy(mount = "Nikon Z"), Vector.empty[CameraKind.InterchangeableLens], true)
     )
 
     cases.traverse_ { case (candidate, cameras, allowed) =>
       val refs     = Refs()
       val expected = if allowed then UpdateResult.Updated else UpdateResult.InvalidatesSelection
+
       for
-        manager <- buildManager(refs, references = LensRepository.ReferencesResult.Found(cameras.map(_.kind)))
+        manager <- buildManager(refs, references = LensRepository.ReferencesResult.Found(cameras = cameras))
         result  <- manager.update(candidate)
         updated <- refs.updated.get
       yield
@@ -66,6 +66,7 @@ final class LensManagerComponentTest extends CatsEffectSuite:
 
     cases.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, references = response)
         result  <- manager.update(lens)
@@ -93,6 +94,7 @@ final class LensManagerComponentTest extends CatsEffectSuite:
 
     updates.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, updateResult = response)
         result  <- manager.update(lens)
@@ -102,6 +104,7 @@ final class LensManagerComponentTest extends CatsEffectSuite:
         assertEquals(writes, Vector(lens))
     } >> deletes.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, deleteResult = response)
         result  <- manager.delete(lens.id)
@@ -120,7 +123,7 @@ final class LensManagerComponentTest extends CatsEffectSuite:
   private def buildManager(
       refs: Refs,
       createResult: LensRepository.CreateResult = LensRepository.CreateResult.Created,
-      references: LensRepository.ReferencesResult = LensRepository.ReferencesResult.Found(Vector(camera.kind)),
+      references: LensRepository.ReferencesResult = LensRepository.ReferencesResult.Found(cameras = Vector(fullFrame)),
       updateResult: LensRepository.UpdateResult = LensRepository.UpdateResult.Updated,
       deleteResult: LensRepository.DeleteResult = LensRepository.DeleteResult.Deleted
   ) =

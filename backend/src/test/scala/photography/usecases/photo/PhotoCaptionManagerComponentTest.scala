@@ -13,10 +13,10 @@ final class PhotoCaptionManagerComponentTest extends CatsEffectSuite:
 
   test("should distinguish absent captions from failed or missing authoritative reads"):
     val cases = Vector(
-      PhotoCaptionRepository.ReadResult.Found("日本\nVacanță".some) -> ReadResult.Found("日本\nVacanță".some),
-      PhotoCaptionRepository.ReadResult.Found(None)               -> ReadResult.Found(None),
-      PhotoCaptionRepository.ReadResult.NotFound                  -> ReadResult.NotFound,
-      PhotoCaptionRepository.ReadResult.Failed                    -> ReadResult.Failed
+      PhotoCaptionRepository.ReadResult.Found(maybeCaption = "日本\nVacanță".some) -> ReadResult.Found(maybeCaption = "日本\nVacanță".some),
+      PhotoCaptionRepository.ReadResult.Found(maybeCaption = None)               -> ReadResult.Found(maybeCaption = None),
+      PhotoCaptionRepository.ReadResult.NotFound                                 -> ReadResult.NotFound,
+      PhotoCaptionRepository.ReadResult.Failed                                   -> ReadResult.Failed
     )
 
     cases.traverse_ { case (response, expected) =>
@@ -34,6 +34,7 @@ final class PhotoCaptionManagerComponentTest extends CatsEffectSuite:
     cases.traverse_ { case (response, expected) =>
       val refs    = Refs()
       val manager = buildManager(refs, writeResult = response)
+
       for
         text    <- manager.save(photo, text = "日本\nVacanță")
         cleared <- manager.save(photo, text = "")

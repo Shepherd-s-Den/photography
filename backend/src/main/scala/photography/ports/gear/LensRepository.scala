@@ -2,7 +2,7 @@ package photography.ports.gear
 
 import photography.domain.gear.{CameraKind, Lens, LensId}
 
-/** Reference reads and atomic writes share backend mutation coordination; deletion of a referenced lens returns Used. */
+/** References include only valid interchangeable bodies; malformed saved relationships fail at the adapter. Writes share mutation coordination. */
 trait LensRepository[F[_]]:
   def create(lens: Lens): F[LensRepository.CreateResult]
   def readReferences(id: LensId): F[LensRepository.ReferencesResult]
@@ -14,7 +14,7 @@ object LensRepository:
     case Created, Conflict, Failed, Uncertain
 
   enum ReferencesResult:
-    case Found(cameras: Vector[CameraKind])
+    case Found(cameras: Vector[CameraKind.InterchangeableLens])
     case NotFound, Failed
 
   enum UpdateResult:

@@ -14,9 +14,11 @@ import photography.usecases.gear.CameraManager.*
 import java.util.UUID
 
 final class CameraManagerComponentTest extends CatsEffectSuite:
-  private val camera =
-    Camera(CameraId(new UUID(0L, 1L)), code = "body", friendlyName = "Body", CameraKind.InterchangeableLens("Sony E", SensorFormat.ApsC))
-  private val lens = Lens(LensId(new UUID(0L, 2L)), code = "lens", friendlyName = "Lens", mount = "Sony E", SensorFormat.ApsC)
+  private val apsCKind      = CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.ApsC)
+  private val fullFrameKind = CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.FullFrame)
+  private val nikonKind     = CameraKind.InterchangeableLens(mount = "Nikon Z", sensor = SensorFormat.ApsC)
+  private val camera        = Camera(CameraId(new UUID(0L, 1L)), code = "body", friendlyName = "Body", apsCKind)
+  private val lens          = Lens(LensId(new UUID(0L, 2L)), code = "lens", friendlyName = "Lens", mount = "Sony E", coverage = SensorFormat.ApsC)
 
   test("should create a camera with generated identity and expose repository conflicts and uncertainty"):
     val cases = Vector(
@@ -28,6 +30,7 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
 
     cases.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, createResult = response)
         result  <- manager.create(camera.code, camera.friendlyName, camera.kind)
@@ -39,16 +42,24 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
 
   test("should protect every saved camera use when editing kind, mount or sensor"):
     val cases = Vector(
-      (camera, Usage.Interchangeable(NonEmptyVector.one(lens)), true),
-      (camera.copy(kind = CameraKind.InterchangeableLens("Sony E", SensorFormat.FullFrame)), Usage.Interchangeable(NonEmptyVector.one(lens)), false),
+      (camera, Usage.Interchangeable(lenses = NonEmptyVector.one(lens)), true),
       (
-        camera.copy(kind = CameraKind.InterchangeableLens("Sony E", SensorFormat.FullFrame)),
-        Usage.Interchangeable(NonEmptyVector.of(lens.copy(coverage = SensorFormat.FullFrame), lens)),
+        camera.copy(kind = fullFrameKind),
+        Usage.Interchangeable(lenses = NonEmptyVector.one(lens)),
         false
       ),
-      (camera, Usage.Interchangeable(NonEmptyVector.one(lens.copy(coverage = SensorFormat.FullFrame))), true),
-      (camera.copy(kind = CameraKind.InterchangeableLens("Nikon Z", SensorFormat.ApsC)), Usage.Interchangeable(NonEmptyVector.one(lens)), false),
-      (camera.copy(kind = CameraKind.FixedLens), Usage.Interchangeable(NonEmptyVector.one(lens)), false),
+      (
+        camera.copy(kind = fullFrameKind),
+        Usage.Interchangeable(lenses = NonEmptyVector.of(lens.copy(coverage = SensorFormat.FullFrame), lens)),
+        false
+      ),
+      (camera, Usage.Interchangeable(lenses = NonEmptyVector.one(lens.copy(coverage = SensorFormat.FullFrame))), true),
+      (
+        camera.copy(kind = nikonKind),
+        Usage.Interchangeable(lenses = NonEmptyVector.one(lens)),
+        false
+      ),
+      (camera.copy(kind = CameraKind.FixedLens), Usage.Interchangeable(lenses = NonEmptyVector.one(lens)), false),
       (camera.copy(kind = CameraKind.FixedLens), Usage.FixedLens, true),
       (camera, Usage.FixedLens, false),
       (camera.copy(kind = CameraKind.FixedLens), Usage.Unused, true)
@@ -57,6 +68,7 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
     cases.traverse_ { case (candidate, usage, allowed) =>
       val refs     = Refs()
       val expected = if allowed then UpdateResult.Updated else UpdateResult.InvalidatesSelection
+
       for
         manager <- buildManager(refs, references = CameraRepository.ReferencesResult.Found(usage))
         result  <- manager.update(candidate)
@@ -74,6 +86,7 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
 
     cases.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, references = response)
         result  <- manager.update(camera)
@@ -101,6 +114,7 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
 
     updates.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, updateResult = response)
         result  <- manager.update(camera)
@@ -110,6 +124,7 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
         assertEquals(writes, Vector(camera))
     } >> deletes.traverse_ { case (response, expected) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, deleteResult = response)
         result  <- manager.delete(camera.id)
@@ -128,7 +143,8 @@ final class CameraManagerComponentTest extends CatsEffectSuite:
   private def buildManager(
       refs: Refs,
       createResult: CameraRepository.CreateResult = CameraRepository.CreateResult.Created,
-      references: CameraRepository.ReferencesResult = CameraRepository.ReferencesResult.Found(Usage.Interchangeable(NonEmptyVector.one(lens))),
+      references: CameraRepository.ReferencesResult =
+        CameraRepository.ReferencesResult.Found(Usage.Interchangeable(lenses = NonEmptyVector.one(lens))),
       updateResult: CameraRepository.UpdateResult = CameraRepository.UpdateResult.Updated,
       deleteResult: CameraRepository.DeleteResult = CameraRepository.DeleteResult.Deleted
   ) =

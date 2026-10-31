@@ -32,7 +32,7 @@ object ChapterGearManager:
 
     override def read(album: AlbumId, chapter: ChapterId): F[ReadResult] =
       repository.read(album, chapter).map:
-        case ChapterGearRepository.ReadResult.Found(selection) => ReadResult.Found(selection)
+        case ChapterGearRepository.ReadResult.Found(selection) => ReadResult.Found(selection = selection)
         case ChapterGearRepository.ReadResult.NotFound         => ReadResult.NotFound
         case ChapterGearRepository.ReadResult.Failed           => ReadResult.Failed
 
@@ -44,14 +44,12 @@ object ChapterGearManager:
             case GearCatalogRepository.ReadResult.Found(current) =>
               compatibility.validate(current, selection = selection) match
                 case GearCompatibility.ValidationResult.Rejected(reason) => ReplaceResult.Rejected(reason).pure[F]
-                case GearCompatibility.ValidationResult.Accepted         => persistSelection(album, chapter, selection = selection)
-
-    private def persistSelection(album: AlbumId, chapter: ChapterId, selection: GearSelection) =
-      repository.replace(album, chapter, selection = selection).map:
-        case ChapterGearRepository.WriteResult.Saved     => ReplaceResult.Saved
-        case ChapterGearRepository.WriteResult.NotFound  => ReplaceResult.NotFound
-        case ChapterGearRepository.WriteResult.Failed    => ReplaceResult.Failed
-        case ChapterGearRepository.WriteResult.Uncertain => ReplaceResult.Uncertain
+                case GearCompatibility.ValidationResult.Accepted         =>
+                  repository.replace(album, chapter, selection = selection).map:
+                    case ChapterGearRepository.WriteResult.Saved     => ReplaceResult.Saved
+                    case ChapterGearRepository.WriteResult.NotFound  => ReplaceResult.NotFound
+                    case ChapterGearRepository.WriteResult.Failed    => ReplaceResult.Failed
+                    case ChapterGearRepository.WriteResult.Uncertain => ReplaceResult.Uncertain
 
   enum CatalogResult:
     case Found(catalog: GearCatalog)

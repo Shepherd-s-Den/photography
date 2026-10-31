@@ -33,7 +33,13 @@ object CameraManager:
             case CameraRepository.ReferencesResult.NotFound     => UpdateResult.NotFound.pure[F]
             case CameraRepository.ReferencesResult.Failed       => UpdateResult.Failed.pure[F]
             case CameraRepository.ReferencesResult.Found(usage) =>
-              if preservesSelections(camera.kind, usage) then persistCamera(camera)
+              if preservesSelections(camera.kind, usage) then
+                repository.update(camera).map:
+                  case CameraRepository.UpdateResult.Updated   => UpdateResult.Updated
+                  case CameraRepository.UpdateResult.NotFound  => UpdateResult.NotFound
+                  case CameraRepository.UpdateResult.Conflict  => UpdateResult.Conflict
+                  case CameraRepository.UpdateResult.Failed    => UpdateResult.Failed
+                  case CameraRepository.UpdateResult.Uncertain => UpdateResult.Uncertain
               else UpdateResult.InvalidatesSelection.pure[F]
 
     override def delete(id: CameraId): F[DeleteResult] =
@@ -52,14 +58,6 @@ object CameraManager:
           case CameraKind.FixedLens              => true
           case _: CameraKind.InterchangeableLens => false
       case CameraRepository.Usage.Interchangeable(lenses) => lenses.forall(kind.accepts)
-
-    private def persistCamera(camera: Camera) =
-      repository.update(camera).map:
-        case CameraRepository.UpdateResult.Updated   => UpdateResult.Updated
-        case CameraRepository.UpdateResult.NotFound  => UpdateResult.NotFound
-        case CameraRepository.UpdateResult.Conflict  => UpdateResult.Conflict
-        case CameraRepository.UpdateResult.Failed    => UpdateResult.Failed
-        case CameraRepository.UpdateResult.Uncertain => UpdateResult.Uncertain
 
   enum CreateResult:
     case Created(camera: Camera)

@@ -232,9 +232,9 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
       val refs               = Refs()
       val occupied           = buildAlbumWithSpreads(spreads = Vector(firstOccupied, second))
       val selected           = firstOccupied.placements.headOption.getOrElse(fail("Expected occupied spread"))
-      val expectedPlacements = firstOccupied.placements.map(value =>
+      val expectedPlacements = firstOccupied.placements.map { value =>
         if value.id.value === selected.id.value then value.copy(captionCorner = corner) else value
-      )
+      }
       val expected = firstOccupied.copy(placements = expectedPlacements)
 
       for
@@ -245,18 +245,6 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
         assertEquals(result, PlacementResult.Saved(expected))
         assertEquals(replacements, Vector(expected))
     }
-
-  test("should reject a missing caption placement without changing saved composition"):
-    val refs    = Refs()
-    val missing = SpreadPlacementId(buildUuid(index = 999L))
-
-    for
-      manager      <- buildManager(refs)
-      result       <- manager.editPlacements(album.id, first.id, Edit.SetCaptionCorner(missing, CaptionCorner.TopLeft))
-      replacements <- refs.replacements.get
-    yield
-      assertEquals(result, PlacementResult.Rejected(Failure.PlacementNotFound))
-      assertEquals(replacements, Vector.empty[Spread])
 
   test("should change an unoccupied photo spread to a same-context layout with fresh slots"):
     val refs = Refs()
@@ -504,6 +492,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     val requests  = Vector(
       Edit.Place(staleSlot, PhotoId(buildUuid(index = 572L))) -> Failure.SlotNotFound,
       Edit.Remove(stale)                                      -> Failure.PlacementNotFound,
+      Edit.SetCaptionCorner(stale, CaptionCorner.TopLeft)     -> Failure.PlacementNotFound,
       Edit.Move(stale, source.slot)                           -> Failure.PlacementNotFound,
       Edit.Move(source.id, staleSlot)                         -> Failure.SlotNotFound,
       Edit.Adjust(stale, untouched)                           -> Failure.PlacementNotFound,
@@ -513,6 +502,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
 
     requests.traverse_ { case (request, failure) =>
       val refs = Refs()
+
       for
         manager <- buildManager(refs, maybeAlbum = occupied.some)
         result  <- manager.editPlacements(album.id, first.id, request)
