@@ -123,7 +123,7 @@ object SqliteGearRepository:
         for
           validCode <- code.refineEither[Not[Empty]]
           validName <- name.refineEither[Not[Empty]]
-          validKind <- decodeKind(kind, maybeMount, maybeSensor)
+          validKind <- decodeKind(kind = kind, maybeMount = maybeMount, maybeSensor = maybeSensor)
         yield Camera(CameraId(id), validCode, validName, validKind)
       decoded.leftMap(new IllegalArgumentException(_))
 
@@ -133,8 +133,8 @@ object SqliteGearRepository:
         for
           validCode     <- code.refineEither[Not[Empty]]
           validName     <- name.refineEither[Not[Empty]]
-          validMount    <- decodeMount(mount)
-          validCoverage <- decodeFormat(coverage)
+          validMount    <- decodeMount(value = mount)
+          validCoverage <- decodeFormat(value = coverage)
         yield Lens(LensId(id), validCode, validName, validMount, validCoverage)
       decoded.leftMap(new IllegalArgumentException(_))
 
@@ -142,7 +142,7 @@ object SqliteGearRepository:
       (kind, maybeMount, maybeSensor) match
         case ("fixed_lens", None, None)                          => CameraKind.FixedLens.asRight[String]
         case ("interchangeable_lens", Some(mount), Some(sensor)) =>
-          (decodeMount(mount), decodeFormat(sensor)).mapN(CameraKind.InterchangeableLens.apply)
+          (decodeMount(value = mount), decodeFormat(value = sensor)).mapN(CameraKind.InterchangeableLens.apply)
         case _ => "Invalid stored camera optics".asLeft[CameraKind]
 
     private def encodeKind(kind: CameraKind) = kind match
