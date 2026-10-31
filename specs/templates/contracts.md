@@ -1,1 +1,1 @@
-Use the Contracts authoring template in [shared context guidance](../../.agents/skills/sdd/context.md#authoring-templates).
+Use the Contracts template in context.md returned by the [shared workflow entrypoint](../../.agents/skills/sdd/SKILL.md).

@@ -184,14 +184,9 @@ class VerificationSeamIntegrationTest(unittest.TestCase):
         temporary_directory = tempfile.TemporaryDirectory()
         self.addCleanup(temporary_directory.cleanup)
         repository = Path(temporary_directory.name)
-        shutil.copytree(ROOT / ".agents/skills/sdd", repository / ".agents/skills/sdd",
-                        ignore=shutil.ignore_patterns("__pycache__"))
         for path in (
-            "AGENTS.md",
-            ".agents/README.md",
-            "CONTRIBUTING.md",
-            "DESIGN-PRINCIPLES.md",
             ".githooks/pre-push",
+            ".agents/skills/sdd/scripts/check_markdown_wrapping.py",
             "scripts/verify",
         ):
             target = repository / path

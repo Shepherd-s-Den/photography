@@ -21,11 +21,10 @@ export function checkLocalSetup(source: Directory): Container {
     .withDirectory("/work/scripts", source.directory("scripts"))
     .withDirectory("/work/.githooks", source.directory(".githooks"))
     .withDirectory("/work/.github/workflows", source.directory(".github/workflows"))
-    .withDirectory("/work/.agents/skills/sdd", source.directory(".agents/skills/sdd"))
-    .withFile("/work/AGENTS.md", source.file("AGENTS.md"))
-    .withFile("/work/.agents/README.md", source.file(".agents/README.md"))
-    .withFile("/work/CONTRIBUTING.md", source.file("CONTRIBUTING.md"))
-    .withFile("/work/DESIGN-PRINCIPLES.md", source.file("DESIGN-PRINCIPLES.md"))
+    .withDirectory(
+      "/work/.agents/skills/sdd/scripts",
+      source.directory(".agents/skills/sdd/scripts"),
+    )
     .withWorkdir("/work")
     .withExec(["python3", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_*.py"]);
 }

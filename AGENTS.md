@@ -5,4 +5,3 @@
 - Backend, frontend and pipeline behavior remain with their owners.
 - Preserve active agents' branches and local state; isolated work belongs in separate worktrees.
 - Product decisions come from current contracts and maintainer-approved scope.
-- Shared skills remain under `.agents/skills` for discovery.

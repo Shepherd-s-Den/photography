@@ -1,1 +1,1 @@
-Follow shared [conventions](.agents/skills/sdd/conventions.md) and [execution](.agents/skills/sdd/executor.md); setup, gates and safety pointers are in [local guidance](.agents/skills/sdd/local.md).
+Read conventions.md and the Typelevel profile returned by `bash scripts/workflows context`; [local guidance](.agents/skills/sdd/local.md) points to setup and gates.
