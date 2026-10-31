@@ -8,6 +8,8 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import munit.CatsEffectSuite
+import org.typelevel.log4cats.Logger
+import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.{Clock, IdGenerator}
 import photography.domain.album.*
 import photography.domain.layout.*
@@ -20,6 +22,7 @@ import java.time.Instant
 import java.util.UUID
 
 final class AlbumManagerComponentTest extends CatsEffectSuite:
+  private given Logger[IO] = Slf4jLogger.getLogger[IO]
 
   private val pageSize                = 6.refineUnsafe[Positive]
   private val createdAt               = Instant.parse("2026-10-07T12:00:00Z")
@@ -69,7 +72,8 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     val expectedStart     = Spread.AlbumStart(SpreadId(buildUuid(index = 11)), templateId, Vector(photoSlot), textSlot, emptyPlacements)
     val expectedCreatedAt = Instant.parse("2026-10-07T12:00:00.123Z")
     val emptyChapters     = Vector.empty[Chapter]
-    val expectedAlbum = Album(expectedAlbumId, selectedYear, title = "Asian capitals", synopsis = "", expectedCreatedAt, expectedStart, emptyChapters)
+    val expectedAlbum     =
+      Album(expectedAlbumId, selectedYear, title = "Asian capitals", synopsis = "", Author.all, expectedCreatedAt, expectedStart, emptyChapters)
     val front         = CoverSlot(CoverSlotId(buildUuid(index = 14)))
     val back          = CoverSlot(CoverSlotId(buildUuid(index = 15)))
     val expectedCover = Cover(expectedAlbumId, SpineOwner.Front, front, back)
@@ -148,12 +152,61 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       assertEquals(missing, DeleteAlbumResult.NotFound)
       assertEquals(failed, DeleteAlbumResult.Failed)
 
+  test("should create old-year albums with the full supported author catalog"):
+    buildManager(Refs()).create(year = 2020, title = "History").map:
+      case CreateAlbumResult.Created(album) => assertEquals(album.authors, Author.all)
+      case result                           => fail(s"Unexpected creation $result")
+
+  test("should save synopsis and authors once and preserve every repository outcome"):
+    val album         = buildAlbum(index = 1)
+    val text          = "Șir 日本語\n🙂"
+    val updated       = album.copy(synopsis = text)
+    val synopsisCases = Vector(
+      AlbumRepository.SaveSynopsisResult.Saved(updated)                  -> SaveSynopsisResult.Saved(updated),
+      AlbumRepository.SaveSynopsisResult.NotFound                        -> SaveSynopsisResult.NotFound,
+      AlbumRepository.SaveSynopsisResult.Failed(Failure.DatabaseFailure) -> SaveSynopsisResult.Failed,
+      AlbumRepository.SaveSynopsisResult.Uncertain                       -> SaveSynopsisResult.Uncertain
+    )
+    val authorsCases = Vector(
+      AlbumRepository.SaveAuthorsResult.Saved(album)                    -> SaveAuthorsResult.Saved(album),
+      AlbumRepository.SaveAuthorsResult.NotFound                        -> SaveAuthorsResult.NotFound,
+      AlbumRepository.SaveAuthorsResult.Failed(Failure.DatabaseFailure) -> SaveAuthorsResult.Failed,
+      AlbumRepository.SaveAuthorsResult.Uncertain                       -> SaveAuthorsResult.Uncertain
+    )
+
+    for
+      synopsis <- synopsisCases.traverse { case (response, expected) =>
+        val refs = Refs()
+        for
+          result <- buildManager(refs, synopsisResult = response).saveSynopsis(album.id, text = text)
+          calls  <- refs.synopsisCalls.get
+          reads  <- refs.maybeLastReadId.get
+        yield
+          assertEquals(calls, Vector(album.id -> text))
+          assertEquals(reads, None)
+          assertEquals(result, expected)
+      }
+      authors <- authorsCases.traverse { case (response, expected) =>
+        val refs = Refs()
+        for
+          result <- buildManager(refs, authorsResult = response).saveAuthors(album.id, Author.all)
+          calls  <- refs.authorsCalls.get
+        yield
+          assertEquals(calls, Vector(album.id -> Author.all))
+          assertEquals(result, expected)
+      }
+    yield
+      assertEquals(synopsis.size, synopsisCases.size)
+      assertEquals(authors.size, authorsCases.size)
+
   final private case class Refs():
-    val listCalls: Ref[IO, Vector[(Int, Int)]]         = Ref.unsafe(Vector.empty)
-    val maybeCreated: Ref[IO, Option[(Album, Cover)]]  = Ref.unsafe(None)
-    val maybeLastReadId: Ref[IO, Option[AlbumId]]      = Ref.unsafe(None)
-    val maybeRenamedTitle: Ref[IO, Option[AlbumTitle]] = Ref.unsafe(None)
-    val maybeDeletedId: Ref[IO, Option[AlbumId]]       = Ref.unsafe(None)
+    val synopsisCalls: Ref[IO, Vector[(AlbumId, String)]]      = Ref.unsafe(Vector.empty)
+    val authorsCalls: Ref[IO, Vector[(AlbumId, AlbumAuthors)]] = Ref.unsafe(Vector.empty)
+    val listCalls: Ref[IO, Vector[(Int, Int)]]                 = Ref.unsafe(Vector.empty)
+    val maybeCreated: Ref[IO, Option[(Album, Cover)]]          = Ref.unsafe(None)
+    val maybeLastReadId: Ref[IO, Option[AlbumId]]              = Ref.unsafe(None)
+    val maybeRenamedTitle: Ref[IO, Option[AlbumTitle]]         = Ref.unsafe(None)
+    val maybeDeletedId: Ref[IO, Option[AlbumId]]               = Ref.unsafe(None)
 
   // scalafix:off DisableSyntax.defaultArgs
   private def buildManager(
@@ -164,6 +217,8 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       getResult: AlbumRepository.GetResult = AlbumRepository.GetResult.NotFound,
       renameResult: AlbumRepository.RenameResult = AlbumRepository.RenameResult.NotFound,
       deleteResult: AlbumRepository.DeleteResult = AlbumRepository.DeleteResult.NotFound,
+      synopsisResult: AlbumRepository.SaveSynopsisResult = AlbumRepository.SaveSynopsisResult.NotFound,
+      authorsResult: AlbumRepository.SaveAuthorsResult = AlbumRepository.SaveAuthorsResult.NotFound,
       listResult: ListAlbumStartTemplatesResult =
         ListAlbumStartTemplatesResult.Listed(NonEmptyList.of(buildAlbumStartTemplate(index = 20), buildAlbumStartTemplate(index = 21))),
       currentTime: Instant = createdAt
@@ -182,6 +237,10 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     given Clock[IO] with
       override def readInstant: IO[Instant] = currentTime.pure[IO]
     val repository = new AlbumRepository[IO]:
+      override def saveSynopsis(album: AlbumId, text: String): IO[AlbumRepository.SaveSynopsisResult] =
+        refs.synopsisCalls.update(_ :+ (album -> text)).as(synopsisResult)
+      override def saveAuthors(album: AlbumId, authors: AlbumAuthors): IO[AlbumRepository.SaveAuthorsResult] =
+        refs.authorsCalls.update(_ :+ (album -> authors)).as(authorsResult)
       override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
         refs.listCalls.update(_ :+ (offset -> limit)).as(
           if maybeListFailureOffset.contains(offset) then AlbumRepository.ListResult.Failed(Failure.DatabaseFailure)
@@ -216,7 +275,7 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
     val year              = (1900 + index).refineUnsafe[AlbumYearConstraint]
     val title: AlbumTitle = s"Album $index".refineUnsafe
     val albumCreatedAt    = createdAt.plusSeconds(index.toLong)
-    Album(albumId, year, title, synopsis = s"Synopsis $index", albumCreatedAt, start, chapters = Vector.empty[Chapter])
+    Album(albumId, year, title, synopsis = s"Synopsis $index", Author.all, albumCreatedAt, start, chapters = Vector.empty[Chapter])
 
   private def buildUuid(index: Int) =
     val suffix = index.toString.reverse.padTo(12, '0').reverse

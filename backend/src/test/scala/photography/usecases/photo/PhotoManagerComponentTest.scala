@@ -313,6 +313,12 @@ final class PhotoManagerComponentTest extends CatsEffectSuite:
     val writePhoto  = save
     val removePhoto = remove
     val repository  = new PhotoRepository[Db]:
+      override def saveCaption(id: PhotoId, maybeCaption: Option[String]): Db[PhotoRepository.SaveCaptionResult] =
+        Kleisli.liftF[
+          IO,
+          Unit,
+          PhotoRepository.SaveCaptionResult
+        ](IO.raiseError[PhotoRepository.SaveCaptionResult](new AssertionError("Unexpected caption mutation")))
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
         val listed = maybeListed.getOrElse(current.get.map(photos => PhotoRepository.ListResult.Listed(photos)))
         Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](IO(assertEquals(id, chapter)) >> listed)

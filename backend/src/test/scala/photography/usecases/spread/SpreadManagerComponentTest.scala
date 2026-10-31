@@ -89,6 +89,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     year = 2026,
     title = "A year abroad",
     synopsis = "",
+    authors = Author.all,
     Instant.EPOCH,
     albumOpening,
     chapters = Vector(chapter, otherChapter)

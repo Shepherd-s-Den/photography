@@ -12,8 +12,8 @@ import photography.usecases.gear.LensManager.*
 import java.util.UUID
 
 final class LensManagerComponentTest extends CatsEffectSuite:
-  private val lens      = Lens(LensId(new UUID(0L, 1L)), code = "lens", friendlyName = "Lens", mount = "Sony E", coverage = SensorFormat.FullFrame)
-  private val fullFrame = new CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.FullFrame)
+  private val lens = Lens(LensId(new UUID(0L, 1L)), code = "lens", friendlyName = "Lens", mount = LensMount.SonyE, coverage = SensorFormat.FullFrame)
+  private val fullFrame = new CameraKind.InterchangeableLens(mount = LensMount.SonyE, sensor = SensorFormat.FullFrame)
 
   test("should create an independently identified shared lens without a camera owner"):
     val cases = Vector(
@@ -36,13 +36,13 @@ final class LensManagerComponentTest extends CatsEffectSuite:
     }
 
   test("should reject edits invalidating any referencing body while allowing coverage expansion and unused edits"):
-    val apsC  = new CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.ApsC)
+    val apsC  = new CameraKind.InterchangeableLens(mount = LensMount.SonyE, sensor = SensorFormat.ApsC)
     val cases = Vector(
       (lens, Vector(fullFrame, apsC), true),
       (lens.copy(coverage = SensorFormat.ApsC), Vector(apsC, fullFrame), false),
       (lens.copy(coverage = SensorFormat.ApsC), Vector(apsC), true),
-      (lens.copy(mount = "Nikon Z"), Vector(fullFrame), false),
-      (lens.copy(mount = "Nikon Z"), Vector.empty[CameraKind.InterchangeableLens], true)
+      (lens.copy(mount = LensMount.NikonZ), Vector(fullFrame), false),
+      (lens.copy(mount = LensMount.NikonZ), Vector.empty[CameraKind.InterchangeableLens], true)
     )
 
     cases.traverse_ { case (candidate, cameras, allowed) =>

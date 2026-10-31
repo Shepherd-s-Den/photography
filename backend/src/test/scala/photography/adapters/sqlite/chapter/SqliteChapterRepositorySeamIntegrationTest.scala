@@ -49,6 +49,155 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     (SELECT count(*) FROM destination_country) + (SELECT count(*) FROM spread) +
     (SELECT count(*) FROM spread_photo_slot) + (SELECT count(*) FROM spread_text_slot)""".query[Long].unique
 
+  test("should save exact scoped chapter descriptions and clear while retaining all metadata and composition"):
+    buildTransactor.use: xa =>
+      val chapters = SqliteChapterRepository.make
+      val albums   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val camera   = new UUID(12L, 1L)
+      val lens     = new UUID(12L, 2L)
+      val gear     = sql"""SELECT c.chapter_id, c.camera_id, c.use_kind, l.lens_id FROM chapter_camera c
+        JOIN chapter_camera_lens l ON l.chapter_id = c.chapter_id AND l.camera_id = c.camera_id"""
+        .query[(UUID, UUID, String, UUID)].to[Vector]
+      for
+        _              <- seedAlbum(xa)
+        first          <- buildChapter(xa, index = 1)
+        second         <- buildChapter(xa, index = 2)
+        _              <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+        _              <- chapters.create(albumId, second, order = NonEmptyList.of(second.id, first.id)).transact(xa)
+        _              <- insertPhotoComposition(first.id, first.opening.id).transact(xa)
+        _              <- sql"INSERT INTO camera VALUES ($camera, 'camera', 'Camera', 'interchangeable_lens')".update.run.transact(xa)
+        _              <- sql"INSERT INTO lens VALUES ($lens, $camera, 'lens', 'Lens')".update.run.transact(xa)
+        _              <- sql"INSERT INTO chapter_camera VALUES (${first.id.value}, $camera, 'interchangeable_lenses')".update.run.transact(xa)
+        _              <- sql"INSERT INTO chapter_camera_lens VALUES (${first.id.value}, $camera, $lens)".update.run.transact(xa)
+        before         <- albums.get(albumId)
+        saved          <- chapters.saveDescription(albumId, first.id, text = "日本\nVacanță").transact(xa)
+        after          <- albums.get(albumId)
+        missingAlbum   <- chapters.saveDescription(AlbumId(new UUID(0L, 99L)), first.id, text = "wrong album").transact(xa)
+        missingChapter <- chapters.saveDescription(albumId, ChapterId(new UUID(0L, 99L)), text = "missing").transact(xa)
+        unchanged      <- albums.get(albumId)
+        cleared        <- chapters.saveDescription(albumId, first.id, text = "").transact(xa)
+        empty          <- albums.get(albumId)
+        retainedGear   <- gear.transact(xa)
+      yield
+        val expectedText = before match
+          case AlbumRepository.GetResult.Found(album) =>
+            val savedChapters =
+              album.chapters.map(value => if value.id.value === first.id.value then value.copy(description = "日本\nVacanță") else value)
+            AlbumRepository.GetResult.Found(album.copy(chapters = savedChapters))
+          case other => fail(s"Expected complete album: $other")
+        val expectedEmpty = before match
+          case AlbumRepository.GetResult.Found(album) =>
+            val savedChapters = album.chapters.map(value => if value.id.value === first.id.value then value.copy(description = "") else value)
+            AlbumRepository.GetResult.Found(album.copy(chapters = savedChapters))
+          case other => fail(s"Expected complete album: $other")
+        assertEquals(saved, ChapterRepository.SaveDescriptionResult.Saved)
+        assertEquals(after, expectedText)
+        assertEquals(missingAlbum, ChapterRepository.SaveDescriptionResult.AlbumNotFound)
+        assertEquals(missingChapter, ChapterRepository.SaveDescriptionResult.ChapterNotFound)
+        assertEquals(unchanged, expectedText)
+        assertEquals(cleared, ChapterRepository.SaveDescriptionResult.Saved)
+        assertEquals(empty, expectedEmpty)
+        assertEquals(retainedGear, Vector((first.id.value, camera, "interchangeable_lenses", lens)))
+
+  test("should reject cross-album description edits and roll back failed statements and surrounding transactions"):
+    buildTransactor.use: xa =>
+      val chapters   = SqliteChapterRepository.make
+      val albums     = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val otherAlbum = AlbumId(new UUID(0L, 99L))
+      val reject     = sql"""CREATE TRIGGER reject_description BEFORE UPDATE OF description ON chapter BEGIN
+        UPDATE chapter SET source_folder = '/partial' WHERE id = OLD.id;
+        SELECT RAISE(FAIL, 'Rejected description');
+      END""".update.run
+      val ignore = sql"""CREATE TRIGGER reject_description BEFORE UPDATE OF description ON chapter BEGIN
+        UPDATE chapter SET source_folder = '/partial' WHERE id = OLD.id;
+        SELECT RAISE(IGNORE);
+      END""".update.run
+      val abortTransaction = sql"""CREATE TRIGGER reject_description BEFORE UPDATE OF description ON chapter BEGIN
+        SELECT RAISE(ROLLBACK, 'Description transaction aborted');
+      END""".update.run
+      for
+        _     <- seedAlbum(xa)
+        first <- buildChapter(xa, index = 1)
+        _     <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+        _     <-
+          sql"INSERT INTO album (id, year, title, synopsis, created_at_ms) VALUES (${otherAlbum.value}, 2099, 'Other', '', 0)".update.run.transact(xa)
+        before       <- albums.get(albumId)
+        scoped       <- chapters.saveDescription(otherAlbum, first.id, text = "Wrong owner").transact(xa)
+        _            <- reject.transact(xa)
+        failed       <- chapters.saveDescription(albumId, first.id, text = "Rejected").transact(xa)
+        retained     <- albums.get(albumId)
+        _            <- sql"DROP TRIGGER reject_description".update.run.transact(xa)
+        _            <- ignore.transact(xa)
+        ignored      <- chapters.saveDescription(albumId, first.id, text = "").transact(xa)
+        ignoredAlbum <- albums.get(albumId)
+        _            <- sql"DROP TRIGGER reject_description".update.run.transact(xa)
+        aborted      <-
+        (chapters.saveDescription(albumId, first.id, text = "") >>
+          new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]).transact(xa).attempt
+        finalAlbum <- albums.get(albumId)
+        _          <- abortTransaction.transact(xa)
+        uncertain  <- chapters.saveDescription(albumId, first.id, text = "").transact(xa).attempt
+      yield
+        assertEquals(scoped, ChapterRepository.SaveDescriptionResult.ChapterNotFound)
+        failed match
+          case ChapterRepository.SaveDescriptionResult.Failed(cause) => assert(cause.getMessage.contains("Rejected description"))
+          case result                                                => fail(s"Expected rejected description cause, obtained $result")
+        assertEquals(retained, before)
+        ignored match
+          case ChapterRepository.SaveDescriptionResult.Failed(cause) =>
+            assertEquals(cause.getMessage, "Description update did not change the existing chapter")
+          case result => fail(s"Expected ignored description cause, obtained $result")
+        assertEquals(ignoredAlbum, before)
+        assert(aborted.isLeft)
+        assertEquals(finalAlbum, before)
+        uncertain match
+          case Left(cause) =>
+            assert(cause.getMessage.contains("Description transaction aborted"))
+            assert(cause.getSuppressed.toVector.exists(_.getMessage.contains("savepoint")))
+          case result => fail(s"Expected uncertain rollback acknowledgement with both causes, obtained $result")
+
+  test("should expose uncertain description acknowledgements without retrying or conflating the actual SQLite commit"):
+    Vector(false, true).traverse_ { committed =>
+      buildTransactor.use: xa =>
+        val chapters  = SqliteChapterRepository.make
+        val albums    = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+        val templates = SpreadTemplateManager.make(SqliteSpreadTemplateRepository.make[IO](xa))
+        val imports   = new ChapterPhotoImport[IO]:
+          override def prepare(parent: AlbumId, chapter: ChapterId, source: PhotoSource): IO[Request] =
+            IO.raiseError[Request](new AssertionError("Unexpected import preparation"))
+          override def launch(request: Request): IO[Scheduling] = IO.raiseError[Scheduling](new AssertionError("Unexpected import launch"))
+          override def retire(parent: AlbumId, retirements: Vector[PhotoWriteIntent.Retirement]): IO[Unit] =
+            IO.raiseError[Unit](new AssertionError("Unexpected retirement"))
+          override def suspend(chapter: ChapterId): IO[Unit]            = IO.raiseError[Unit](new AssertionError("Unexpected suspension"))
+          override def status(chapter: ChapterId): IO[ExecutionOutcome] =
+            IO.raiseError[ExecutionOutcome](new AssertionError("Unexpected import status"))
+        given IdGenerator[IO] with
+          override def generateId: IO[UUID] = IO.raiseError[UUID](new AssertionError("Unexpected identity allocation"))
+        given Transaction[ConnectionIO, IO] with
+          override def run[A](program: ConnectionIO[A]): IO[A] =
+            val lost = new IllegalStateException("Lost acknowledgement").raiseError[IO, A]
+            if committed then program.transact(xa) >> lost else lost
+          override def resolve[A](program: ConnectionIO[A]): IO[A] =
+            IO.raiseError[A](new AssertionError("Unexpected automatic reconciliation"))
+        Mutex[IO].flatMap: mutex =>
+          given Mutex[IO] = mutex
+          val manager     = ChapterManager.make(albums, chapters, ChapterPlanning.make(templates), imports, SqlitePhotoRepository.make)
+          for
+            _      <- seedAlbum(xa)
+            first  <- buildChapter(xa, index = 1)
+            _      <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+            before <- albums.get(albumId)
+            result <- manager.saveDescription(albumId, first.id, text = "日本\nVacanță")
+            after  <- albums.get(albumId)
+          yield
+            val expected = before match
+              case AlbumRepository.GetResult.Found(album) if committed =>
+                AlbumRepository.GetResult.Found(album.copy(chapters = album.chapters.map(_.copy(description = "日本\nVacanță"))))
+              case original => original
+            assertEquals(result, ChapterManager.SaveDescriptionResult.Uncertain)
+            assertEquals(after, expected)
+    }
+
   test("should expose chapter writes as database programs that roll back with their caller"):
     buildTransactor.use: xa =>
       val chapters = SqliteChapterRepository.make
@@ -467,8 +616,9 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
     val textSlot        = SpreadSlot.Text(TextSpreadSlotId(new UUID(4L, 11L)), template.textSlot)
     val emptyPlacements = Vector.empty[SpreadPlacement]
     val opening         = Spread.AlbumStart(SpreadId(new UUID(4L, 10L)), template.id, photoSlots = photos, textSlot, placements = emptyPlacements)
-    val album           = Album(albumId, year = 2026, title = "Album", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
-    val cover           = Cover(albumId, SpineOwner.Front, CoverSlot(CoverSlotId(new UUID(4L, 12L))), CoverSlot(CoverSlotId(new UUID(4L, 13L))))
+    val album           =
+      Album(albumId, year = 2026, title = "Album", synopsis = "", authors = Author.all, Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    val cover = Cover(albumId, SpineOwner.Front, CoverSlot(CoverSlotId(new UUID(4L, 12L))), CoverSlot(CoverSlotId(new UUID(4L, 13L))))
     (album, cover)
 
   private def buildChapter(xa: Transactor[IO], index: Int) =

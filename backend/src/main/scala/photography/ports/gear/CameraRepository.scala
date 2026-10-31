@@ -3,7 +3,6 @@ package photography.ports.gear
 import cats.data.NonEmptyVector
 import photography.domain.gear.{Camera, CameraId, Lens}
 
-/** Updates and deletion are atomic. Reference reads and writes participate in the backend's shared mutation coordination. */
 trait CameraRepository[F[_]]:
   def create(camera: Camera): F[CameraRepository.CreateResult]
   def readReferences(id: CameraId): F[CameraRepository.ReferencesResult]

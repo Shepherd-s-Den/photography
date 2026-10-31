@@ -6,6 +6,8 @@ import photography.domain.album.*
 import photography.domain.layout.Spread
 
 trait ChapterRepository[F[_]]:
+  def saveDescription(album: AlbumId, chapter: ChapterId, text: String): F[ChapterRepository.SaveDescriptionResult]
+
   def findSource(chapter: ChapterId): F[ChapterRepository.SourceResult]
 
   def create(album: AlbumId, chapter: ChapterRepository.NewChapter, order: NonEmptyList[ChapterId]): F[ChapterRepository.CreateResult]
@@ -13,6 +15,10 @@ trait ChapterRepository[F[_]]:
   def update(command: ChapterRepository.Update): F[ChapterRepository.UpdateResult]
 
 object ChapterRepository:
+  enum SaveDescriptionResult:
+    case Saved, AlbumNotFound, ChapterNotFound, Uncertain
+    case Failed(cause: Throwable)
+
   enum SourceResult:
     case Found(album: AlbumId, source: PhotoSource)
     case ChapterNotFound, Failed

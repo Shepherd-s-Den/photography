@@ -32,7 +32,7 @@ Before Phase 1, create `.agent-work/<slug>/checklist.md` tracking lifecycle gate
 
 Re-read that checklist before every phase's work, including after any interruption, tangent, or unrelated request. Do not open a PR, hand off for review, or start the next phase while an earlier gate sits unchecked — creating the checklist once is not the same as following it.
 
-**Architecture before implementation:** follow [`executor.md`](executor.md#tests)'s caller-first design-map gate before tests or production changes. Review evidence, final repairs and handling missed rules follow [`reviewer.md`](reviewer.md).
+**Architecture before implementation:** complete the [architecture decision gate](checklists/code-quality.md#architecture-gate) before tests or production changes; [`executor.md`](executor.md#tests) places its source-backed decisions in the ignored design map. Review evidence, final repairs and handling missed rules follow [`reviewer.md`](reviewer.md).
 
 **PR-opening gate:** complete the executor's self-checks and the single independent review phase in [`reviewer.md`](reviewer.md), adjudicate every finding, independently verify final repairs, and rerun affected gates before publishing or updating a ready PR. Record evidence and dispositions against the final candidate in the local checklist. “Stop once the PR is open” is an endpoint, not a waiver of these prerequisites; only an explicit maintainer waiver changes them.
 

@@ -5,8 +5,10 @@ import cats.data.NonEmptyList
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.Positive
+import io.github.iltotore.iron.constraint.collection.MinLength
 import org.typelevel.doobie.{ConnectionIO, Fragment, Transactor}
 import org.typelevel.doobie.implicits.*
+import org.typelevel.doobie.util.invariant.InvalidValue
 import org.typelevel.log4cats.Logger
 import org.sqlite.{SQLiteErrorCode, SQLiteException}
 import photography.adapters.sqlite.SqliteCodecs.given
@@ -41,7 +43,7 @@ object SqliteAlbumRepository:
       val query     =
         for
           _ <- initial.liftTo[ConnectionIO]
-          _ <- insertAlbum(album.id, album.year, album.title, album.synopsis, album.createdAt)
+          _ <- insertAlbum(album)
           _ <- insertInitialSpread(album.id, opening.id, opening.template, photos = opening.photoSlots, opening.textSlot)
           _ <- insertCover(cover)
           _ <- loadRequired(album.id.value)
@@ -53,20 +55,70 @@ object SqliteAlbumRepository:
 
     override def rename(id: AlbumId, title: AlbumTitle): F[RenameResult] =
       val update = sql"UPDATE album SET title = $title WHERE id = ${id.value}"
-      val query  = load(id.value).flatMap:
-        case None        => RenameResult.NotFound.pure[ConnectionIO]
-        case Some(album) =>
-          update.update.run.as(RenameResult.Renamed(album.copy(title = title)))
-      execute(query, RenameResult.Failed(_))
+      saveField(id, update).map:
+        case FieldSaveResult.Saved(updated) => RenameResult.Renamed(updated)
+        case FieldSaveResult.NotFound       => RenameResult.NotFound
+        case FieldSaveResult.Failed(reason) => RenameResult.Failed(reason)
+        case FieldSaveResult.Uncertain      => RenameResult.Failed(Failure.DatabaseFailure)
 
     override def delete(id: AlbumId): F[DeleteResult] =
       val query = sql"DELETE FROM album WHERE id = ${id.value}".update.run.map: deleted =>
         if deleted === 0 then DeleteResult.NotFound else DeleteResult.Deleted
       execute(query, DeleteResult.Failed(_))
 
-    private def insertAlbum(id: AlbumId, year: AlbumYear, title: AlbumTitle, synopsis: String, createdAt: Instant) =
-      sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
-            VALUES (${id.value}, $year, $title, $synopsis, $createdAt)""".update.run.void
+    override def saveSynopsis(album: AlbumId, text: String): F[SaveSynopsisResult] =
+      val update = sql"UPDATE album SET synopsis = $text WHERE id = ${album.value}"
+      saveField(album, update).map:
+        case FieldSaveResult.Saved(updated) => SaveSynopsisResult.Saved(updated)
+        case FieldSaveResult.NotFound       => SaveSynopsisResult.NotFound
+        case FieldSaveResult.Failed(reason) => SaveSynopsisResult.Failed(reason)
+        case FieldSaveResult.Uncertain      => SaveSynopsisResult.Uncertain
+
+    override def saveAuthors(album: AlbumId, authors: AlbumAuthors): F[SaveAuthorsResult] =
+      val encoded = encodeAuthors(authors)
+      val update  = sql"UPDATE album SET authors = $encoded WHERE id = ${album.value}"
+      saveField(album, update).map:
+        case FieldSaveResult.Saved(updated) => SaveAuthorsResult.Saved(updated)
+        case FieldSaveResult.NotFound       => SaveAuthorsResult.NotFound
+        case FieldSaveResult.Failed(reason) => SaveAuthorsResult.Failed(reason)
+        case FieldSaveResult.Uncertain      => SaveAuthorsResult.Uncertain
+
+    private def saveField(album: AlbumId, update: Fragment) =
+      val rejected = new IllegalArgumentException(s"Expected one applied album field update for ${album.value}")
+      val query    = load(album.value).flatMap:
+        case None    => FieldSaveResult.NotFound.pure[ConnectionIO]
+        case Some(_) => update.update.run.ensure(rejected)(_ === 1) >> loadRequired(album.value).map(FieldSaveResult.Saved(_))
+      val commit = transactor.strategy.after.handleErrorWith(error => new UncertainCommit(error).raiseError[ConnectionIO, Unit])
+      query.transact(Transactor.after.set(transactor, commit)).attempt.flatMap:
+        case Right(result) => result.pure[F]
+        case Left(error)   =>
+          val result = error match
+            case sqlite: SQLiteException
+                if (sqlite.getResultCode.code & 255) === SQLiteErrorCode.SQLITE_CONSTRAINT.code ||
+                  sqlite.getResultCode.code === SQLiteErrorCode.SQLITE_ERROR.code => FieldSaveResult.Failed(Failure.DatabaseFailure)
+            case _: IllegalArgumentException | _: InvalidValue[?, ?] => FieldSaveResult.Failed(Failure.DatabaseFailure)
+            case _                                                   => FieldSaveResult.Uncertain
+          Logger[F].error(error)(s"SQLite album field save failed for ${album.value}: $result").as(result)
+
+    final private class UncertainCommit(cause: Throwable) extends RuntimeException(cause)
+
+    private enum FieldSaveResult:
+      case Saved(album: Album)
+      case NotFound, Uncertain
+      case Failed(reason: Failure)
+
+    private def insertAlbum(album: Album) =
+      val authors = encodeAuthors(album.authors)
+      sql"""INSERT INTO album (id, year, title, synopsis, authors, created_at_ms)
+            VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, $authors, ${album.createdAt})""".update.run.void
+
+    private def encodeAuthors(authors: AlbumAuthors) =
+      authors.foldLeft(0)((encoded, author) => encoded | (1 << author.ordinal))
+
+    private def decodeAuthors(encoded: Int) =
+      Either.cond(encoded >= 1 && encoded <= 7, (), new IllegalArgumentException("Invalid album authors")).flatMap: _ =>
+        Author.all.filter(author => (encoded & (1 << author.ordinal)) =!= 0).refineEither[MinLength[1]]
+          .leftMap(new IllegalArgumentException(_))
 
     private def insertInitialSpread(
         album: AlbumId,
@@ -119,14 +171,16 @@ object SqliteAlbumRepository:
         case None          => new IllegalArgumentException(s"Missing required spread ${id.value}").raiseError[ConnectionIO, Spread]
 
     private def load(id: UUID) =
-      sql"SELECT year, title, synopsis, created_at_ms FROM album WHERE id = $id".query[(AlbumYear, AlbumTitle, String, Instant)].option.flatMap:
-        case None                                     => none[Album].pure[ConnectionIO]
-        case Some((year, title, synopsis, createdAt)) =>
+      sql"""SELECT year, title, synopsis, CASE WHEN typeof(authors) = 'integer' THEN authors ELSE 0 END, created_at_ms
+            FROM album WHERE id = $id""".query[(AlbumYear, AlbumTitle, String, Int, Instant)].option.flatMap:
+        case None                                                     => none[Album].pure[ConnectionIO]
+        case Some((year, title, synopsis, encodedAuthors, createdAt)) =>
           for
+            authors  <- decodeAuthors(encodedAuthors).liftTo[ConnectionIO]
             chapters <- loadChapters(id)
             opening  <- loadAlbumOpening(id)
             _        <- validateCover(id)
-          yield Album(AlbumId(id), year = year, title = title, synopsis = synopsis, createdAt = createdAt, opening, chapters = chapters).some
+          yield Album(AlbumId(id), year = year, title = title, synopsis = synopsis, authors, createdAt = createdAt, opening, chapters = chapters).some
 
     private def loadRequired(id: UUID) =
       load(id).flatMap(_.toRight(new IllegalArgumentException(s"Missing required album $id")).liftTo[ConnectionIO])

@@ -18,7 +18,7 @@ import photography.domain.layout.*
 import photography.ports.album.AlbumRepository
 import photography.ports.chapter.ChapterRepository
 import photography.ports.photo.PhotoRepository
-import photography.usecases.chapter.ChapterManager.{CreateResult, Period, RefreshResult, UpdateResult}
+import photography.usecases.chapter.ChapterManager.{CreateResult, Period, RefreshResult, SaveDescriptionResult, UpdateResult}
 import photography.usecases.spread.SpreadTemplateManager.ListChapterStartTemplatesResult
 import photography.usecases.photo.ChapterPhotoImport.{ExecutionOutcome, Request, Scheduling, Status}
 import org.typelevel.log4cats.Logger
@@ -29,7 +29,7 @@ import java.time.{Instant, LocalDate}
 import java.util.UUID
 
 final class ChapterManagerComponentTest extends CatsEffectSuite:
-  private given Logger[IO]              = Slf4jLogger.getLogger[IO]
+  private val logger                    = Slf4jLogger.getLogger[IO]
   private val homeName: DestinationName = "Home"
   private val countries                 = NonEmptyList.of(
     Country(CountryId(buildUuid(index = 21)), code = "JP", name = "Japan", AbsoluteLocation(Path.of("/flags/jp.svg"))),
@@ -46,7 +46,16 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     val emptyPlacements = Vector.empty[SpreadPlacement]
     val opening = Spread.AlbumStart(SpreadId(buildUuid(index = 3)), template.id, photoSlots = emptyPhotoSlots, textSlot, placements = emptyPlacements)
     val emptyChapters = Vector.empty[Chapter]
-    Album(AlbumId(buildUuid(index = 1)), year = 2026, title = "A year abroad", synopsis = "", Instant.EPOCH, opening, chapters = emptyChapters)
+    Album(
+      AlbumId(buildUuid(index = 1)),
+      year = 2026,
+      title = "A year abroad",
+      synopsis = "",
+      authors = Author.all,
+      Instant.EPOCH,
+      opening,
+      chapters = emptyChapters
+    )
   private val chapter =
     val destination     = Destination(DestinationId(buildUuid(index = 30)), name = "Asian capitals", countries = countries)
     val period          = VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2)
@@ -532,7 +541,77 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         assertEquals(prepared, Vector.empty[(ChapterId, PhotoSource)])
     }
 
+  test("should save description alone with exact text and explicit outcomes without metadata or import work"):
+    val failure = new IllegalStateException("Description write rejected")
+    val cases   = Vector(
+      ChapterRepository.SaveDescriptionResult.Saved           -> SaveDescriptionResult.Saved,
+      ChapterRepository.SaveDescriptionResult.AlbumNotFound   -> SaveDescriptionResult.AlbumNotFound,
+      ChapterRepository.SaveDescriptionResult.ChapterNotFound -> SaveDescriptionResult.ChapterNotFound,
+      ChapterRepository.SaveDescriptionResult.Failed(failure) -> SaveDescriptionResult.Failed,
+      ChapterRepository.SaveDescriptionResult.Uncertain       -> SaveDescriptionResult.Uncertain
+    )
+    cases.traverse_ { case (response, expected) =>
+      val refs           = Refs()
+      val expectedErrors = response match
+        case ChapterRepository.SaveDescriptionResult.Failed(cause) => Vector(cause, cause)
+        case _                                                     => Vector.empty[Throwable]
+      for
+        manager      <- buildManager(refs, descriptionWrite = response.pure[IO])
+        saved        <- manager.saveDescription(album.id, chapter.id, text = "日本\nVacanță")
+        cleared      <- manager.saveDescription(album.id, chapter.id, text = "")
+        writes       <- refs.descriptions.get
+        updates      <- refs.updates.get
+        reads        <- refs.photoReads.get
+        preparations <- refs.preparations.get
+        launches     <- refs.launches.get
+        errors       <- refs.errors.get
+      yield
+        assertEquals(Vector(saved, cleared), Vector(expected, expected))
+        assertEquals(writes, Vector((album.id, chapter.id, "日本\nVacanță"), (album.id, chapter.id, "")))
+        assertEquals(updates, Vector.empty)
+        assertEquals(reads, Vector.empty)
+        assertEquals(preparations, Vector.empty)
+        assertEquals(launches, Vector.empty)
+        assertEquals(errors, expectedErrors)
+    }
+
+  test("should report uncertain description acknowledgement without retrying the mutation"):
+    val refs = Refs()
+    for
+      manager <- buildManager(
+        refs,
+        descriptionWrite = IO.raiseError[ChapterRepository.SaveDescriptionResult](new IllegalStateException("Lost acknowledgement"))
+      )
+      result <- manager.saveDescription(album.id, chapter.id, text = "Saved?")
+      writes <- refs.descriptions.get
+    yield
+      assertEquals(result, SaveDescriptionResult.Uncertain)
+      assertEquals(writes, Vector((album.id, chapter.id, "Saved?")))
+
+  test("should finish the description transaction handoff before honoring cancellation"):
+    TestControl.executeEmbed:
+      val refs = Refs()
+      for
+        entered       <- Deferred[IO, Unit]
+        release       <- Deferred[IO, Unit]
+        committed     <- Deferred[IO, Unit]
+        cancelStarted <- Deferred[IO, Unit]
+        manager       <- buildManager(
+          refs,
+          descriptionWrite = entered.complete(()).void >> release.get >> committed.complete(()).as(ChapterRepository.SaveDescriptionResult.Saved)
+        )
+        worker       <- manager.saveDescription(album.id, chapter.id, text = "Description").start
+        _            <- entered.get
+        cancellation <- (cancelStarted.complete(()).void >> worker.cancel).start
+        _            <- cancelStarted.get >> IO.cede
+        _            <- release.complete(())
+        _            <- cancellation.join
+        completed    <- committed.tryGet
+      yield assertEquals(completed, ().some)
+
   final private case class Refs():
+    val errors: Ref[IO, Vector[Throwable]]                                                                                  = Ref.unsafe(Vector.empty)
+    val descriptions: Ref[IO, Vector[(AlbumId, ChapterId, String)]]                                                         = Ref.unsafe(Vector.empty)
     val retirements: Ref[IO, Vector[PhotoWriteIntent.Retirement]]                                                           = Ref.unsafe(Vector.empty)
     val suspensions: Ref[IO, Vector[ChapterId]]                                                                             = Ref.unsafe(Vector.empty)
     val photoReads: Ref[IO, Vector[ChapterId]]                                                                              = Ref.unsafe(Vector.empty)
@@ -561,6 +640,7 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       maybeSource: Option[IO[ChapterRepository.SourceResult]] = None,
       createWrite: ChapterRepository.CreateResult = ChapterRepository.CreateResult.Saved,
       updateWrite: ChapterRepository.UpdateResult = ChapterRepository.UpdateResult.Saved,
+      descriptionWrite: IO[ChapterRepository.SaveDescriptionResult] = ChapterRepository.SaveDescriptionResult.Saved.pure[IO],
       templates: ListChapterStartTemplatesResult = ListChapterStartTemplatesResult.Listed(NonEmptyList.one(template)),
       preparation: IO[Unit] = IO.unit,
       scheduling: IO[Scheduling] = Scheduling.Queued.pure[IO],
@@ -571,10 +651,15 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       recording: IO[PhotoRepository.RecordWriteResult] = PhotoRepository.RecordWriteResult.Recorded.pure[IO],
       removal: IO[PhotoRepository.WriteResult] = PhotoRepository.WriteResult.Applied.pure[IO]
   ) =
+    given Logger[IO] = buildLogger(refs)
     given IdGenerator[IO] with
       private val next                  = Ref.unsafe[IO, Long](10L)
       override def generateId: IO[UUID] = next.getAndUpdate(_ + 1L).map(buildUuid)
     val albums = new AlbumRepository[IO]:
+      override def saveSynopsis(value: AlbumId, text: String): IO[AlbumRepository.SaveSynopsisResult] =
+        IO.raiseError[AlbumRepository.SaveSynopsisResult](new AssertionError("Unexpected synopsis save"))
+      override def saveAuthors(value: AlbumId, authors: AlbumAuthors): IO[AlbumRepository.SaveAuthorsResult] =
+        IO.raiseError[AlbumRepository.SaveAuthorsResult](new AssertionError("Unexpected authors save"))
       override def get(value: AlbumId): IO[AlbumRepository.GetResult] =
         maybeRead.getOrElse((AlbumRepository.GetResult.Found(current): AlbumRepository.GetResult).pure[IO])
       override def list(offset: Int, limit: Int): IO[AlbumRepository.ListResult] =
@@ -587,6 +672,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         IO.raiseError[AlbumRepository.DeleteResult](new AssertionError("Unexpected deletion"))
     val writeUpdate = update
     val repository  = new ChapterRepository[IO]:
+      override def saveDescription(parent: AlbumId, id: ChapterId, text: String): IO[ChapterRepository.SaveDescriptionResult] =
+        refs.descriptions.update(_ :+ (parent, id, text)) >> descriptionWrite
       override def findSource(id: ChapterId): IO[ChapterRepository.SourceResult] =
         val saved =
           current.chapters.find(_.id.value === id.value).fold[ChapterRepository.SourceResult](ChapterRepository.SourceResult.ChapterNotFound):
@@ -626,6 +713,8 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
         override def status(id: ChapterId): IO[ExecutionOutcome] =
           ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue]).pure[IO]
       val photoRepository = new PhotoRepository[IO]:
+        override def saveCaption(id: PhotoId, maybeCaption: Option[String]): IO[PhotoRepository.SaveCaptionResult] =
+          IO.raiseError[PhotoRepository.SaveCaptionResult](new AssertionError("Unexpected caption save"))
         override def listChapter(id: ChapterId): IO[PhotoRepository.ListResult] =
           refs.photoReads.update(_ :+ id) >> listed
         override def save(photo: Photo): IO[PhotoRepository.WriteResult] =
@@ -641,3 +730,16 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
   // scalafix:on DisableSyntax.defaultArgs
 
   private def buildUuid(index: Long) = new UUID(0L, index)
+
+  private def buildLogger(refs: Refs) =
+    new Logger[IO]:
+      override def error(cause: Throwable)(message: => String): IO[Unit] = refs.errors.update(_ :+ cause) >> logger.error(cause)(message)
+      override def warn(cause: Throwable)(message: => String): IO[Unit]  = logger.warn(cause)(message)
+      override def info(cause: Throwable)(message: => String): IO[Unit]  = logger.info(cause)(message)
+      override def debug(cause: Throwable)(message: => String): IO[Unit] = logger.debug(cause)(message)
+      override def trace(cause: Throwable)(message: => String): IO[Unit] = logger.trace(cause)(message)
+      override def error(message: => String): IO[Unit]                   = logger.error(message)
+      override def warn(message: => String): IO[Unit]                    = logger.warn(message)
+      override def info(message: => String): IO[Unit]                    = logger.info(message)
+      override def debug(message: => String): IO[Unit]                   = logger.debug(message)
+      override def trace(message: => String): IO[Unit]                   = logger.trace(message)

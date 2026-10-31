@@ -287,6 +287,12 @@ final class ChapterPhotoImportComponentTest extends CatsEffectSuite:
       private val next                  = Ref.unsafe[IO, Long](10L)
       override def generateId: IO[UUID] = next.getAndUpdate(_ + 1L).map(index => new UUID(0L, index))
     val photos = new PhotoRepository[Db]:
+      override def saveCaption(id: PhotoId, maybeCaption: Option[String]): Db[PhotoRepository.SaveCaptionResult] =
+        Kleisli.liftF[
+          IO,
+          Unit,
+          PhotoRepository.SaveCaptionResult
+        ](IO.raiseError[PhotoRepository.SaveCaptionResult](new AssertionError("Unexpected caption mutation")))
       override def listChapter(id: ChapterId): Db[PhotoRepository.ListResult] =
         val listed = refs.saves.get.map(photos => PhotoRepository.ListResult.Listed(photos = photos): PhotoRepository.ListResult)
         Kleisli.liftF[IO, Unit, PhotoRepository.ListResult](listed)

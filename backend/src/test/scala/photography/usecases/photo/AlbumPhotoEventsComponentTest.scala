@@ -35,7 +35,7 @@ final class AlbumPhotoEventsComponentTest extends CatsEffectSuite:
       text,
       placements = Vector.empty[SpreadPlacement]
     )
-    Album(album, year = 2026, title = "Delivery", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    Album(album, year = 2026, title = "Delivery", synopsis = "", authors = Author.all, Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
 
   test("should validate albums before creating streams and expose lookup failures"):
     Vector(GetAlbumResult.NotFound -> SubscribeResult.AlbumNotFound[IO](), GetAlbumResult.Failed -> SubscribeResult.Failed[IO]()).traverse_ {
@@ -105,6 +105,10 @@ final class AlbumPhotoEventsComponentTest extends CatsEffectSuite:
 
   private def buildAlbums(response: IO[GetAlbumResult]) =
     new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
       override def get(id: AlbumId): IO[GetAlbumResult]                              = response
       override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
       override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] = CreateAlbumResult.Failed.pure[IO]

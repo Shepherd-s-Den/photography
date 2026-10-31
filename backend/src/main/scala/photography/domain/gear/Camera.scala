@@ -18,9 +18,9 @@ enum CameraKind derives CanEqual:
   case FixedLens
   case InterchangeableLens(mount: LensMount, sensor: SensorFormat)
 
-  def accepts(lens: Lens): Boolean = this match
-    case FixedLens                          => false
-    case InterchangeableLens(mount, sensor) =>
-      (mount: String) === (lens.mount: String) && (sensor === SensorFormat.ApsC || lens.coverage === SensorFormat.FullFrame)
+  def accepts(mount: LensMount, coverage: SensorFormat): Boolean = this match
+    case FixedLens                                => false
+    case InterchangeableLens(cameraMount, sensor) =>
+      cameraMount === mount && (sensor === SensorFormat.ApsC || coverage === SensorFormat.FullFrame)
 
 final case class Camera(id: CameraId, code: CameraExifCode, friendlyName: CameraName, kind: CameraKind)

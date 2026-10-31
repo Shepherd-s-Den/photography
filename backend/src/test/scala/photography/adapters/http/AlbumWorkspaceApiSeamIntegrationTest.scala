@@ -51,7 +51,16 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     val emptyPhotos     = Vector.empty[SpreadSlot.Photo]
     val emptyPlacements = Vector.empty[SpreadPlacement]
     val opening         = Spread.AlbumStart(SpreadId(new UUID(0L, 11L)), template, photoSlots = emptyPhotos, text, placements = emptyPlacements)
-    Album(AlbumId(new UUID(0L, 1L)), year = 2024, title = "Our year", synopsis = "", Instant.EPOCH, opening, chapters = Vector(chapter))
+    Album(
+      AlbumId(new UUID(0L, 1L)),
+      year = 2024,
+      title = "Our year",
+      synopsis = "",
+      authors = Author.all,
+      Instant.EPOCH,
+      opening,
+      chapters = Vector(chapter)
+    )
 
   private val emptyInventories           = Map.empty[ChapterId, AlbumWorkspaceManager.ChapterPhotos]
   private val workspace: GetResult.Found =
@@ -447,12 +456,18 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       override def get(id: AlbumId): IO[GetResult]                                     = workspaceResult.pure[IO]
       override def listChapter(id: ChapterId): IO[AlbumWorkspaceManager.ChapterResult] = chapterResult.pure[IO]
     val albums = new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
       override def get(id: AlbumId): IO[GetAlbumResult]                              = albumResult.pure[IO]
       override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
       override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] = CreateAlbumResult.Failed.pure[IO]
       override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
     val chapters = new ChapterManager[IO]:
+      override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): IO[ChapterManager.SaveDescriptionResult] =
+        IO.raiseError[ChapterManager.SaveDescriptionResult](new AssertionError("Unexpected description mutation"))
       override def refresh(chapter: ChapterId): IO[ChapterManager.RefreshResult] = refreshResult.pure[IO]
       override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: PhotoSource) =
         refs.calls.update(_ :+ s"create:${id.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}").as(createResult)

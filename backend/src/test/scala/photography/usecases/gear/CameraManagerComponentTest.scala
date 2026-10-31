@@ -14,11 +14,11 @@ import photography.usecases.gear.CameraManager.*
 import java.util.UUID
 
 final class CameraManagerComponentTest extends CatsEffectSuite:
-  private val apsCKind      = CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.ApsC)
-  private val fullFrameKind = CameraKind.InterchangeableLens(mount = "Sony E", sensor = SensorFormat.FullFrame)
-  private val nikonKind     = CameraKind.InterchangeableLens(mount = "Nikon Z", sensor = SensorFormat.ApsC)
+  private val apsCKind      = CameraKind.InterchangeableLens(mount = LensMount.SonyE, sensor = SensorFormat.ApsC)
+  private val fullFrameKind = CameraKind.InterchangeableLens(mount = LensMount.SonyE, sensor = SensorFormat.FullFrame)
+  private val nikonKind     = CameraKind.InterchangeableLens(mount = LensMount.NikonZ, sensor = SensorFormat.ApsC)
   private val camera        = Camera(CameraId(new UUID(0L, 1L)), code = "body", friendlyName = "Body", apsCKind)
-  private val lens          = Lens(LensId(new UUID(0L, 2L)), code = "lens", friendlyName = "Lens", mount = "Sony E", coverage = SensorFormat.ApsC)
+  private val lens = Lens(LensId(new UUID(0L, 2L)), code = "lens", friendlyName = "Lens", mount = LensMount.SonyE, coverage = SensorFormat.ApsC)
 
   test("should create a camera with generated identity and expose repository conflicts and uncertainty"):
     val cases = Vector(

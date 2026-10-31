@@ -14,7 +14,11 @@ type LensExifCode = String :| Not[Empty]
 
 type LensName = String :| Not[Empty]
 
-type LensMount = String :| (Not[Empty] & Not[Blank])
+enum LensMount derives CanEqual:
+  case SonyE, NikonZ
+
+object LensMount:
+  given Eq[LensMount] = Eq.by(_.ordinal)
 
 enum SensorFormat derives CanEqual:
   case ApsC, FullFrame

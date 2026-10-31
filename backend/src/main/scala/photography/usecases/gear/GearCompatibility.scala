@@ -28,7 +28,7 @@ object GearCompatibility:
 
     private def validateLens(kind: CameraKind, lenses: Vector[Lens], id: LensId) =
       lenses.find(_.id.value === id.value).toRight(Failure.UnknownLens)
-        .flatMap(lens => Either.cond(kind.accepts(lens), (), Failure.IncompatibleLens))
+        .flatMap(lens => Either.cond(kind.accepts(lens.mount, coverage = lens.coverage), (), Failure.IncompatibleLens))
 
   enum ValidationResult derives CanEqual:
     case Accepted

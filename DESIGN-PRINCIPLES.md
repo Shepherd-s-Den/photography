@@ -99,11 +99,9 @@ The build starts deliberately small. Add each compiler, formatting, analysis, an
 
 ## 8. Code Expresses Intent
 
-Meaningful names, strong types (§2), clear constructs, and cohesive modules (§3) carry intent. Comments are often design smells: investigate the use case that needs explaining before adding one.
+Meaningful names, strong types (§2), clear constructs and cohesive modules (§3) carry intent. Improve the API, model or responsibility boundary when its meaning requires explanation.
 
-- **Design before commentary.** Question the API, domain model, and responsibility boundaries; rewrite the code to remove the need for explanation when possible. A newly identified subdomain may need its own package.
-- **High-signal documentation.** Keep rationale in concise, authoritative docs. Retain comments only for constraints or non-obvious reasons code cannot express, such as a library workaround or deliberate deviation.
-- **Avoid duplicated narration.** No scaladoc/JSDoc restating a type, method, or field; no notes about code that used to be here or once didn't compile (git holds the history). Contract-level text that ships to consumers is API content, not a code comment, and stays.
+**Hard rule: do not add code comments, including documentation comments.** Keep rationale and contract guarantees in their owning documentation, not alongside declarations or executable code. Required compiler, linter and coverage directives remain tooling syntax; they do not authorize explanatory prose. Record the justification for a required suppression in review evidence without weakening its governing gate.
 
 ## Typelevel and Tagless Final
 

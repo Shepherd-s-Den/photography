@@ -8,4 +8,5 @@ enum Author derives CanEqual:
 
 type AlbumAuthors = Set[Author] :| MinLength[1]
 
-final case class AlbumEditorial(synopsis: String, authors: AlbumAuthors)
+object Author:
+  val all: AlbumAuthors = Set(Author.Cosmin, Author.Mara, Author.Iacob).refineUnsafe[MinLength[1]]

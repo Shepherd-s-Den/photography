@@ -33,7 +33,7 @@ object LensManager:
             case LensRepository.ReferencesResult.NotFound       => UpdateResult.NotFound.pure[F]
             case LensRepository.ReferencesResult.Failed         => UpdateResult.Failed.pure[F]
             case LensRepository.ReferencesResult.Found(cameras) =>
-              if cameras.forall(_.accepts(lens)) then
+              if cameras.forall(_.accepts(lens.mount, coverage = lens.coverage)) then
                 repository.update(lens).map:
                   case LensRepository.UpdateResult.Updated   => UpdateResult.Updated
                   case LensRepository.UpdateResult.NotFound  => UpdateResult.NotFound

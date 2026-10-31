@@ -57,7 +57,7 @@ object CameraManager:
       case CameraRepository.Usage.FixedLens => kind match
           case CameraKind.FixedLens              => true
           case _: CameraKind.InterchangeableLens => false
-      case CameraRepository.Usage.Interchangeable(lenses) => lenses.forall(kind.accepts)
+      case CameraRepository.Usage.Interchangeable(lenses) => lenses.forall(lens => kind.accepts(lens.mount, coverage = lens.coverage))
 
   enum CreateResult:
     case Created(camera: Camera)

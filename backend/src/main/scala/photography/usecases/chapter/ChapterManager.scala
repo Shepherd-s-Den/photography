@@ -19,6 +19,7 @@ import photography.usecases.chapter.ChapterManager.*
 import photography.usecases.photo.ChapterPhotoImport.{Request, Scheduling}
 
 trait ChapterManager[F[_]]:
+  def saveDescription(album: AlbumId, chapter: ChapterId, text: String): F[SaveDescriptionResult]
   def create(album: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, sourceFolder: PhotoSource): F[CreateResult]
   def update(
       album: AlbumId,
@@ -47,6 +48,18 @@ object ChapterManager:
       photos: ChapterPhotoImport[F],
       photoRepository: PhotoRepository[Db]
   )(using Transaction[Db, F]) extends ChapterManager[F]:
+    override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): F[SaveDescriptionResult] =
+      summon[Mutex[F]].lock.surround:
+        MonadCancelThrow[F].uncancelable: _ =>
+          Transaction[Db, F].run(chapters.saveDescription(album, chapter, text = text)).flatMap:
+            case ChapterRepository.SaveDescriptionResult.Saved           => SaveDescriptionResult.Saved.pure[F]
+            case ChapterRepository.SaveDescriptionResult.AlbumNotFound   => SaveDescriptionResult.AlbumNotFound.pure[F]
+            case ChapterRepository.SaveDescriptionResult.ChapterNotFound => SaveDescriptionResult.ChapterNotFound.pure[F]
+            case ChapterRepository.SaveDescriptionResult.Failed(cause)   =>
+              Logger[F].error(cause)("Chapter description write failed").as(SaveDescriptionResult.Failed)
+            case ChapterRepository.SaveDescriptionResult.Uncertain => SaveDescriptionResult.Uncertain.pure[F]
+          .handleErrorWith(error => Logger[F].error(error)("Chapter description commit acknowledgement failed").as(SaveDescriptionResult.Uncertain))
+
     override def create(
         album: AlbumId,
         name: DestinationName,
@@ -240,6 +253,9 @@ object ChapterManager:
     case Created(id: ChapterId, scheduling: Scheduling)
     case Rejected(reason: ChapterConflict)
     case AlbumNotFound, Failed
+
+  enum SaveDescriptionResult:
+    case Saved, AlbumNotFound, ChapterNotFound, Failed, Uncertain
 
   enum UpdateResult:
     case Updated(scheduling: Scheduling)

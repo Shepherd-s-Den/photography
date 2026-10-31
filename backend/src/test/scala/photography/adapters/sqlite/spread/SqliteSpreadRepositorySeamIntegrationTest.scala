@@ -360,7 +360,7 @@ final class SqliteSpreadRepositorySeamIntegrationTest extends CatsEffectSuite:
       textSlot = SpreadSlot.Text(TextSpreadSlotId(new UUID(1L, 11L)), template.textSlot),
       placements = Vector.empty[SpreadPlacement]
     )
-    Album(albumId, year = 2026, title = "Album", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    Album(albumId, year = 2026, title = "Album", synopsis = "", authors = Author.all, Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
 
   private def buildOpening(template: SpreadTemplate.ChapterStart) =
     val photos = template.photoSlots.zipWithIndex.map { case (box, index) =>

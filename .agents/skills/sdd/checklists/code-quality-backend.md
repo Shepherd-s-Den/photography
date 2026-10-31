@@ -14,7 +14,7 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 - [ ] A shared codecs object contains pure bidirectional mappings only. Name at least two real consumers and the representation invariant whose divergence would be a bug; keep other codecs local to their owning implementation.
 - [ ] Live implementations are `private final class`.
 - [ ] Driven ports return domain-valid data. Adapters enforce the port contract; use cases do not re-check a guarantee the port already gives (for example, calling a list and then checking its first entry's kind).
-- [ ] State-dependent writes check and commit against the same current state. State that guarantee at the port and test concurrent calls at the real adapter; an earlier service read is not sufficient.
+- [ ] State-dependent writes check and commit against the same current state. Record the guarantee in owning contract documentation and test concurrent calls at the real adapter; an earlier service read is not sufficient.
 - [ ] Pure and effectful business modules use a caller-defined trait, companion factory and private final Live implementation.
 - [ ] Orchestration remains visible in service methods; effect sequencing is linear and errors remain explicit.
 - [ ] Resource acquisition, use, and release follow the selected Typelevel effect library's resource-safe primitive.
@@ -34,7 +34,7 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 - [ ] For every new or changed trait operation, identify its operation-owned result enum after unwrapping `F`/`Db`; `Either`, `Option`, `Unit` and bare success values fail this gate.
 - [ ] Failure enums inside a companion are named `Failure`, not repeated with the operation name.
 - [ ] Default arguments appear only in tests; runtime code uses wartremover `DefaultArguments` and scalafix `DisableSyntax.noDefaultArgs` as enforced gates.
-- [ ] A wartremover or scalafix suppression is allowed only when the flagged operation is provably safe at that site (for example `minBy` after a non-empty guard). It is scoped to the smallest declaration, uses the full wart id, and carries a comment stating why it cannot fail. Never suppress a gate to hide a real defect.
+- [ ] A wartremover or scalafix suppression is allowed only when the flagged operation is provably safe at that site (for example `minBy` after a non-empty guard). It is scoped to the smallest declaration, uses the full wart id, and has source-backed justification in the review evidence under `DESIGN-PRINCIPLES.md` §8. Never suppress a gate to hide a real defect.
 - [ ] Real imports are used, not fully-qualified paths.
 - [ ] Optional values use the `maybe` prefix.
 
@@ -55,7 +55,6 @@ Load for the backend surface selected by [`SKILL.md`](../SKILL.md#setup). `CONTR
 - [ ] Scalafmt dialect scala3future rejects `traverse_: x =>`; write `traverse_ { x => ... }`.
 - [ ] Inline shallow helpers that add no meaning beyond the code they wrap, however many call sites they have. A helper stays only when it holds non-trivial logic that would be buggy to diverge.
 - [ ] Each method stays within about 7 to 10 lines. Split only when a unit has a real responsibility.
-- [ ] Only comment code that needs clarification.
 
 ## Logging
 

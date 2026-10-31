@@ -8,7 +8,7 @@ import io.github.iltotore.iron.*
 import munit.CatsEffectSuite
 import org.http4s.{HttpApp, MediaType, Method, Request, Status, Uri}
 import org.http4s.headers.`Content-Type`
-import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, Chapter}
+import photography.domain.album.{Album, AlbumAuthors, AlbumId, AlbumTitle, AlbumYear, Author, Chapter}
 import photography.domain.layout.*
 import photography.usecases.album.AlbumManager
 import photography.usecases.album.AlbumManager.*
@@ -27,7 +27,16 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   private val album =
     val createdAt     = Instant.parse("2026-10-24T10:00:00.123Z")
     val emptyChapters = Vector.empty[Chapter]
-    Album(id, year = 2026, title = "Journey of the Shepherds 2026", synopsis = "A synopsis", createdAt, start, chapters = emptyChapters)
+    Album(
+      id,
+      year = 2026,
+      title = "Journey of the Shepherds 2026",
+      synopsis = "A synopsis",
+      authors = Author.all,
+      createdAt,
+      start,
+      chapters = emptyChapters
+    )
   private val metadata      = s"""{"id":"${id.value}","year":2026,"title":"Journey of the Shepherds 2026","createdAt":"2026-10-24T10:00:00.123Z"}"""
   private val albumPath     = s"/api/albums/${id.value}"
   private val jsonMediaType = MediaType.application.json.some
@@ -194,6 +203,10 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       deleteAlbumResult: DeleteAlbumResult = DeleteAlbumResult.Deleted
   ) =
     val albums = new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
       override def list(page: Int): IO[ListAlbumsResult]                             = refs.calls.update(_ :+ s"list:$page").as(listAlbumsResult)
       override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] =
         refs.calls.update(_ :+ s"create:$year:$title").as(createAlbumResult)

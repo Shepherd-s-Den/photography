@@ -8,9 +8,9 @@ import photography.usecases.gear.GearCompatibility.*
 import java.util.UUID
 
 final class GearCompatibilityComponentTest extends FunSuite:
-  private val sony: LensMount  = "Sony E"
-  private val nikon: LensMount = "Nikon Z"
-  private val first            =
+  private val sony  = LensMount.SonyE
+  private val nikon = LensMount.NikonZ
+  private val first =
     Camera(CameraId(new UUID(0L, 1L)), code = "one", friendlyName = "First", CameraKind.InterchangeableLens(mount = sony, sensor = SensorFormat.ApsC))
   private val second        = first.copy(id = CameraId(new UUID(0L, 2L)), code = "two")
   private val fixed         = Camera(CameraId(new UUID(0L, 3L)), code = "fixed", friendlyName = "Fixed", CameraKind.FixedLens)

@@ -33,7 +33,16 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       text,
       placements = Vector.empty[SpreadPlacement]
     )
-    Album(AlbumId(new UUID(0L, 1L)), year = 2026, title = "Our year", synopsis = "", Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+    Album(
+      AlbumId(new UUID(0L, 1L)),
+      year = 2026,
+      title = "Our year",
+      synopsis = "",
+      authors = Author.all,
+      Instant.EPOCH,
+      opening,
+      chapters = Vector.empty[Chapter]
+    )
   private val countries = NonEmptyList.one(
     Country(CountryId(new UUID(0L, 5L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
   )
@@ -128,6 +137,10 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
       execution: ChapterId => IO[ExecutionOutcome] = _ => idle.pure[IO]
   ) =
     val albums = new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
       override def get(id: AlbumId): IO[GetAlbumResult]                              = albumResult.pure[IO]
       override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
       override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] = CreateAlbumResult.Failed.pure[IO]

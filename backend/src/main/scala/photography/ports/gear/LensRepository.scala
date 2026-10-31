@@ -2,7 +2,6 @@ package photography.ports.gear
 
 import photography.domain.gear.{CameraKind, Lens, LensId}
 
-/** References include only valid interchangeable bodies; malformed saved relationships fail at the adapter. Writes share mutation coordination. */
 trait LensRepository[F[_]]:
   def create(lens: Lens): F[LensRepository.CreateResult]
   def readReferences(id: LensId): F[LensRepository.ReferencesResult]

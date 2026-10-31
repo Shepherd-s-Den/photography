@@ -16,6 +16,7 @@ final case class Album(
     year: AlbumYear,
     title: AlbumTitle,
     synopsis: String,
+    authors: AlbumAuthors,
     createdAt: Instant,
     opening: Spread.AlbumStart,
     chapters: Vector[Chapter]
