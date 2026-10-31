@@ -8,6 +8,7 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.adapters.sqlite.album.{SqliteAlbumRepository, SqliteCountryRepository}
 import photography.adapters.sqlite.chapter.SqliteChapterRepository
+import photography.adapters.sqlite.gear.SqliteGearRepository
 import photography.adapters.sqlite.spread.SqliteSpreadTemplateRepository
 import photography.adapters.sqlite.photo.SqlitePhotoPlacementRepository
 import photography.adapters.sqlite.cover.SqliteCoverRepository
@@ -20,7 +21,8 @@ import photography.domain.layout.SpreadTemplateId
 import java.util.UUID
 import photography.ports.photo.{PhotoRepository, ThumbnailStorage}
 import photography.usecases.album.{AlbumManager, AlbumPageSize, AlbumWorkspaceManager}
-import photography.usecases.chapter.ChapterMetadataManager
+import photography.usecases.chapter.{ChapterManager, ChapterMetadataManager}
+import photography.usecases.gear.GearManager
 import photography.usecases.photo.ChapterPhotoImport
 import photography.usecases.photo.{AlbumPhotoEvents, PhotoInventory}
 import photography.usecases.chapter.ChapterPlanning
@@ -36,7 +38,9 @@ final case class AppManagers[F[_]](
     workspaces: AlbumWorkspaceManager[F],
     photoEvents: AlbumPhotoEvents[F],
     spreads: SpreadManager[F],
-    coverPlacements: CoverManager[F]
+    coverPlacements: CoverManager[F],
+    gear: GearManager[F],
+    chapterGear: ChapterManager[F]
 )
 
 object AppManagers:
@@ -58,6 +62,9 @@ object AppManagers:
       val templates          = SpreadTemplateManager.make(templateRepository)
       val albumComposition   = SqliteAlbumCompositionRepository.make
       val chapterRepository  = SqliteChapterRepository.make
+      val gearRepository     = SqliteGearRepository.make[F](sqlite)
+      val gear               = GearManager.make(gearRepository, chapterRepository)
+      val chapterGear        = ChapterManager.make(chapterRepository, gear)
       val albumRepository    = SqliteAlbumRepository.make[F](sqlite, albumComposition, chapterRepository)
       val countries          = SqliteCountryRepository.make[F](sqlite)
       val albums             = AlbumManager.make(albumRepository, templates, pageSize)
@@ -76,6 +83,6 @@ object AppManagers:
           val spreads          = SpreadManager.make(templates, composition, spreadRepository, placements, defaultPhotoLayout)
           val coverRepository  = SqliteCoverRepository.make
           val coverPlacements  = CoverManager.make(coverRepository, placements)
-          AppManagers(albums, chapters, templates, workspaces, events, spreads, coverPlacements)
+          AppManagers(albums, chapters, templates, workspaces, events, spreads, coverPlacements, gear, chapterGear)
 
   private val defaultPhotoLayout = SpreadTemplateId(UUID.fromString("00000000-0000-0000-0000-000000000113"))

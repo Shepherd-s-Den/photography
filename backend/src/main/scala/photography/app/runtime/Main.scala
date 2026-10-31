@@ -13,6 +13,7 @@ import photography.adapters.http.{AlbumApi, AlbumSpreadApi, AlbumWorkspaceApi, H
 import photography.adapters.filesystem.FileThumbnailStorage
 import photography.adapters.http.{AlbumPhotoEventsApi, ThumbnailApi}
 import photography.adapters.http.PhotoPlacementApi
+import photography.adapters.http.{ChapterGearApi, GearApi}
 import photography.adapters.sqlite.photo.SqlitePhotoRepository
 import photography.app.config.{AppConfig, HttpServerConfig}
 import photography.capabilities.{Clock, IdGenerator, Transaction}
@@ -58,9 +59,11 @@ object Main extends IOApp.Simple:
     val workspace    = AlbumWorkspaceApi.make(managers.workspaces, managers.albums, managers.chapters).routes
     val thumbnailApi = ThumbnailApi.make(thumbnails).routes
     val events       = AlbumPhotoEventsApi.make(managers.photoEvents).routes
+    val gear         = GearApi.make(managers.gear).routes
+    val chapterGear  = ChapterGearApi.make(managers.chapterGear).routes
     val placements   = PhotoPlacementApi.make(managers.spreads, managers.coverPlacements)
     val api = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> events <+> thumbnailApi <+> SpreadTemplateApi.make(managers.templates).routes <+>
-      AlbumSpreadApi.make(managers.spreads).routes <+> placements
+      AlbumSpreadApi.make(managers.spreads).routes <+> placements <+> gear <+> chapterGear
     StaticSite.make(api, assetRoot = "frontend").map(_.app)
 
   private def buildHttpServer(config: HttpServerConfig, app: HttpApp[IO]) =
