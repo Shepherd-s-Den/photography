@@ -73,15 +73,21 @@ CREATE TABLE camera (
     id TEXT PRIMARY KEY NOT NULL,
     code TEXT NOT NULL UNIQUE,
     friendly_name TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK (kind IN ('fixed_lens', 'interchangeable_lens'))
+    kind TEXT NOT NULL CHECK (kind IN ('fixed_lens', 'interchangeable_lens')),
+    mount TEXT CHECK (mount IN ('sony_e', 'nikon_z')),
+    sensor_format TEXT CHECK (sensor_format IN ('aps_c', 'full_frame')),
+    CHECK (
+        (kind = 'fixed_lens' AND mount IS NULL AND sensor_format IS NULL)
+        OR (kind = 'interchangeable_lens' AND mount IS NOT NULL AND sensor_format IS NOT NULL)
+    )
 ) STRICT;
 
 CREATE TABLE lens (
     id TEXT PRIMARY KEY NOT NULL,
-    camera_id TEXT NOT NULL REFERENCES camera (id),
     code TEXT NOT NULL UNIQUE,
     friendly_name TEXT NOT NULL,
-    UNIQUE (camera_id, id)
+    mount TEXT NOT NULL CHECK (mount IN ('sony_e', 'nikon_z')),
+    coverage TEXT NOT NULL CHECK (coverage IN ('aps_c', 'full_frame'))
 ) STRICT;
 
 CREATE TABLE chapter_camera (
@@ -94,10 +100,9 @@ CREATE TABLE chapter_camera (
 CREATE TABLE chapter_camera_lens (
     chapter_id TEXT NOT NULL,
     camera_id TEXT NOT NULL,
-    lens_id TEXT NOT NULL,
+    lens_id TEXT NOT NULL REFERENCES lens (id),
     PRIMARY KEY (chapter_id, camera_id, lens_id),
-    FOREIGN KEY (chapter_id, camera_id) REFERENCES chapter_camera (chapter_id, camera_id) ON DELETE CASCADE,
-    FOREIGN KEY (camera_id, lens_id) REFERENCES lens (camera_id, id)
+    FOREIGN KEY (chapter_id, camera_id) REFERENCES chapter_camera (chapter_id, camera_id) ON DELETE CASCADE
 ) STRICT;
 
 CREATE TABLE spread_template (
