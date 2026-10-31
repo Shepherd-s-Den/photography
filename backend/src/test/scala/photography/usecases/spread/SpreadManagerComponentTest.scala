@@ -1,4 +1,5 @@
 package photography.usecases.spread
+import photography.domain.gear.CameraSelection
 
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
@@ -74,6 +75,7 @@ final class SpreadManagerComponentTest extends CatsEffectSuite:
     Destination(DestinationId(buildUuid(index = 21L)), name = "Asian capitals", countries = NonEmptyList.one(country)),
     VisitPeriod(firstDay = LocalDate.of(2026, 5, 1), days = 2),
     description = "",
+    gear = Vector.empty[CameraSelection],
     sourceFolder = "/photos/capitals",
     chapterOpening,
     spreads = Vector(first, second)

@@ -108,7 +108,7 @@ final class PhotoInventoryComponentTest extends CatsEffectSuite:
         StateT.modify[IO, Int](_ + 1).as(placed)
       override def inspect(album: AlbumId, maybeChapter: Option[ChapterId], photo: PhotoId): Db[PhotoPlacementRepository.InspectResult] =
         StateT.liftF(IO.raiseError[PhotoPlacementRepository.InspectResult](new AssertionError("Unexpected photo inspection")))
-    val chapters = new ChapterRepository[Db]:
+    val chapters = new ChapterRepository.Metadata[Db]:
       override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): Db[ChapterRepository.SaveDescriptionResult] =
         StateT.liftF(IO.raiseError[ChapterRepository.SaveDescriptionResult](new AssertionError("Unexpected description mutation")))
       override def findSource(id: ChapterId): Db[ChapterRepository.SourceResult] = StateT.modify[IO, Int](_ + 1).as(source)

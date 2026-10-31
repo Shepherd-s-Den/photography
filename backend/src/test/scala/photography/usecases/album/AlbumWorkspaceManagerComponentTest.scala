@@ -1,4 +1,5 @@
 package photography.usecases.album
+import photography.domain.gear.CameraSelection
 
 import photography.usecases.photo.ChapterPhotoImport
 import photography.usecases.photo.PhotoInventory
@@ -57,7 +58,16 @@ final class AlbumWorkspaceManagerComponentTest extends CatsEffectSuite:
     val opening         = Spread.ChapterStart(openingId, template, photoSlots = emptyPhotos, textSlot, placements = emptyPlacements)
     val destination     = Destination(DestinationId(new UUID(0L, 8L)), name = "Coast", countries)
     val period          = VisitPeriod(LocalDate.of(2026, 1, 1), days = 1)
-    Chapter(id, destination, period, description = "", sourceFolder = "/photos/coast", opening, spreads = emptySpreads)
+    Chapter(
+      id,
+      destination,
+      period,
+      description = "",
+      gear = Vector.empty[CameraSelection],
+      sourceFolder = "/photos/coast",
+      opening,
+      spreads = emptySpreads
+    )
   private val emptyInventory = PhotoInventory.Inventory(photos = Vector.empty[Photo], placed = Set.empty)
   private val idle           = ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
 

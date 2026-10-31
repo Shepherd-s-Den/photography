@@ -14,10 +14,11 @@ import org.http4s.circe.jsonDecoder
 import photography.domain.album.*
 import photography.domain.layout.*
 import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
-import photography.usecases.chapter.ChapterManager
+import photography.usecases.chapter.ChapterMetadataManager
+import photography.domain.gear.CameraSelection
 import photography.usecases.album.AlbumManager.*
 import photography.usecases.album.AlbumWorkspaceManager.GetResult
-import photography.usecases.chapter.ChapterManager.{CreateResult, Period, UpdateResult}
+import photography.usecases.chapter.ChapterMetadataManager.{CreateResult, Period, UpdateResult}
 import photography.usecases.photo.ChapterPhotoImport.{ExecutionOutcome, Scheduling, Status as ImportStatus}
 import photography.usecases.photo.{PhotoInventory, PhotoManager, PhotoWriteRecovery}
 
@@ -43,6 +44,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       destination,
       VisitPeriod(LocalDate.of(2024, 2, 29), days = 2),
       description = "Sea air",
+      gear = Vector.empty[CameraSelection],
       sourceFolder = "/photos/coast",
       opening,
       spreads = Vector(photos)
@@ -265,12 +267,17 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
     val execution = ExecutionOutcome(ImportStatus.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue])
     val found     = AlbumWorkspaceManager.ChapterResult.Found(AlbumWorkspaceManager.ChapterPhotos(empty, execution))
     val scenarios = Vector(
-      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.Queued), Status.Ok, Status.Accepted),
-      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.Coalesced), Status.Ok, Status.Accepted),
-      (AlbumWorkspaceManager.ChapterResult.ChapterNotFound, ChapterManager.RefreshResult.ChapterNotFound, Status.NotFound, Status.NotFound),
-      (AlbumWorkspaceManager.ChapterResult.Failed, ChapterManager.RefreshResult.Failed, Status.InternalServerError, Status.InternalServerError),
-      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.Failed), Status.Ok, Status.InternalServerError),
-      (found, ChapterManager.RefreshResult.Scheduled(Scheduling.NotRequested), Status.Ok, Status.InternalServerError)
+      (found, ChapterMetadataManager.RefreshResult.Scheduled(Scheduling.Queued), Status.Ok, Status.Accepted),
+      (found, ChapterMetadataManager.RefreshResult.Scheduled(Scheduling.Coalesced), Status.Ok, Status.Accepted),
+      (AlbumWorkspaceManager.ChapterResult.ChapterNotFound, ChapterMetadataManager.RefreshResult.ChapterNotFound, Status.NotFound, Status.NotFound),
+      (
+        AlbumWorkspaceManager.ChapterResult.Failed,
+        ChapterMetadataManager.RefreshResult.Failed,
+        Status.InternalServerError,
+        Status.InternalServerError
+      ),
+      (found, ChapterMetadataManager.RefreshResult.Scheduled(Scheduling.Failed), Status.Ok, Status.InternalServerError),
+      (found, ChapterMetadataManager.RefreshResult.Scheduled(Scheduling.NotRequested), Status.Ok, Status.InternalServerError)
     )
 
     scenarios.traverse_ { case (inventory, refresh, getStatus, postStatus) =>
@@ -450,7 +457,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       createResult: CreateResult = CreateResult.Created(chapter.id, Scheduling.Queued),
       updateResult: UpdateResult = UpdateResult.Updated(Scheduling.NotRequested),
       chapterResult: AlbumWorkspaceManager.ChapterResult = AlbumWorkspaceManager.ChapterResult.Failed,
-      refreshResult: ChapterManager.RefreshResult = ChapterManager.RefreshResult.Failed
+      refreshResult: ChapterMetadataManager.RefreshResult = ChapterMetadataManager.RefreshResult.Failed
   ) =
     val workspaces = new AlbumWorkspaceManager[IO]:
       override def get(id: AlbumId): IO[GetResult]                                     = workspaceResult.pure[IO]
@@ -465,10 +472,10 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] = CreateAlbumResult.Failed.pure[IO]
       override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
       override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
-    val chapters = new ChapterManager[IO]:
-      override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): IO[ChapterManager.SaveDescriptionResult] =
-        IO.raiseError[ChapterManager.SaveDescriptionResult](new AssertionError("Unexpected description mutation"))
-      override def refresh(chapter: ChapterId): IO[ChapterManager.RefreshResult] = refreshResult.pure[IO]
+    val chapters = new ChapterMetadataManager[IO]:
+      override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): IO[ChapterMetadataManager.SaveDescriptionResult] =
+        IO.raiseError[ChapterMetadataManager.SaveDescriptionResult](new AssertionError("Unexpected description mutation"))
+      override def refresh(chapter: ChapterId): IO[ChapterMetadataManager.RefreshResult] = refreshResult.pure[IO]
       override def create(id: AlbumId, name: DestinationName, countries: NonEmptyList[CountryId], period: Period, folder: PhotoSource) =
         refs.calls.update(_ :+ s"create:${id.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}").as(createResult)
       override def update(

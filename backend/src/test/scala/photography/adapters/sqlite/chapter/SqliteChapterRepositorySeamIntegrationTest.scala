@@ -1,4 +1,5 @@
 package photography.adapters.sqlite.chapter
+import photography.domain.gear.{CameraId, CameraSelection, CameraUse}
 
 import photography.adapters.sqlite.album.SqliteAlbumCompositionRepository
 
@@ -29,7 +30,7 @@ import photography.ports.chapter.ChapterRepository
 import photography.ports.photo.PhotoRepository
 import photography.ports.spread.SpreadTemplateRepository
 import photography.syntax.SyncSyntax.*
-import photography.usecases.chapter.{ChapterManager, ChapterPlanning}
+import photography.usecases.chapter.{ChapterMetadataManager, ChapterPlanning}
 import photography.usecases.photo.{ChapterPhotoImport, PhotoWriteRecovery}
 import photography.usecases.spread.SpreadTemplateManager
 import photography.usecases.photo.ChapterPhotoImport.{ExecutionOutcome, Request, Scheduling, Status}
@@ -187,7 +188,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
 
         Mutex[IO].flatMap: mutex =>
           given Mutex[IO] = mutex
-          val manager     = ChapterManager.make(albums, chapters, ChapterPlanning.make(templates), imports, SqlitePhotoRepository.make)
+          val manager     = ChapterMetadataManager.make(albums, chapters, ChapterPlanning.make(templates), imports, SqlitePhotoRepository.make)
 
           for
             _      <- seedAlbum(xa)
@@ -202,7 +203,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
                 AlbumRepository.GetResult.Found(album.copy(chapters = album.chapters.map(_.copy(description = "日本\nVacanță"))))
               case original => original
 
-            assertEquals(result, ChapterManager.SaveDescriptionResult.Uncertain)
+            assertEquals(result, ChapterMetadataManager.SaveDescriptionResult.Uncertain)
             assertEquals(after, expected)
     }
 
@@ -250,7 +251,9 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(after, before)
       }
 
-  test("should persist complete openings and supplied order, isolate shared destinations and preserve description and composition on metadata edits"):
+  test(
+    "should persist complete openings and supplied order, isolate shared destinations and preserve description, gear and composition on metadata edits"
+  ):
     buildTransactor.use: xa =>
       val albums                   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
       val chapters                 = SqliteChapterRepository.make
@@ -258,6 +261,8 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val newCountries             = NonEmptyList.of(otherCountry, country)
       val newFolder: PhotoSource   = "/photos/changed"
       val countryIds               = newCountries.map(_.id)
+      val cameraId                 = CameraId(new UUID(0L, 991L))
+      val selectedGear             = Vector(CameraSelection(cameraId, CameraUse.FixedLens))
 
       (buildChapter(xa, index = 1), buildChapter(xa, index = 2)).tupled.flatMap { case (first, second) =>
         val command = ChapterRepository.Update(
@@ -271,6 +276,11 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           order = NonEmptyList.of(first.id, second.id)
         )
 
+        val insertCamera = sql"""INSERT INTO camera(id, code, friendly_name, kind)
+          VALUES (${cameraId.value}, 'retained-fixed', 'Retained fixed', 'fixed_lens')""".update.run.transact(xa)
+        val selectCamera = sql"""INSERT INTO chapter_camera(chapter_id, camera_id, use_kind)
+          VALUES (${first.id.value}, ${cameraId.value}, 'fixed_lens')""".update.run.transact(xa)
+
         for
           _       <- seedAlbum(xa)
           created <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
@@ -278,6 +288,8 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           initial <- albums.get(albumId)
           _       <- sql"UPDATE chapter SET destination_id = ${first.destinationId.value} WHERE id = ${second.id.value}".update.run.transact(xa)
           _       <- insertPhotoComposition(first.id, first.opening.id).transact(xa)
+          _       <- insertCamera
+          _       <- selectCamera
           before  <- albums.get(albumId)
           updated <- chapters.update(command).transact(xa)
           loaded  <- albums.get(albumId)
@@ -287,9 +299,27 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
           val secondDestination   = Destination(second.destinationId, second.name, countries = NonEmptyList.of(country, otherCountry))
           val emptySpreads        = Vector.empty[Spread.PhotosOnly]
           val expectedFirst       =
-            Chapter(first.id, originalDestination, first.period, first.description, first.sourceFolder, first.opening, spreads = emptySpreads)
+            Chapter(
+              first.id,
+              originalDestination,
+              first.period,
+              first.description,
+              gear = Vector.empty[CameraSelection],
+              first.sourceFolder,
+              first.opening,
+              spreads = emptySpreads
+            )
           val expectedSecond =
-            Chapter(second.id, secondDestination, second.period, second.description, second.sourceFolder, second.opening, spreads = emptySpreads)
+            Chapter(
+              second.id,
+              secondDestination,
+              second.period,
+              second.description,
+              gear = Vector.empty[CameraSelection],
+              second.sourceFolder,
+              second.opening,
+              spreads = emptySpreads
+            )
           initial match
             case AlbumRepository.GetResult.Found(album) => assertEquals(album.chapters, Vector(expectedSecond, expectedFirst))
             case result                                 => fail(s"Expected complete created chapters, obtained $result")
@@ -304,6 +334,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
               assertEquals(updated, ChapterRepository.UpdateResult.Saved)
               assertEquals(album.chapters.map(_.id), Vector(first.id, second.id))
               assertEquals(actual, expected)
+              assertEquals(original.chapters.find(_.id.value === first.id.value).map(_.gear), selectedGear.some)
               assertEquals(album.chapters.lastOption.map(_.destination), originalDestination.some)
               assertEquals(album.chapters.lastOption.map(_.opening), second.opening.some)
             case result => fail(s"Expected complete persisted album, obtained $result")
@@ -419,14 +450,14 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         val image                        = EncodedThumbnail(imageBytes, ThumbnailDimensions(width = 1, height = 1), ThumbnailQuality.Low)
         val committed                    = stage === "saved" || stage === "acknowledgement"
         val requestedSource: PhotoSource = if stage === "unchanged" then "/photos/1" else "/photos/changed"
-        val visit                        = ChapterManager.Period.Dates(period)
+        val visit                        = ChapterMetadataManager.Period.Dates(period)
         val requestedCountries           =
           if stage === "unknown-country" then NonEmptyList.one(CountryId(new UUID(9L, 99L))) else NonEmptyList.one(otherCountry.id)
         val expectedPhotos = if committed then 0 else 2
-        val expectedResult = if committed then ChapterManager.UpdateResult.Updated(Scheduling.Failed)
-        else if stage === "unchanged" then ChapterManager.UpdateResult.Updated(Scheduling.NotRequested)
-        else if stage === "unknown-country" then ChapterManager.UpdateResult.Rejected(ChapterConflict.UnknownCountries)
-        else ChapterManager.UpdateResult.Failed
+        val expectedResult = if committed then ChapterMetadataManager.UpdateResult.Updated(Scheduling.Failed)
+        else if stage === "unchanged" then ChapterMetadataManager.UpdateResult.Updated(Scheduling.NotRequested)
+        else if stage === "unknown-country" then ChapterMetadataManager.UpdateResult.Rejected(ChapterConflict.UnknownCountries)
+        else ChapterMetadataManager.UpdateResult.Failed
         val slots = sql"SELECT id, x, y, width, height FROM spread_photo_slot ORDER BY id".query[(String, Double, Double, Double, Double)].to[Vector]
         val coverSlots = sql"SELECT id, side FROM cover_slot ORDER BY id".query[(String, String)].to[Vector]
         val change     = buildConnection(path).use: xa =>
@@ -457,7 +488,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
               override def status(chapter: ChapterId): IO[ExecutionOutcome]                                    =
                 ExecutionOutcome(Status.Idle, retirementIssues = Vector.empty[PhotoWriteRecovery.Issue]).pure[IO]
             val planning = ChapterPlanning.make(templates)
-            val manager  = ChapterManager.make(albums, chapters, planning, imports, photos)
+            val manager  = ChapterMetadataManager.make(albums, chapters, planning, imports, photos)
             val trigger  = stage match
               case "evidence" => "CREATE TRIGGER reject_write BEFORE INSERT ON photo_write_intent BEGIN SELECT RAISE(ABORT, 'evidence'); END"
               case "removal"  => "CREATE TRIGGER reject_write BEFORE DELETE ON photo BEGIN SELECT RAISE(ABORT, 'remove'); END"

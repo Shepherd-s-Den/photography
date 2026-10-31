@@ -16,9 +16,9 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 object SqliteChapterRepository:
-  def make: ChapterRepository[ConnectionIO] = new LiveChapterRepository
+  def make: ChapterRepository.Metadata[ConnectionIO] = new LiveChapterRepository
 
-  final private class LiveChapterRepository extends ChapterRepository[ConnectionIO]:
+  final private class LiveChapterRepository extends ChapterRepository.Metadata[ConnectionIO]:
     override def saveDescription(album: AlbumId, chapter: ChapterId, text: String): ConnectionIO[SaveDescriptionResult] =
       albumExists(album).attempt.flatMap:
         case Right(false) => SaveDescriptionResult.AlbumNotFound.pure[ConnectionIO]

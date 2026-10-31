@@ -1,7 +1,7 @@
 package photography.adapters.sqlite.album
 
 import cats.effect.Async
-import cats.data.NonEmptyList
+import cats.data.{NonEmptyList, NonEmptyVector}
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.Positive
@@ -14,6 +14,7 @@ import org.sqlite.{SQLiteErrorCode, SQLiteException}
 import photography.adapters.sqlite.SqliteCodecs.given
 import photography.domain.album.*
 import photography.domain.layout.*
+import photography.domain.gear.*
 import photography.ports.album.{AlbumRepository, AlbumCompositionRepository}
 import photography.ports.album.AlbumRepository.*
 
@@ -199,10 +200,23 @@ object SqliteAlbumRepository:
         period    <- decodePeriod(start = start, end = end).leftMap(new IllegalArgumentException(_)).liftTo[ConnectionIO]
         loaded    <- loadChapterSpreads(albumId, id)
         countries <- loadCountries(destination)
+        gear      <- loadChapterGear(id)
       yield
         val (opening, photos) = loaded
         val location          = Destination(DestinationId(destination), name = name, countries = countries)
-        Chapter(ChapterId(id), location, period, description = description, sourceFolder = folder, opening, spreads = photos)
+        Chapter(ChapterId(id), location, period, description = description, gear = gear, sourceFolder = folder, opening, spreads = photos)
+
+    private def loadChapterGear(chapter: UUID) =
+      sql"SELECT camera_id, use_kind FROM chapter_camera WHERE chapter_id = $chapter ORDER BY rowid".query[(UUID, String)].to[Vector]
+        .flatMap(_.traverse { case (camera, kind) =>
+          val lenses = sql"SELECT lens_id FROM chapter_camera_lens WHERE chapter_id = $chapter AND camera_id = $camera ORDER BY rowid"
+          lenses.query[UUID].to[Vector].flatMap: ids =>
+            val use = (kind, NonEmptyVector.fromVector(ids.map(LensId(_)))) match
+              case ("fixed_lens", None)                       => CameraUse.FixedLens.asRight[Throwable]
+              case ("interchangeable_lenses", Some(selected)) => CameraUse.Interchangeable(lenses = selected).asRight[Throwable]
+              case _                                          => new IllegalArgumentException("Invalid saved chapter gear").asLeft[CameraUse]
+            use.liftTo[ConnectionIO].map(CameraSelection(CameraId(camera), _))
+        })
 
     private def decodePeriod(start: Instant, end: Instant) =
       val days    = ChronoUnit.DAYS.between(start, end)

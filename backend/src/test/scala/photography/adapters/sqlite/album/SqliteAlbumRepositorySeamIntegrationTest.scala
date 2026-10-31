@@ -1,4 +1,5 @@
 package photography.adapters.sqlite.album
+import photography.domain.gear.CameraSelection
 
 import photography.adapters.sqlite.FlywayMigrator
 import photography.adapters.sqlite.SqliteConnection
@@ -152,6 +153,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
           destination,
           period,
           description = "",
+          gear = Vector.empty[CameraSelection],
           sourceFolder = "/photos/Home",
           chapterOpening,
           spreads = emptySpreads
@@ -414,7 +416,16 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         val expectedChapterId         = ChapterId(buildUuid(index = 402))
         val sourceFolder: PhotoSource = "/photos/coast"
         val chapter                   =
-          Chapter(expectedChapterId, destination, period, description = "", sourceFolder, expectedChapter, spreads = expectedSpreads)
+          Chapter(
+            expectedChapterId,
+            destination,
+            period,
+            description = "",
+            gear = Vector.empty[CameraSelection],
+            sourceFolder,
+            expectedChapter,
+            spreads = expectedSpreads
+          )
         val secondPhotoSlot = expectedSlot.copy(id = PhotoSpreadSlotId(buildUuid(index = 422)))
         val secondTextSlot  = expectedChapter.textSlot.copy(id = TextSpreadSlotId(buildUuid(index = 423)))
         val secondSpreadId  = SpreadId(buildUuid(index = 421))
