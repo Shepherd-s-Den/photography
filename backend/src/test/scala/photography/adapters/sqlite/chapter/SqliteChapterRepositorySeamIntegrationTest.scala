@@ -59,6 +59,10 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val gear     = sql"""SELECT c.chapter_id, c.camera_id, c.use_kind, l.lens_id FROM chapter_camera c
         JOIN chapter_camera_lens l ON l.chapter_id = c.chapter_id AND l.camera_id = c.camera_id"""
         .query[(UUID, UUID, String, UUID)].to[Vector]
+      val insertCamera = sql"""INSERT INTO camera (id, code, friendly_name, kind, mount, sensor_format)
+        VALUES ($camera, 'camera', 'Camera', 'interchangeable_lens', 'sony_e', 'aps_c')""".update.run.transact(xa)
+      val insertLens = sql"""INSERT INTO lens (id, code, friendly_name, mount, coverage)
+        VALUES ($lens, 'lens', 'Lens', 'sony_e', 'aps_c')""".update.run.transact(xa)
 
       for
         _              <- seedAlbum(xa)
@@ -67,8 +71,8 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
         _              <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
         _              <- chapters.create(albumId, second, order = NonEmptyList.of(second.id, first.id)).transact(xa)
         _              <- insertPhotoComposition(first.id, first.opening.id).transact(xa)
-        _              <- sql"INSERT INTO camera VALUES ($camera, 'camera', 'Camera', 'interchangeable_lens')".update.run.transact(xa)
-        _              <- sql"INSERT INTO lens VALUES ($lens, $camera, 'lens', 'Lens')".update.run.transact(xa)
+        _              <- insertCamera
+        _              <- insertLens
         _              <- sql"INSERT INTO chapter_camera VALUES (${first.id.value}, $camera, 'interchangeable_lenses')".update.run.transact(xa)
         _              <- sql"INSERT INTO chapter_camera_lens VALUES (${first.id.value}, $camera, $lens)".update.run.transact(xa)
         before         <- albums.get(albumId)
