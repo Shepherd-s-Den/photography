@@ -9,4 +9,4 @@ enum Author derives CanEqual:
 type AlbumAuthors = Set[Author] :| MinLength[1]
 
 object Author:
-  val all: AlbumAuthors = Set(Author.Cosmin, Author.Mara, Author.Iacob).refineUnsafe[MinLength[1]]
+  val all: AlbumAuthors = Author.values.toSet.refineUnsafe[MinLength[1]]

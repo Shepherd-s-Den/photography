@@ -60,30 +60,32 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       assertEquals(selected, ListAlbumsResult.Failed)
 
   test("should create an Album from the first AlbumStart template the repository lists"):
-    val refs         = Refs()
-    val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
-    val listed       = ListAlbumStartTemplatesResult.Listed(NonEmptyList.of(buildAlbumStartTemplate(index = 20), buildAlbumStartTemplate(index = 21)))
+    Vector[AlbumYear](2020, 2025, selectedYear).traverse_ { year =>
+      val refs         = Refs()
+      val suppliedTime = Instant.parse("2026-10-07T12:00:00.123456789Z")
+      val listed  = ListAlbumStartTemplatesResult.Listed(NonEmptyList.of(buildAlbumStartTemplate(index = 20), buildAlbumStartTemplate(index = 21)))
+      val manager = buildManager(refs, listResult = listed, currentTime = suppliedTime)
+      val expectedAlbumId           = AlbumId(buildUuid(index = 10))
+      val templateId                = SpreadTemplateId(buildUuid(index = 20))
+      val photoSlot                 = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), photoBox, bleed = Set.empty[SpreadEdge])
+      val textSlot                  = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), fullBox)
+      val emptyPlacements           = Vector.empty[SpreadPlacement]
+      val expectedStart             = Spread.AlbumStart(SpreadId(buildUuid(index = 11)), templateId, Vector(photoSlot), textSlot, emptyPlacements)
+      val expectedCreatedAt         = Instant.parse("2026-10-07T12:00:00.123Z")
+      val emptyChapters             = Vector.empty[Chapter]
+      val expectedTitle: AlbumTitle = "Asian capitals"
+      val expectedAlbum = Album(expectedAlbumId, year, expectedTitle, synopsis = "", Author.all, expectedCreatedAt, expectedStart, emptyChapters)
+      val front         = CoverSlot(CoverSlotId(buildUuid(index = 14)))
+      val back          = CoverSlot(CoverSlotId(buildUuid(index = 15)))
+      val expectedCover = Cover(expectedAlbumId, SpineOwner.Front, front, back)
 
-    val expectedAlbumId   = AlbumId(buildUuid(index = 10))
-    val templateId        = SpreadTemplateId(buildUuid(index = 20))
-    val photoSlot         = SpreadSlot.Photo(PhotoSpreadSlotId(buildUuid(index = 12)), photoBox, bleed = Set.empty[SpreadEdge])
-    val textSlot          = SpreadSlot.Text(TextSpreadSlotId(buildUuid(index = 13)), fullBox)
-    val emptyPlacements   = Vector.empty[SpreadPlacement]
-    val expectedStart     = Spread.AlbumStart(SpreadId(buildUuid(index = 11)), templateId, Vector(photoSlot), textSlot, emptyPlacements)
-    val expectedCreatedAt = Instant.parse("2026-10-07T12:00:00.123Z")
-    val emptyChapters     = Vector.empty[Chapter]
-    val expectedAlbum     =
-      Album(expectedAlbumId, selectedYear, title = "Asian capitals", synopsis = "", Author.all, expectedCreatedAt, expectedStart, emptyChapters)
-    val front         = CoverSlot(CoverSlotId(buildUuid(index = 14)))
-    val back          = CoverSlot(CoverSlotId(buildUuid(index = 15)))
-    val expectedCover = Cover(expectedAlbumId, SpineOwner.Front, front, back)
-
-    for
-      result  <- buildManager(refs, listResult = listed, currentTime = suppliedTime).create(year = selectedYear, title = "Asian capitals")
-      created <- refs.maybeCreated.get
-    yield
-      assertEquals(result, CreateAlbumResult.Created(expectedAlbum))
-      assertEquals(created, (expectedAlbum, expectedCover).some)
+      for
+        result  <- manager.create(year, title = expectedAlbum.title)
+        created <- refs.maybeCreated.get
+      yield
+        assertEquals(result, CreateAlbumResult.Created(expectedAlbum))
+        assertEquals(created, (expectedAlbum, expectedCover).some)
+    }
 
   test("should report failure when the atomic creation write fails"):
     buildManager(Refs(), createResult = AlbumRepository.CreateResult.Failed(Failure.DatabaseFailure))
@@ -152,11 +154,6 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       assertEquals(missing, DeleteAlbumResult.NotFound)
       assertEquals(failed, DeleteAlbumResult.Failed)
 
-  test("should create old-year albums with the full supported author catalog"):
-    buildManager(Refs()).create(year = 2020, title = "History").map:
-      case CreateAlbumResult.Created(album) => assertEquals(album.authors, Author.all)
-      case result                           => fail(s"Unexpected creation $result")
-
   test("should save synopsis and authors once and preserve every repository outcome"):
     val album         = buildAlbum(index = 1)
     val text          = "Șir 日本語\n🙂"
@@ -174,27 +171,34 @@ final class AlbumManagerComponentTest extends CatsEffectSuite:
       AlbumRepository.SaveAuthorsResult.Uncertain                       -> SaveAuthorsResult.Uncertain
     )
 
+    val saveSynopsisCases = synopsisCases.traverse { case (response, expected) =>
+      val refs    = Refs()
+      val manager = buildManager(refs, synopsisResult = response)
+
+      for
+        result <- manager.saveSynopsis(album.id, text = text)
+        calls  <- refs.synopsisCalls.get
+        reads  <- refs.maybeLastReadId.get
+      yield
+        assertEquals(calls, Vector(album.id -> text))
+        assertEquals(reads, None)
+        assertEquals(result, expected)
+    }
+    val saveAuthorsCases = authorsCases.traverse { case (response, expected) =>
+      val refs    = Refs()
+      val manager = buildManager(refs, authorsResult = response)
+
+      for
+        result <- manager.saveAuthors(album.id, Author.all)
+        calls  <- refs.authorsCalls.get
+      yield
+        assertEquals(calls, Vector(album.id -> Author.all))
+        assertEquals(result, expected)
+    }
+
     for
-      synopsis <- synopsisCases.traverse { case (response, expected) =>
-        val refs = Refs()
-        for
-          result <- buildManager(refs, synopsisResult = response).saveSynopsis(album.id, text = text)
-          calls  <- refs.synopsisCalls.get
-          reads  <- refs.maybeLastReadId.get
-        yield
-          assertEquals(calls, Vector(album.id -> text))
-          assertEquals(reads, None)
-          assertEquals(result, expected)
-      }
-      authors <- authorsCases.traverse { case (response, expected) =>
-        val refs = Refs()
-        for
-          result <- buildManager(refs, authorsResult = response).saveAuthors(album.id, Author.all)
-          calls  <- refs.authorsCalls.get
-        yield
-          assertEquals(calls, Vector(album.id -> Author.all))
-          assertEquals(result, expected)
-      }
+      synopsis <- saveSynopsisCases
+      authors  <- saveAuthorsCases
     yield
       assertEquals(synopsis.size, synopsisCases.size)
       assertEquals(authors.size, authorsCases.size)

@@ -66,9 +66,12 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           bytes = 12
         )
       )
+
       val persist = buildTransactor(path).use: xa =>
+        val seededPhoto = seed >> repository.save(photo) >> insertCoverPlacement
+
         for
-          _                <- (seed >> repository.save(photo) >> insertCoverPlacement).transact(xa)
+          _                <- seededPhoto.transact(xa)
           snapshot         <- repository.listChapter(chapter).transact(xa)
           beforePlacements <- placements.transact(xa)
           edited           <- repository.saveCaption(photoId, maybeCaption = "日本\nVacanță".some).transact(xa)
@@ -91,6 +94,7 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           assertEquals(finalPhotos, ListResult.Listed(photos = Vector(replacement.copy(maybeCaption = None))))
           assertEquals(missing, SaveCaptionResult.PhotoNotFound)
           assertEquals(afterPlacements, beforePlacements)
+
       persist >> buildTransactor(path).use: xa =>
         repository.listChapter(chapter).transact(xa).map(assertEquals(_, ListResult.Listed(photos = Vector(replacement.copy(maybeCaption = None)))))
 
@@ -109,6 +113,9 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
         val abortTransaction = sql"""CREATE TRIGGER reject_caption BEFORE UPDATE OF caption ON photo BEGIN
           SELECT RAISE(ROLLBACK, 'Caption transaction aborted');
         END""".update.run
+        val abortedCaption = repository.saveCaption(photoId, maybeCaption = None) >>
+          new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]
+
         for
           _             <- (seed >> repository.save(photo)).transact(xa)
           _             <- reject.transact(xa)
@@ -119,12 +126,10 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
           ignored       <- repository.saveCaption(photoId, maybeCaption = None).transact(xa)
           ignoredPhotos <- repository.listChapter(chapter).transact(xa)
           _             <- sql"DROP TRIGGER reject_caption".update.run.transact(xa)
-          rolledBack    <-
-          (repository.saveCaption(photoId, maybeCaption = None) >>
-            new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]).transact(xa).attempt
-          finalPhotos <- repository.listChapter(chapter).transact(xa)
-          _           <- abortTransaction.transact(xa)
-          uncertain   <- repository.saveCaption(photoId, maybeCaption = None).transact(xa).attempt
+          rolledBack    <- abortedCaption.transact(xa).attempt
+          finalPhotos   <- repository.listChapter(chapter).transact(xa)
+          _             <- abortTransaction.transact(xa)
+          uncertain     <- repository.saveCaption(photoId, maybeCaption = None).transact(xa).attempt
         yield
           failed match
             case SaveCaptionResult.Failed(cause) => assert(cause.getMessage.contains("Rejected caption"))
@@ -153,10 +158,12 @@ final class SqlitePhotoRepositorySeamIntegrationTest extends CatsEffectSuite:
               if committed then program.transact(xa) >> lost else lost
             override def resolve[A](program: ConnectionIO[A]): IO[A] =
               IO.raiseError[A](new AssertionError("Unexpected automatic reconciliation"))
+
           Mutex[IO].flatMap: mutex =>
             given Mutex[IO] = mutex
             val manager     = PhotoCaptionManager.make[IO, ConnectionIO](repository)
             val expected    = if committed then photo.copy(maybeCaption = "日本\nVacanță".some) else photo
+
             for
               _      <- (seed >> repository.save(photo)).transact(xa)
               result <- manager.save(photoId, text = "日本\nVacanță")

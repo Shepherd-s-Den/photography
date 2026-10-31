@@ -550,11 +550,13 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
       ChapterRepository.SaveDescriptionResult.Failed(failure) -> SaveDescriptionResult.Failed,
       ChapterRepository.SaveDescriptionResult.Uncertain       -> SaveDescriptionResult.Uncertain
     )
+
     cases.traverse_ { case (response, expected) =>
       val refs           = Refs()
       val expectedErrors = response match
         case ChapterRepository.SaveDescriptionResult.Failed(cause) => Vector(cause, cause)
         case _                                                     => Vector.empty[Throwable]
+
       for
         manager      <- buildManager(refs, descriptionWrite = response.pure[IO])
         saved        <- manager.saveDescription(album.id, chapter.id, text = "日本\nVacanță")
@@ -576,38 +578,36 @@ final class ChapterManagerComponentTest extends CatsEffectSuite:
     }
 
   test("should report uncertain description acknowledgement without retrying the mutation"):
-    val refs = Refs()
+    val refs                = Refs()
+    val lostAcknowledgement = IO.raiseError[ChapterRepository.SaveDescriptionResult](new IllegalStateException("Lost acknowledgement"))
+
     for
-      manager <- buildManager(
-        refs,
-        descriptionWrite = IO.raiseError[ChapterRepository.SaveDescriptionResult](new IllegalStateException("Lost acknowledgement"))
-      )
-      result <- manager.saveDescription(album.id, chapter.id, text = "Saved?")
-      writes <- refs.descriptions.get
+      manager <- buildManager(refs, descriptionWrite = lostAcknowledgement)
+      result  <- manager.saveDescription(album.id, chapter.id, text = "Saved?")
+      writes  <- refs.descriptions.get
     yield
       assertEquals(result, SaveDescriptionResult.Uncertain)
       assertEquals(writes, Vector((album.id, chapter.id, "Saved?")))
 
   test("should finish the description transaction handoff before honoring cancellation"):
     TestControl.executeEmbed:
-      val refs = Refs()
-      for
-        entered       <- Deferred[IO, Unit]
-        release       <- Deferred[IO, Unit]
-        committed     <- Deferred[IO, Unit]
-        cancelStarted <- Deferred[IO, Unit]
-        manager       <- buildManager(
-          refs,
-          descriptionWrite = entered.complete(()).void >> release.get >> committed.complete(()).as(ChapterRepository.SaveDescriptionResult.Saved)
-        )
-        worker       <- manager.saveDescription(album.id, chapter.id, text = "Description").start
-        _            <- entered.get
-        cancellation <- (cancelStarted.complete(()).void >> worker.cancel).start
-        _            <- cancelStarted.get >> IO.cede
-        _            <- release.complete(())
-        _            <- cancellation.join
-        completed    <- committed.tryGet
-      yield assertEquals(completed, ().some)
+      val refs           = Refs()
+      val handoffSignals = (Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit]).tupled
+
+      handoffSignals.flatMap { case (entered, release, committed, cancelStarted) =>
+        val committing = entered.complete(()).void >> release.get >> committed.complete(()).as(ChapterRepository.SaveDescriptionResult.Saved)
+
+        for
+          manager      <- buildManager(refs, descriptionWrite = committing)
+          worker       <- manager.saveDescription(album.id, chapter.id, text = "Description").start
+          _            <- entered.get
+          cancellation <- (cancelStarted.complete(()).void >> worker.cancel).start
+          _            <- cancelStarted.get >> IO.cede
+          _            <- release.complete(())
+          _            <- cancellation.join
+          completed    <- committed.tryGet
+        yield assertEquals(completed, ().some)
+      }
 
   final private case class Refs():
     val errors: Ref[IO, Vector[Throwable]]                                                                                  = Ref.unsafe(Vector.empty)

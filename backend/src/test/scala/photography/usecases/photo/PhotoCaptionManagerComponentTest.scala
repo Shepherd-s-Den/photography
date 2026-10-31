@@ -25,11 +25,13 @@ final class PhotoCaptionManagerComponentTest extends CatsEffectSuite:
       PhotoRepository.SaveCaptionResult.Failed(failure) -> SaveResult.Failed,
       PhotoRepository.SaveCaptionResult.Uncertain       -> SaveResult.Uncertain
     )
+
     cases.traverse_ { case (response, expected) =>
       val refs           = Refs()
       val expectedErrors = response match
         case PhotoRepository.SaveCaptionResult.Failed(cause) => Vector(cause, cause, cause)
         case _                                               => Vector.empty[Throwable]
+
       for
         manager      <- buildManager(refs, response.pure[IO])
         saved        <- manager.save(photo, text = "日本\nVacanță")
@@ -46,9 +48,11 @@ final class PhotoCaptionManagerComponentTest extends CatsEffectSuite:
     }
 
   test("should expose uncertain commit acknowledgement without reading or retrying"):
-    val refs = Refs()
+    val refs                = Refs()
+    val lostAcknowledgement = IO.raiseError[PhotoRepository.SaveCaptionResult](new IllegalStateException("Lost acknowledgement"))
+
     for
-      manager <- buildManager(refs, IO.raiseError[PhotoRepository.SaveCaptionResult](new IllegalStateException("Lost acknowledgement")))
+      manager <- buildManager(refs, lostAcknowledgement)
       result  <- manager.save(photo, text = "Saved?")
       writes  <- refs.writes.get
     yield
@@ -57,21 +61,23 @@ final class PhotoCaptionManagerComponentTest extends CatsEffectSuite:
 
   test("should finish the caption transaction handoff before honoring cancellation"):
     TestControl.executeEmbed:
-      val refs = Refs()
-      for
-        entered       <- Deferred[IO, Unit]
-        release       <- Deferred[IO, Unit]
-        committed     <- Deferred[IO, Unit]
-        cancelStarted <- Deferred[IO, Unit]
-        manager <- buildManager(refs, entered.complete(()).void >> release.get >> committed.complete(()).as(PhotoRepository.SaveCaptionResult.Saved))
-        worker  <- manager.save(photo, text = "Caption").start
-        _       <- entered.get
-        cancellation <- (cancelStarted.complete(()).void >> worker.cancel).start
-        _            <- cancelStarted.get >> IO.cede
-        _            <- release.complete(())
-        _            <- cancellation.join
-        completed    <- committed.tryGet
-      yield assertEquals(completed, ().some)
+      val refs           = Refs()
+      val handoffSignals = (Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit], Deferred[IO, Unit]).tupled
+
+      handoffSignals.flatMap { case (entered, release, committed, cancelStarted) =>
+        val committing = entered.complete(()).void >> release.get >> committed.complete(()).as(PhotoRepository.SaveCaptionResult.Saved)
+
+        for
+          manager      <- buildManager(refs, committing)
+          worker       <- manager.save(photo, text = "Caption").start
+          _            <- entered.get
+          cancellation <- (cancelStarted.complete(()).void >> worker.cancel).start
+          _            <- cancelStarted.get >> IO.cede
+          _            <- release.complete(())
+          _            <- cancellation.join
+          completed    <- committed.tryGet
+        yield assertEquals(completed, ().some)
+      }
 
   final private case class Refs():
     val errors: Ref[IO, Vector[Throwable]]                 = Ref.unsafe(Vector.empty)

@@ -58,6 +58,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val gear     = sql"""SELECT c.chapter_id, c.camera_id, c.use_kind, l.lens_id FROM chapter_camera c
         JOIN chapter_camera_lens l ON l.chapter_id = c.chapter_id AND l.camera_id = c.camera_id"""
         .query[(UUID, UUID, String, UUID)].to[Vector]
+
       for
         _              <- seedAlbum(xa)
         first          <- buildChapter(xa, index = 1)
@@ -90,6 +91,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
             val savedChapters = album.chapters.map(value => if value.id.value === first.id.value then value.copy(description = "") else value)
             AlbumRepository.GetResult.Found(album.copy(chapters = savedChapters))
           case other => fail(s"Expected complete album: $other")
+
         assertEquals(saved, ChapterRepository.SaveDescriptionResult.Saved)
         assertEquals(after, expectedText)
         assertEquals(missingAlbum, ChapterRepository.SaveDescriptionResult.AlbumNotFound)
@@ -115,46 +117,49 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
       val abortTransaction = sql"""CREATE TRIGGER reject_description BEFORE UPDATE OF description ON chapter BEGIN
         SELECT RAISE(ROLLBACK, 'Description transaction aborted');
       END""".update.run
-      for
-        _     <- seedAlbum(xa)
-        first <- buildChapter(xa, index = 1)
-        _     <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
-        _     <-
-          sql"INSERT INTO album (id, year, title, synopsis, created_at_ms) VALUES (${otherAlbum.value}, 2099, 'Other', '', 0)".update.run.transact(xa)
-        before       <- albums.get(albumId)
-        scoped       <- chapters.saveDescription(otherAlbum, first.id, text = "Wrong owner").transact(xa)
-        _            <- reject.transact(xa)
-        failed       <- chapters.saveDescription(albumId, first.id, text = "Rejected").transact(xa)
-        retained     <- albums.get(albumId)
-        _            <- sql"DROP TRIGGER reject_description".update.run.transact(xa)
-        _            <- ignore.transact(xa)
-        ignored      <- chapters.saveDescription(albumId, first.id, text = "").transact(xa)
-        ignoredAlbum <- albums.get(albumId)
-        _            <- sql"DROP TRIGGER reject_description".update.run.transact(xa)
-        aborted      <-
-        (chapters.saveDescription(albumId, first.id, text = "") >>
-          new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]).transact(xa).attempt
-        finalAlbum <- albums.get(albumId)
-        _          <- abortTransaction.transact(xa)
-        uncertain  <- chapters.saveDescription(albumId, first.id, text = "").transact(xa).attempt
-      yield
-        assertEquals(scoped, ChapterRepository.SaveDescriptionResult.ChapterNotFound)
-        failed match
-          case ChapterRepository.SaveDescriptionResult.Failed(cause) => assert(cause.getMessage.contains("Rejected description"))
-          case result                                                => fail(s"Expected rejected description cause, obtained $result")
-        assertEquals(retained, before)
-        ignored match
-          case ChapterRepository.SaveDescriptionResult.Failed(cause) =>
-            assertEquals(cause.getMessage, "Description update did not change the existing chapter")
-          case result => fail(s"Expected ignored description cause, obtained $result")
-        assertEquals(ignoredAlbum, before)
-        assert(aborted.isLeft)
-        assertEquals(finalAlbum, before)
-        uncertain match
-          case Left(cause) =>
-            assert(cause.getMessage.contains("Description transaction aborted"))
-            assert(cause.getSuppressed.toVector.exists(_.getMessage.contains("savepoint")))
-          case result => fail(s"Expected uncertain rollback acknowledgement with both causes, obtained $result")
+      val insertOtherAlbum =
+        sql"INSERT INTO album (id, year, title, synopsis, created_at_ms) VALUES (${otherAlbum.value}, 2099, 'Other', '', 0)".update.run
+      val seededChapter = seedAlbum(xa) >> buildChapter(xa, index = 1)
+
+      seededChapter.flatMap: first =>
+        val abortedDescription = chapters.saveDescription(albumId, first.id, text = "") >>
+          new IllegalStateException("Abort transaction").raiseError[ConnectionIO, Unit]
+
+        for
+          _            <- chapters.create(albumId, first, order = NonEmptyList.one(first.id)).transact(xa)
+          _            <- insertOtherAlbum.transact(xa)
+          before       <- albums.get(albumId)
+          scoped       <- chapters.saveDescription(otherAlbum, first.id, text = "Wrong owner").transact(xa)
+          _            <- reject.transact(xa)
+          failed       <- chapters.saveDescription(albumId, first.id, text = "Rejected").transact(xa)
+          retained     <- albums.get(albumId)
+          _            <- sql"DROP TRIGGER reject_description".update.run.transact(xa)
+          _            <- ignore.transact(xa)
+          ignored      <- chapters.saveDescription(albumId, first.id, text = "").transact(xa)
+          ignoredAlbum <- albums.get(albumId)
+          _            <- sql"DROP TRIGGER reject_description".update.run.transact(xa)
+          aborted      <- abortedDescription.transact(xa).attempt
+          finalAlbum   <- albums.get(albumId)
+          _            <- abortTransaction.transact(xa)
+          uncertain    <- chapters.saveDescription(albumId, first.id, text = "").transact(xa).attempt
+        yield
+          assertEquals(scoped, ChapterRepository.SaveDescriptionResult.ChapterNotFound)
+          failed match
+            case ChapterRepository.SaveDescriptionResult.Failed(cause) => assert(cause.getMessage.contains("Rejected description"))
+            case result                                                => fail(s"Expected rejected description cause, obtained $result")
+          assertEquals(retained, before)
+          ignored match
+            case ChapterRepository.SaveDescriptionResult.Failed(cause) =>
+              assertEquals(cause.getMessage, "Description update did not change the existing chapter")
+            case result => fail(s"Expected ignored description cause, obtained $result")
+          assertEquals(ignoredAlbum, before)
+          assert(aborted.isLeft)
+          assertEquals(finalAlbum, before)
+          uncertain match
+            case Left(cause) =>
+              assert(cause.getMessage.contains("Description transaction aborted"))
+              assert(cause.getSuppressed.toVector.exists(_.getMessage.contains("savepoint")))
+            case result => fail(s"Expected uncertain rollback acknowledgement with both causes, obtained $result")
 
   test("should expose uncertain description acknowledgements without retrying or conflating the actual SQLite commit"):
     Vector(false, true).traverse_ { committed =>
@@ -179,9 +184,11 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
             if committed then program.transact(xa) >> lost else lost
           override def resolve[A](program: ConnectionIO[A]): IO[A] =
             IO.raiseError[A](new AssertionError("Unexpected automatic reconciliation"))
+
         Mutex[IO].flatMap: mutex =>
           given Mutex[IO] = mutex
           val manager     = ChapterManager.make(albums, chapters, ChapterPlanning.make(templates), imports, SqlitePhotoRepository.make)
+
           for
             _      <- seedAlbum(xa)
             first  <- buildChapter(xa, index = 1)
@@ -194,6 +201,7 @@ final class SqliteChapterRepositorySeamIntegrationTest extends CatsEffectSuite:
               case AlbumRepository.GetResult.Found(album) if committed =>
                 AlbumRepository.GetResult.Found(album.copy(chapters = album.chapters.map(_.copy(description = "日本\nVacanță"))))
               case original => original
+
             assertEquals(result, ChapterManager.SaveDescriptionResult.Uncertain)
             assertEquals(after, expected)
     }

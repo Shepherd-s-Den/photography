@@ -361,6 +361,7 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
         corruptions.traverse_ { case (corruption, repair) =>
           val corrupt = sql"PRAGMA foreign_keys = OFF".update.run >> Fragment.const(corruption).update.run >>
             sql"PRAGMA foreign_keys = ON".update.run
+
           for
             _       <- xa.rawTrans.apply(corrupt)
             invalid <- repository.get(album.id)
@@ -448,23 +449,25 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should preserve the complete aggregate through all nonempty author combinations and Unicode synopsis clearing"):
     buildTransactor.use: xa =>
-      val repository   = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
-      val album        = buildAlbum(index = 1)
-      val text         = "Ș 日本語\n🙂"
-      val combinations = Author.all.subsets().filter(_.nonEmpty).toVector.map(_.refineUnsafe[MinLength[1]])
+      val repository             = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+      val album                  = buildAlbum(index = 1)
+      val text                   = "Ș 日本語\n🙂"
+      val combinations           = Author.all.subsets().filter(_.nonEmpty).toVector.map(_.refineUnsafe[MinLength[1]])
+      val saveAuthorCombinations = combinations.traverse_ { authors =>
+        val expected = album.copy(synopsis = text, authors = authors)
+
+        for
+          result <- repository.saveAuthors(album.id, authors)
+          found  <- repository.get(album.id)
+        yield
+          assertEquals(result, SaveAuthorsResult.Saved(expected))
+          assertEquals(found, GetResult.Found(expected))
+      }
 
       for
-        _     <- repository.create(album, buildCover(album))
-        saved <- repository.saveSynopsis(album.id, text = text)
-        _     <- combinations.traverse_ { authors =>
-          val expected = album.copy(synopsis = text, authors = authors)
-          for
-            result <- repository.saveAuthors(album.id, authors)
-            found  <- repository.get(album.id)
-          yield
-            assertEquals(result, SaveAuthorsResult.Saved(expected))
-            assertEquals(found, GetResult.Found(expected))
-        }
+        _               <- repository.create(album, buildCover(album))
+        saved           <- repository.saveSynopsis(album.id, text = text)
+        _               <- saveAuthorCombinations
         _               <- repository.saveAuthors(album.id, Author.all)
         cleared         <- repository.saveSynopsis(album.id, text = "")
         unknownSynopsis <- repository.saveSynopsis(AlbumId(buildUuid(index = 999)), text = text)
@@ -513,44 +516,49 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
 
   test("should initialize historical credits once and retain saved authors and composition across restart"):
     val acquireDatabase = IO.blocking(Files.createTempFile(Path.of("target"), "album-history-", ".sqlite"))
+
     Resource.make(acquireDatabase)(path => IO.blocking(Files.deleteIfExists(path)).void).use: path =>
-      val albums = Vector(2025, 2026).zipWithIndex.map { case (year, index) =>
-        buildAlbum(index = index + 1).copy(year = year.refineUnsafe[AlbumYearConstraint], synopsis = "Retained Ș\n日本")
-      }
+      val original          = buildAlbum(index = 1).copy(year = 2025, synopsis = "Retained Ș\n日本")
+      val later             = buildAlbum(index = 2).copy(year = 2026, synopsis = original.synopsis)
+      val albums            = Vector(original, later)
       val historicalAuthors = Set(Author.Cosmin, Author.Mara).refineUnsafe[MinLength[1]]
       val selected          = Set(Author.Iacob).refineUnsafe[MinLength[1]]
-      val expected          = albums.headOption.toRight(new AssertionError("Missing historical fixture")).liftTo[IO]
       val oldMigration      = IO.blocking:
         Flyway.configure().dataSource(s"jdbc:sqlite:${path.toAbsolutePath}", "", "").table("flyway").locations("db").target("2").load().migrate()
+      val initializeHistoricalAlbums = buildConnection(path).use(xa => albums.traverse_(album => insertHistoricalAlbum(album).transact(xa)))
+      val migrateAuthors             = FlywayMigrator.make[IO](path).use(_.migrate)
+      val saveHistoricalAuthors      = buildConnection(path).use: xa =>
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+
+        for
+          first   <- repository.get(original.id)
+          current <- repository.get(later.id)
+          saved   <- repository.saveAuthors(original.id, selected)
+        yield
+          assertEquals(first, GetResult.Found(original.copy(authors = historicalAuthors)))
+          assertEquals(current, GetResult.Found(later))
+          assertEquals(saved, SaveAuthorsResult.Saved(original.copy(authors = selected)))
+      val verifyRestartRetention = buildConnection(path).use: xa =>
+        val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
+
+        for
+          retained <- repository.get(original.id)
+          renamed  <- repository.rename(original.id, title = changedTitle)
+          cleared  <- repository.saveSynopsis(original.id, text = "")
+          deleted  <- repository.delete(original.id)
+        yield
+          assertEquals(retained, GetResult.Found(original.copy(authors = selected)))
+          assertEquals(renamed, RenameResult.Renamed(original.copy(title = changedTitle, authors = selected)))
+          assertEquals(cleared, SaveSynopsisResult.Saved(original.copy(title = changedTitle, synopsis = "", authors = selected)))
+          assertEquals(deleted, DeleteResult.Deleted)
 
       for
-        _        <- oldMigration
-        original <- expected
-        _        <- buildConnection(path).use(xa => albums.traverse_(album => insertHistoricalAlbum(album).transact(xa)))
-        _        <- FlywayMigrator.make[IO](path).use(_.migrate)
-        _        <- buildConnection(path).use: xa =>
-          val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
-          for
-            first <- repository.get(original.id)
-            later <- repository.get(AlbumId(buildUuid(index = 2)))
-            saved <- repository.saveAuthors(original.id, selected)
-          yield
-            assertEquals(first, GetResult.Found(original.copy(authors = historicalAuthors)))
-            assertEquals(later, GetResult.Found(buildAlbum(index = 2).copy(year = 2026, synopsis = original.synopsis)))
-            assertEquals(saved, SaveAuthorsResult.Saved(original.copy(authors = selected)))
-        _ <- FlywayMigrator.make[IO](path).use(_.migrate)
-        _ <- buildConnection(path).use: xa =>
-          val repository = SqliteAlbumRepository.make[IO](xa, SqliteAlbumCompositionRepository.make)
-          for
-            retained <- repository.get(original.id)
-            renamed  <- repository.rename(original.id, title = changedTitle)
-            cleared  <- repository.saveSynopsis(original.id, text = "")
-            deleted  <- repository.delete(original.id)
-          yield
-            assertEquals(retained, GetResult.Found(original.copy(authors = selected)))
-            assertEquals(renamed, RenameResult.Renamed(original.copy(title = changedTitle, authors = selected)))
-            assertEquals(cleared, SaveSynopsisResult.Saved(original.copy(title = changedTitle, synopsis = "", authors = selected)))
-            assertEquals(deleted, DeleteResult.Deleted)
+        _ <- oldMigration
+        _ <- initializeHistoricalAlbums
+        _ <- migrateAuthors
+        _ <- saveHistoricalAuthors
+        _ <- migrateAuthors
+        _ <- verifyRestartRetention
       yield ()
 
   test("should report lost commit acknowledgement as uncertain without replaying the field mutation"):
@@ -581,21 +589,26 @@ final class SqliteAlbumRepositorySeamIntegrationTest extends CatsEffectSuite:
     }
 
   private def insertHistoricalAlbum(album: Album) =
-    val opening = album.opening
-    val cover   = buildCover(album)
-    val text    = opening.textSlot
+    val opening     = album.opening
+    val cover       = buildCover(album)
+    val text        = opening.textSlot
+    val insertAlbum = sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
+                           VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, ${album.createdAt.toEpochMilli})"""
+    val insertOpening = sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
+                             VALUES (${opening.id.value}, ${opening.template.value}, 'album_start', ${album.id.value}, 0)"""
+    val insertPhotos = opening.photoSlots.traverse_ { slot =>
+      val box = slot.box
+      sql"""INSERT INTO spread_photo_slot (id, spread_id, x, y, width, height)
+            VALUES (${slot.id.value}, ${opening.id.value}, $box)""".update.run.void
+    }
+    val insertText = sql"""INSERT INTO spread_text_slot (id, spread_id, x, y, width, height)
+                          VALUES (${text.id.value}, ${opening.id.value}, ${text.box})"""
+
     for
-      _ <- sql"""INSERT INTO album (id, year, title, synopsis, created_at_ms)
-                 VALUES (${album.id.value}, ${album.year}, ${album.title}, ${album.synopsis}, ${album.createdAt.toEpochMilli})""".update.run
-      _ <- sql"""INSERT INTO spread (id, template_id, kind, album_id, position)
-                 VALUES (${opening.id.value}, ${opening.template.value}, 'album_start', ${album.id.value}, 0)""".update.run
-      _ <- opening.photoSlots.traverse_ { slot =>
-        val box = slot.box
-        sql"""INSERT INTO spread_photo_slot (id, spread_id, x, y, width, height)
-              VALUES (${slot.id.value}, ${opening.id.value}, $box)""".update.run.void
-      }
-      _ <- sql"""INSERT INTO spread_text_slot (id, spread_id, x, y, width, height)
-                 VALUES (${text.id.value}, ${opening.id.value}, ${text.box})""".update.run
+      _ <- insertAlbum.update.run
+      _ <- insertOpening.update.run
+      _ <- insertPhotos
+      _ <- insertText.update.run
       _ <- sql"INSERT INTO cover (album_id, spine_owner) VALUES (${album.id.value}, 'front')".update.run
       _ <- sql"INSERT INTO cover_slot (id, album_id, side) VALUES (${cover.front.id.value}, ${album.id.value}, 'front')".update.run
       _ <- sql"INSERT INTO cover_slot (id, album_id, side) VALUES (${cover.back.id.value}, ${album.id.value}, 'back')".update.run
