@@ -9,10 +9,11 @@ import org.typelevel.log4cats.StructuredLogger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import org.typelevel.doobie.ConnectionIO
 import org.typelevel.doobie.implicits.*
-import photography.adapters.http.{AlbumApi, AlbumSpreadApi, AlbumWorkspaceApi, HealthRoutes, SpreadTemplateApi, StaticSite}
+import photography.adapters.http.{AlbumApi, AlbumSpreadApi, AlbumResourcesApi, ChapterApi, HealthRoutes, SpreadTemplateApi, StaticSite}
 import photography.adapters.filesystem.FileThumbnailStorage
 import photography.adapters.http.{AlbumPhotoEventsApi, ThumbnailApi}
 import photography.adapters.http.PhotoPlacementApi
+import photography.adapters.http.ChapterCompositionApi
 import photography.adapters.sqlite.photo.SqlitePhotoRepository
 import photography.app.config.{AppConfig, HttpServerConfig}
 import photography.capabilities.{Clock, IdGenerator, Transaction}
@@ -42,9 +43,9 @@ object Main extends IOApp.Simple:
         val pageSize      = config.albums.pageSize
         val photoRoot     = config.albums.photoRoot
         val quality       = config.thumbnails.quality
-        val buildManagers = AppManagers.make[IO](resources.sqlite, pageSize, photoRoot, photos, thumbnails, quality)
+        val buildManagers = ProgramsBuilder.make[IO](resources.sqlite, pageSize, photos, thumbnails, quality).build
         val serve         = buildManagers.use: managers =>
-          val server = buildHttpApp(managers, thumbnails).flatMap(httpApp => buildHttpServer(config.http, httpApp))
+          val server = buildHttpApp(managers, thumbnails, photoRoot).flatMap(httpApp => buildHttpServer(config.http, httpApp))
           server.useForever.void
         for
           _ <- resources.flyway.migrate
@@ -53,14 +54,16 @@ object Main extends IOApp.Simple:
           _ <- serve
         yield ()
 
-  private def buildHttpApp(managers: AppManagers[IO], thumbnails: ThumbnailStorage[IO]) =
+  private def buildHttpApp(managers: Programs[IO], thumbnails: ThumbnailStorage[IO], photoRoot: photography.domain.album.PhotoSource) =
     val metadata     = AlbumApi.make(managers.albums).routes
-    val workspace    = AlbumWorkspaceApi.make(managers.workspaces, managers.albums, managers.chapters).routes
+    val resources    = AlbumResourcesApi.make(managers.resources, managers.countries, photoRoot)
+    val chapters     = ChapterApi.make(managers.inventories, managers.chapters).routes
     val thumbnailApi = ThumbnailApi.make(thumbnails).routes
     val events       = AlbumPhotoEventsApi.make(managers.photoEvents).routes
     val placements   = PhotoPlacementApi.make(managers.spreads, managers.coverPlacements)
-    val api = HealthRoutes.routes[IO] <+> metadata <+> workspace <+> events <+> thumbnailApi <+> SpreadTemplateApi.make(managers.templates).routes <+>
-      AlbumSpreadApi.make(managers.spreads).routes <+> placements
+    val api          = HealthRoutes.routes[IO] <+> resources <+> metadata <+> chapters <+> events <+> thumbnailApi <+>
+      SpreadTemplateApi.make(managers.templates).routes <+>
+      ChapterCompositionApi.make(managers.composition) <+> AlbumSpreadApi.make(managers.spreads).routes <+> placements
     StaticSite.make(api, assetRoot = "frontend").map(_.app)
 
   private def buildHttpServer(config: HttpServerConfig, app: HttpApp[IO]) =

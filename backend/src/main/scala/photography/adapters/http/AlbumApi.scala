@@ -4,7 +4,8 @@ import cats.effect.Async
 import cats.syntax.all.*
 import io.circe.{Decoder, Encoder}
 import io.github.iltotore.iron.*
-import org.http4s.{HttpRoutes, MessageBodyFailure, Query, QueryParamDecoder, QueryParameterValue, Request}
+import org.http4s.{CacheDirective, HttpRoutes, MessageBodyFailure, Query, QueryParamDecoder, QueryParameterValue, Request}
+import org.http4s.headers.`Cache-Control`
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.{Album, AlbumId, AlbumTitle, AlbumYear, AlbumYearConstraint}
@@ -24,16 +25,15 @@ object AlbumApi:
       HttpRoutes.of[F] {
         case request @ GET -> Root / "api" / "albums"                    => list(request.uri.query)
         case request @ POST -> Root / "api" / "albums"                   => create(request)
-        case GET -> Root / "api" / "albums" / AlbumIdVar(id)             => get(id)
         case request @ PATCH -> Root / "api" / "albums" / AlbumIdVar(id) => rename(id, request)
         case DELETE -> Root / "api" / "albums" / AlbumIdVar(id)          => delete(id)
-        case (GET | PATCH | DELETE) -> Root / "api" / "albums" / _       => respondAlbumNotFound
+        case (PATCH | DELETE) -> Root / "api" / "albums" / _             => respondAlbumNotFound
       }
 
     private def list(query: Query) = query match
       case Page(page) =>
         albums.list(page = page).flatMap:
-          case ListAlbumsResult.Listed(selected) => Ok(selected)
+          case ListAlbumsResult.Listed(selected) => Ok(selected).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
           case ListAlbumsResult.Failed           => respondServiceFailure
       case _ => BadRequest(Map("message" -> "Supply page once as a 32-bit integer"))
 
@@ -43,12 +43,6 @@ object AlbumApi:
         case CreateAlbumResult.YearAlreadyUsed => BadRequest(Map("message" -> "An album already exists for that year"))
         case CreateAlbumResult.Failed          => respondServiceFailure
       }.recoverWith { case _: MessageBodyFailure => BadRequest(invalidYear) }
-
-    private def get(id: AlbumId) =
-      albums.get(id).flatMap:
-        case found: GetAlbumResult.Found => Ok(found)
-        case GetAlbumResult.NotFound     => respondAlbumNotFound
-        case GetAlbumResult.Failed       => respondServiceFailure
 
     private def rename(id: AlbumId, request: Request[F]) =
       request.as[AlbumTitle].flatMap(title => albums.rename(id, title)).flatMap {
@@ -89,10 +83,6 @@ object AlbumApi:
 
     private given Encoder[Album] = Encoder.forProduct4("id", "year", "title", "createdAt"): album =>
       (album.id.value.toString, album.year: Int, album.title: String, album.createdAt.toString)
-
-    private given Encoder[GetAlbumResult.Found] = Encoder.forProduct5("id", "year", "title", "synopsis", "createdAt"): found =>
-      val album = found.album
-      (album.id.value.toString, album.year: Int, album.title: String, album.synopsis, album.createdAt.toString)
 
     private given Encoder[AlbumPage] = Encoder.forProduct5("albums", "page", "pageSize", "totalAlbums", "totalPages"): page =>
       (page.albums, page.page, page.pageSize, page.totalAlbums, page.totalPages)

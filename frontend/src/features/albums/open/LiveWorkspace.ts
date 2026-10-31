@@ -5,7 +5,7 @@ import type { Workspace } from "../model/Workspace";
 
 export function createLiveWorkspace(
   albumId: Accessor<string>,
-  client: Pick<AlbumClient, "open" | "workspace" | "chapterPhotos" | "refreshPhotos">,
+  client: Pick<AlbumClient, "open" | "chapters" | "composition" | "spread" | "countries" | "photoSource" | "chapterPhotos" | "refreshPhotos">,
   events: AlbumPhotoEvents,
 ) {
   const [album, setAlbum] = createSignal<Album>();
@@ -68,8 +68,29 @@ export function createLiveWorkspace(
             epoch++;
             for (const chapter of chapters.values()) chapter.dirty = false;
             try {
-              const [metadata, snapshot] = await Promise.all([album() ?? readAlbum(), client.workspace(id, controller.signal)]);
+              const [metadata, orderedChapters, composition, countries, photoRoot] = await Promise.all([
+                album() ?? readAlbum(),
+                client.chapters(id, controller.signal),
+                client.composition(id, controller.signal),
+                client.countries(controller.signal),
+                client.photoSource(controller.signal),
+              ]);
               if (!active) return;
+              const [spreads, inventories] = await Promise.all([
+                Promise.all(composition.map((member) => client.spread(id, member.id, member.chapter, controller.signal))),
+                Promise.all(orderedChapters.map(async (chapter) => [chapter.id, await client.chapterPhotos(chapter.id, controller.signal)] as const)),
+              ]);
+              const snapshot: Workspace = {
+                year: metadata.year,
+                chapters: orderedChapters,
+                countries,
+                photoRoot,
+                spreads,
+                photoInventories: Object.fromEntries(inventories),
+              };
+              if (new Set(orderedChapters.map((chapter) => chapter.id)).size !== orderedChapters.length)
+                throw new Error("Duplicate chapter identities");
+              if (controller.signal.aborted) return;
               setAlbum(metadata);
               setWorkspace(snapshot);
               setInventoryErrors({});

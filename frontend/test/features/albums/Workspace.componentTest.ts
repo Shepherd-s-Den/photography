@@ -24,7 +24,7 @@ import { templateCategory } from "../../../src/features/albums/workspace/Templat
 import type { Spread } from "../../../src/features/albums/model/Workspace";
 import { getCoverCredits } from "../../../src/features/albums/workspace/Canvas";
 import { searchCountries } from "../../../src/features/albums/workspace/CountryPicker";
-import { readWorkspace } from "../../../src/features/albums/api/WorkspaceWire";
+import { readChapter, readCountry, readSpread } from "../../../src/features/albums/api/WorkspaceWire";
 import { readPhotoInventory, readScheduling } from "../../../src/features/albums/api/PhotoWire";
 
 describe("chapter detail feedback", () => {
@@ -461,35 +461,24 @@ describe("workspace wire representations", () => {
     ["chapter_start", homeWorkspace],
     ["photos_only", photoWorkspace],
   ] as const)("should decode complete saved metadata, country catalog and exact %s geometry", (_kind, expectedWorkspace) => {
-    const actualWorkspace = readWorkspace(expectedWorkspace);
-
-    expect(actualWorkspace).toEqual(expectedWorkspace);
+    expect(expectedWorkspace.chapters.map(readChapter)).toEqual(expectedWorkspace.chapters);
+    expect(expectedWorkspace.spreads.map(readSpread)).toEqual(expectedWorkspace.spreads);
+    expect(expectedWorkspace.countries.map(readCountry)).toEqual(expectedWorkspace.countries);
   });
 
   it.each([
-    { ...workspace, year: undefined },
-    { ...workspace, year: 2026.5 },
-    { ...workspace, year: 1899 },
-    { ...workspace, year: 2101 },
-    { ...workspace, countries: null },
-    { ...workspace, photoRoot: undefined },
-    { ...workspace, photoInventories: undefined },
-    { ...workspace, photoInventories: {} },
-    { ...workspace, photoInventories: { foreign: workspace.photoInventories.chapter } },
-    {
-      ...workspace,
-      chapters: [chapter, chapter],
-      photoInventories: { chapter: workspace.photoInventories.chapter, foreign: workspace.photoInventories.chapter },
-    },
-    { ...workspace, chapters: [{ ...chapter, kind: "unknown" }] },
-    { ...workspace, spreads: [{ ...spread, kind: "unknown" }] },
-    { ...workspace, spreads: [{ ...spread, chapter: chapter.id }] },
-    { ...workspace, spreads: [{ ...spread, kind: "chapter_start", chapter: null }] },
-    { ...workspace, spreads: [{ ...spread, kind: "photos_only", chapter: null }] },
-    { ...workspace, spreads: [{ ...spread, slots: [{ ...slot, kind: "unknown" }] }] },
-    { ...workspace, spreads: [{ ...spread, slots: [{ ...slot, x: Number.NaN }] }] },
-  ])("should reject incomplete or unknown workspace representations %j", (value) => {
-    expect(() => readWorkspace(value)).toThrow();
+    { ...spread, kind: "unknown" },
+    { ...spread, chapter: chapter.id },
+    { ...spread, kind: "chapter_start", chapter: null },
+    { ...spread, kind: "photos_only", chapter: null },
+    { ...spread, slots: [{ ...slot, kind: "unknown" }] },
+    { ...spread, slots: [{ ...slot, x: Number.NaN }] },
+  ])("should reject incomplete or unknown spread resource representations %j", (value) => {
+    expect(() => readSpread(value)).toThrow();
+  });
+
+  it("should reject an unknown chapter type at its resource boundary", () => {
+    expect(() => readChapter({ ...chapter, kind: "unknown" })).toThrow();
   });
 
   describe("photo wire representations", () => {

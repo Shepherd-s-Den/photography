@@ -4,6 +4,7 @@ import { App } from "../../src/app/App";
 import { AlbumRequestError, type AlbumClient, type AlbumPage, type AlbumSummary } from "../../src/features/albums/model/Album";
 import type { PlacementContext, PlacementSnapshot } from "../../src/features/albums/model/Placement";
 import type { AlbumPhotoEvents, PhotoEvent } from "../../src/features/albums/model/Photo";
+import { resourceFixture, type SnapshotClient } from "../features/albums/WorkspaceResources";
 
 const events: AlbumPhotoEvents = {
   subscribe: (_id, receive) => {
@@ -419,8 +420,8 @@ describe("album dashboard and open", () => {
   });
 });
 
-function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
-  return {
+function buildClient(overrides: Partial<SnapshotClient> = {}): SnapshotClient & AlbumClient {
+  const client: SnapshotClient = {
     readPlacements: vi
       .fn()
       .mockImplementation((_album: string, context: PlacementContext): Promise<PlacementSnapshot> =>
@@ -458,9 +459,10 @@ function buildClient(overrides: Partial<AlbumClient> = {}): AlbumClient {
     refreshPhotos: vi.fn(),
     templates: vi.fn().mockResolvedValue([]),
     addSpread: vi.fn(),
-    moveSpread: vi.fn(),
+    replaceChapterComposition: vi.fn(),
     changeSpreadTemplate: vi.fn(),
     deleteSpread: vi.fn(),
     ...overrides,
   };
+  return { ...client, ...resourceFixture(client) };
 }

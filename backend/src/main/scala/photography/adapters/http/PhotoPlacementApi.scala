@@ -4,7 +4,8 @@ import cats.effect.Async
 import cats.syntax.all.*
 import io.circe.{Decoder, DecodingFailure, HCursor, Json}
 import io.github.iltotore.iron.*
-import org.http4s.{HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.{CacheDirective, HttpRoutes, MessageBodyFailure, Request}
+import org.http4s.headers.`Cache-Control`
 import org.http4s.circe.CirceEntityCodec.*
 import org.http4s.dsl.Http4sDsl
 import photography.domain.album.{AlbumId, PhotoId}
@@ -20,23 +21,36 @@ object PhotoPlacementApi:
 
   final private class LivePhotoPlacementApi[F[_]: Async](spreads: SpreadManager[F], covers: CoverManager[F]) extends Http4sDsl[F]:
     def routes: HttpRoutes[F] = HttpRoutes.of[F] {
-      case GET -> Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) / "placements" =>
+      case GET -> Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) =>
         spreads.readPlacements(AlbumId(album), SpreadId(spread)).flatMap:
-          case SpreadManager.PlacementReadResult.Found(value)   => Ok(encodeSpread(value))
+          case SpreadManager.PlacementReadResult.Found(value) => Ok(encodeSpread(value)).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
           case SpreadManager.PlacementReadResult.AlbumNotFound  => NotFound(Map("code" -> "album_not_found"))
           case SpreadManager.PlacementReadResult.SpreadNotFound => NotFound(Map("code" -> "spread_not_found"))
           case SpreadManager.PlacementReadResult.Failed         => InternalServerError(Map("code" -> "service_failure"))
       case request @ POST -> Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) / "placements" =>
-        decode(request, buildSpreadDecoder).flatMap:
+        decode(request, spreadPlaceDecoder).flatMap:
           case Left(message) => BadRequest(Map("message" -> message))
           case Right(edit)   => spreads.editPlacements(AlbumId(album), SpreadId(spread), edit).flatMap(encodeSpreadResult)
-      case GET -> Root / "api" / "albums" / CanonicalId(album) / "cover" / "placements" =>
+      case DELETE -> Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) / "placements" / CanonicalId(placement) =>
+        spreads.editPlacements(AlbumId(album), SpreadId(spread), SpreadManager.Edit.Remove(SpreadPlacementId(placement))).flatMap(encodeSpreadResult)
+      case request @ PATCH ->
+          Root / "api" / "albums" / CanonicalId(album) / "spreads" / CanonicalId(spread) / "placements" / CanonicalId(placement) =>
+        decode(request, spreadUpdateDecoder(placement)).flatMap:
+          case Left(message) => BadRequest(Map("message" -> message))
+          case Right(edit)   => spreads.editPlacements(AlbumId(album), SpreadId(spread), edit).flatMap(encodeSpreadResult)
+      case GET -> Root / "api" / "albums" / CanonicalId(album) / "cover" =>
         covers.read(AlbumId(album)).flatMap:
-          case CoverManager.ReadResult.Found(value)  => Ok(encodeCover(value))
+          case CoverManager.ReadResult.Found(value)  => Ok(encodeCover(value)).map(_.putHeaders(`Cache-Control`(CacheDirective.`no-store`)))
           case CoverManager.ReadResult.CoverNotFound => NotFound(Map("code" -> "cover_not_found"))
           case CoverManager.ReadResult.Failed        => InternalServerError(Map("code" -> "service_failure"))
       case request @ POST -> Root / "api" / "albums" / CanonicalId(album) / "cover" / "placements" =>
-        decode(request, buildCoverDecoder).flatMap:
+        decode(request, coverPlaceDecoder).flatMap:
+          case Left(message) => BadRequest(Map("message" -> message))
+          case Right(edit)   => covers.edit(AlbumId(album), edit).flatMap(encodeCoverResult)
+      case DELETE -> Root / "api" / "albums" / CanonicalId(album) / "cover" / "placements" / CanonicalId(placement) =>
+        covers.edit(AlbumId(album), CoverManager.Edit.Remove(CoverPlacementId(placement))).flatMap(encodeCoverResult)
+      case request @ PATCH -> Root / "api" / "albums" / CanonicalId(album) / "cover" / "placements" / CanonicalId(placement) =>
+        decode(request, coverUpdateDecoder(placement)).flatMap:
           case Left(message) => BadRequest(Map("message" -> message))
           case Right(edit)   => covers.edit(AlbumId(album), edit).flatMap(encodeCoverResult)
     }
@@ -72,35 +86,35 @@ object PhotoPlacementApi:
       request.as[Json].map(value => decoder.decodeJson(value).leftMap(_.getMessage))
         .recover { case _: MessageBodyFailure => "Supply a valid JSON placement request".asLeft[A] }
 
-    private def buildSpreadDecoder = Decoder.instance[SpreadManager.Edit]: cursor =>
-      cursor.get[String]("operation").flatMap:
-        case "place" => (decodeId(cursor, field = "slotId"), decodeId(cursor, field = "photoId")).mapN { (slot, photo) =>
-            SpreadManager.Edit.Place(PhotoSpreadSlotId(slot), PhotoId(photo))
-          }
-        case "remove" => decodeId(cursor, field = "placementId").map(id => SpreadManager.Edit.Remove(SpreadPlacementId(id)))
-        case "adjust" =>
-          (decodeId(cursor, field = "placementId"), cursor.get[PhotoTransform]("transform")(using buildTransformDecoder)).mapN { (id, transform) =>
-            SpreadManager.Edit.Adjust(SpreadPlacementId(id), transform)
-          }
-        case "move" => (decodeId(cursor, field = "placementId"), decodeId(cursor, field = "slotId")).mapN { (source, slot) =>
-            SpreadManager.Edit.Move(SpreadPlacementId(source), PhotoSpreadSlotId(slot))
-          }
-        case _ => DecodingFailure("Choose a placement operation", cursor.history).asLeft[SpreadManager.Edit]
+    private def spreadPlaceDecoder = Decoder.instance[SpreadManager.Edit]: cursor =>
+      validateCreation(cursor) >> (decodeId(cursor, field = "slotId"), decodeId(cursor, field = "photoId")).mapN { (slot, photo) =>
+        SpreadManager.Edit.Place(PhotoSpreadSlotId(slot), PhotoId(photo))
+      }
+    private def spreadUpdateDecoder(id: UUID) = Decoder.instance[SpreadManager.Edit]: cursor =>
+      if cursor.keys.exists(_.toSet === Set("slotId")) then
+        decodeId(cursor, field = "slotId").map(slot => SpreadManager.Edit.Move(SpreadPlacementId(id), PhotoSpreadSlotId(slot)))
+      else if cursor.keys.exists(_.toSet === Set("transform")) then
+        cursor.get[PhotoTransform]("transform")(using buildTransformDecoder).map(transform =>
+          SpreadManager.Edit.Adjust(SpreadPlacementId(id), transform)
+        )
+      else DecodingFailure("Supply either slotId or transform", cursor.history).asLeft
 
-    private def buildCoverDecoder = Decoder.instance[CoverManager.Edit]: cursor =>
-      cursor.get[String]("operation").flatMap:
-        case "place" => (decodeId(cursor, field = "slotId"), decodeId(cursor, field = "photoId")).mapN { (slot, photo) =>
-            CoverManager.Edit.Place(CoverSlotId(slot), PhotoId(photo))
-          }
-        case "remove" => decodeId(cursor, field = "placementId").map(id => CoverManager.Edit.Remove(CoverPlacementId(id)))
-        case "adjust" =>
-          (decodeId(cursor, field = "placementId"), cursor.get[PhotoTransform]("transform")(using buildTransformDecoder)).mapN { (id, transform) =>
-            CoverManager.Edit.Adjust(CoverPlacementId(id), transform)
-          }
-        case "move" => (decodeId(cursor, field = "placementId"), decodeId(cursor, field = "slotId")).mapN { (source, slot) =>
-            CoverManager.Edit.Move(CoverPlacementId(source), CoverSlotId(slot))
-          }
-        case _ => DecodingFailure("Choose a placement operation", cursor.history).asLeft[CoverManager.Edit]
+    private def coverPlaceDecoder = Decoder.instance[CoverManager.Edit]: cursor =>
+      validateCreation(cursor) >> (decodeId(cursor, field = "slotId"), decodeId(cursor, field = "photoId")).mapN { (slot, photo) =>
+        CoverManager.Edit.Place(CoverSlotId(slot), PhotoId(photo))
+      }
+
+    private def coverUpdateDecoder(id: UUID) = Decoder.instance[CoverManager.Edit]: cursor =>
+      if cursor.keys.exists(_.toSet === Set("slotId")) then
+        decodeId(cursor, field = "slotId").map(slot => CoverManager.Edit.Move(CoverPlacementId(id), CoverSlotId(slot)))
+      else if cursor.keys.exists(_.toSet === Set("transform")) then
+        cursor.get[PhotoTransform]("transform")(using buildTransformDecoder).map(transform =>
+          CoverManager.Edit.Adjust(CoverPlacementId(id), transform)
+        )
+      else DecodingFailure("Supply either slotId or transform", cursor.history).asLeft
+
+    private def validateCreation(cursor: HCursor) =
+      Either.cond(cursor.keys.exists(_.toSet === Set("slotId", "photoId")), (), DecodingFailure("Supply slotId and photoId", cursor.history))
 
     private def buildTransformDecoder = Decoder.instance[PhotoTransform]: cursor =>
       for
@@ -120,7 +134,27 @@ object PhotoPlacementApi:
       val placements = spread.placements.map: value =>
         encodePlacement(id = value.id.value, slot = value.slot.value, value.photo, value.transform)
           .deepMerge(Json.obj("captionCorner" -> Json.fromString(encodeCorner(value.captionCorner))))
-      Json.obj("id" -> Json.fromString(spread.id.value.toString), "placements" -> Json.arr(placements*))
+      val (kind, photos, text) = spread match
+        case value: Spread.AlbumStart   => ("album_start", value.photoSlots, Some(value.textSlot))
+        case value: Spread.ChapterStart => ("chapter_start", value.photoSlots, Some(value.textSlot))
+        case value: Spread.PhotosOnly   => ("photos_only", value.photoSlots.toList.toVector, None)
+      def slot(id: UUID, kind: String, box: SlotBox) = Json.obj(
+        "id"     -> Json.fromString(id.toString),
+        "kind"   -> Json.fromString(kind),
+        "x"      -> Json.fromDoubleOrNull(box.x),
+        "y"      -> Json.fromDoubleOrNull(box.y),
+        "width"  -> Json.fromDoubleOrNull(box.width),
+        "height" -> Json.fromDoubleOrNull(box.height)
+      )
+      val slots = photos.map(value => slot(value.id.value, "photo", value.box)) ++
+        text.toList.toVector.map(value => slot(value.id.value, "text", value.box))
+      Json.obj(
+        "id"         -> Json.fromString(spread.id.value.toString),
+        "kind"       -> Json.fromString(kind),
+        "templateId" -> Json.fromString(spread.template.value.toString),
+        "slots"      -> Json.arr(slots*),
+        "placements" -> Json.arr(placements*)
+      )
 
     private def encodeCorner(corner: CaptionCorner) = corner match
       case CaptionCorner.TopLeft     => "top_left"

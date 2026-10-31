@@ -1,6 +1,6 @@
 package photography.usecases.photo
 
-import photography.usecases.album.AlbumManager
+import photography.ports.album.AlbumResources
 
 import cats.effect.{Deferred, IO, Ref}
 import cats.effect.std.Queue
@@ -11,8 +11,6 @@ import org.typelevel.log4cats.Logger
 import org.typelevel.log4cats.slf4j.Slf4jLogger
 import photography.capabilities.IdGenerator
 import photography.domain.album.*
-import photography.domain.layout.*
-import photography.usecases.album.AlbumManager.*
 import photography.usecases.photo.AlbumPhotoEvents.{Event, SubscribeResult}
 import java.util.UUID
 import java.time.Instant
@@ -26,30 +24,27 @@ final class AlbumPhotoEventsComponentTest extends CatsEffectSuite:
   private val album   = AlbumId(new UUID(0L, 1L))
   private val chapter = ChapterId(new UUID(0L, 2L))
   private val other   = ChapterId(new UUID(0L, 3L))
-  private val saved   =
-    val text    = SpreadSlot.Text(TextSpreadSlotId(new UUID(0L, 4L)), SlotBox(x = 0.0, y = 0.0, width = 1.0, height = 1.0))
-    val opening = Spread.AlbumStart(
-      SpreadId(new UUID(0L, 5L)),
-      SpreadTemplateId(new UUID(0L, 6L)),
-      photoSlots = Vector.empty[SpreadSlot.Photo],
-      text,
-      placements = Vector.empty[SpreadPlacement]
-    )
-    Album(album, year = 2026, title = "Delivery", synopsis = "", authors = Author.all, Instant.EPOCH, opening, chapters = Vector.empty[Chapter])
+  private val saved   = AlbumResources.Metadata(album, year = 2026, title = "Delivery", synopsis = "", Instant.EPOCH)
 
   test("should validate albums before creating streams and expose lookup failures"):
-    Vector(GetAlbumResult.NotFound -> SubscribeResult.AlbumNotFound[IO](), GetAlbumResult.Failed -> SubscribeResult.Failed[IO]()).traverse_ {
+    Vector(
+      none[AlbumResources.Metadata].asRight[AlbumResources.Failure]              -> SubscribeResult.AlbumNotFound[IO](),
+      AlbumResources.Failure.Unavailable.asLeft[Option[AlbumResources.Metadata]] -> SubscribeResult.Failed[IO]()
+    ).traverse_ {
       case (result, expected) =>
         for
           events     <- AlbumPhotoEvents.make(buildAlbums(result.pure[IO]))
           subscribed <- events.subscribe(album)
         yield assertEquals(subscribed, expected)
-    } >> AlbumPhotoEvents.make(buildAlbums(IO.raiseError[GetAlbumResult](new IllegalStateException("lookup")))).flatMap(_.subscribe(album))
+    } >> AlbumPhotoEvents.make(buildAlbums(IO.raiseError[Either[
+      AlbumResources.Failure,
+      Option[AlbumResources.Metadata]
+    ]](new IllegalStateException("lookup")))).flatMap(_.subscribe(album))
       .map(result => assertEquals(result, SubscribeResult.Failed[IO]()))
 
   test("should register before acknowledgement, coalesce chapter changes, isolate albums and release canceled subscribers"):
     for
-      events       <- AlbumPhotoEvents.make(buildAlbums(GetAlbumResult.Found(saved).pure[IO]))
+      events       <- AlbumPhotoEvents.make(buildAlbums(saved.some.asRight[AlbumResources.Failure].pure[IO]))
       stream       <- events.subscribe(album)
       received     <- Queue.unbounded[IO, Event]
       acknowledged <- Deferred[IO, Unit]
@@ -77,7 +72,7 @@ final class AlbumPhotoEventsComponentTest extends CatsEffectSuite:
 
   test("should keep a fast subscriber responsive while another is blocked and after it disconnects"):
     for
-      events          <- AlbumPhotoEvents.make(buildAlbums(GetAlbumResult.Found(saved).pure[IO]))
+      events          <- AlbumPhotoEvents.make(buildAlbums(saved.some.asRight[AlbumResources.Failure].pure[IO]))
       slow            <- events.subscribe(album)
       fast            <- events.subscribe(album)
       blocked         <- Deferred[IO, Unit]
@@ -103,14 +98,10 @@ final class AlbumPhotoEventsComponentTest extends CatsEffectSuite:
     case SubscribeResult.Opened(events) => events
     case _                              => Stream.raiseError[IO](new AssertionError("Expected subscription"))
 
-  private def buildAlbums(response: IO[GetAlbumResult]) =
-    new AlbumManager[IO]:
-      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
-        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
-      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
-        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
-      override def get(id: AlbumId): IO[GetAlbumResult]                              = response
-      override def list(page: Int): IO[ListAlbumsResult]                             = ListAlbumsResult.Failed.pure[IO]
-      override def create(year: AlbumYear, title: AlbumTitle): IO[CreateAlbumResult] = CreateAlbumResult.Failed.pure[IO]
-      override def rename(id: AlbumId, title: AlbumTitle): IO[RenameResult]          = RenameResult.Failed.pure[IO]
-      override def delete(id: AlbumId): IO[DeleteAlbumResult]                        = DeleteAlbumResult.Failed.pure[IO]
+  private def buildAlbums(response: IO[Either[AlbumResources.Failure, Option[AlbumResources.Metadata]]]) =
+    new AlbumResources[IO]:
+      override def metadata(id: AlbumId): IO[Either[AlbumResources.Failure, Option[AlbumResources.Metadata]]]                = response
+      override def chapters(id: AlbumId): IO[Either[AlbumResources.Failure, Option[Vector[AlbumResources.ChapterMetadata]]]] =
+        IO.raiseError[Either[AlbumResources.Failure, Option[Vector[AlbumResources.ChapterMetadata]]]](new AssertionError("Unexpected chapter read"))
+      override def composition(id: AlbumId): IO[Either[AlbumResources.Failure, Option[Vector[AlbumResources.Member]]]] =
+        IO.raiseError[Either[AlbumResources.Failure, Option[Vector[AlbumResources.Member]]]](new AssertionError("Unexpected composition read"))

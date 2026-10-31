@@ -9,7 +9,14 @@ import { ChapterOutline, getChapterCapacityReason } from "./ChapterOutline";
 import { ChapterMetadata } from "./ChapterMetadata";
 import { CoverCanvas, SpreadCanvas, coverAspectRatio, spreadAspectRatio } from "./Canvas";
 import { FullscreenReader } from "./FullscreenReader";
-import { findDeletionSelection, findReaderNavigation, findSelection, findSpreadNavigation, findSpreadPosition } from "./WorkspaceSelection";
+import {
+  buildChapterReorder,
+  findDeletionSelection,
+  findReaderNavigation,
+  findSelection,
+  findSpreadNavigation,
+  findSpreadPosition,
+} from "./WorkspaceSelection";
 import "./workspace.css";
 import { TemplateSelector } from "./TemplateSelector";
 import { SpreadConfirmation } from "./SpreadConfirmation";
@@ -34,7 +41,7 @@ export function AlbumWorkspace(props: {
     | "updateChapter"
     | "templates"
     | "addSpread"
-    | "moveSpread"
+    | "replaceChapterComposition"
     | "changeSpreadTemplate"
     | "deleteSpread"
     | "readPlacements"
@@ -59,7 +66,7 @@ export function AlbumWorkspace(props: {
   const [spreadPending, setSpreadPending] = createSignal(false);
   const [spreadError, setSpreadError] = createSignal<string>();
   const [failedAction, setFailedAction] = createSignal<SpreadAction>();
-  const [spreadUncertain, setSpreadUncertain] = createSignal(false);
+  const [spreadNeedsReload, setSpreadNeedsReload] = createSignal(false);
   const [confirmation, setConfirmation] = createSignal<{ action: SpreadAction; placements: number }>();
   const [reloadTarget, setReloadTarget] = createSignal<{ destination: SpreadDestination; opener: HTMLButtonElement }>();
   const [choice, setChoice] = createSignal<PhotoChoice>();
@@ -117,7 +124,7 @@ export function AlbumWorkspace(props: {
     reader: reader(),
   }));
   const navigationReason = createMemo(() =>
-    spreadUncertain() ? "Reload the saved workspace before choosing another spread action." : placement.navigationReason(),
+    spreadNeedsReload() ? "Reload the saved workspace before choosing another spread action." : placement.navigationReason(),
   );
   const refreshReason = createMemo(() =>
     spreadPending()
@@ -246,8 +253,10 @@ export function AlbumWorkspace(props: {
       let destination: SpreadDestination = { kind: "part", part: part() };
       if (action.kind === "add")
         destination = { kind: "part", part: await props.client.addSpread(props.album.id, action.chapterId, action.spreadId) };
-      else if (action.kind === "move") await props.client.moveSpread(props.album.id, action.spreadId, action.direction);
-      else if (action.kind === "template")
+      else if (action.kind === "move") {
+        const replacement = buildChapterReorder(props.workspace.spreads, action.spreadId, action.direction);
+        await props.client.replaceChapterComposition(props.album.id, replacement.chapter, replacement.expectedSpreadIds, replacement.spreadIds);
+      } else if (action.kind === "template")
         await props.client.changeSpreadTemplate(props.album.id, action.spreadId, action.templateId, confirmPlacements);
       else {
         await props.client.deleteSpread(props.album.id, action.spreadId, confirmPlacements);
@@ -263,10 +272,15 @@ export function AlbumWorkspace(props: {
       else {
         setSpreadError(describeFailure(failure));
         setFailedAction(action);
-        if (!(failure instanceof AlbumRequestError) || failure.status >= 500) {
-          setSpreadUncertain(true);
+        const changed = failure instanceof AlbumRequestError && failure.status === 409;
+        if (changed || !(failure instanceof AlbumRequestError) || failure.status >= 500) {
+          setSpreadNeedsReload(true);
           setConfirmation(undefined);
-          setSpreadError("Spread outcome is uncertain. Reload saved workspace before choosing the action again.");
+          setSpreadError(
+            changed
+              ? "This chapter's composition changed. Reload saved workspace before choosing the action again."
+              : "Spread outcome is uncertain. Reload saved workspace before choosing the action again.",
+          );
         }
       }
     } finally {
@@ -396,10 +410,10 @@ export function AlbumWorkspace(props: {
                 void reloadSpread();
                 return;
               }
-              if (spreadUncertain()) {
+              if (spreadNeedsReload()) {
                 void refresh().then(() => {
                   if (props.workspaceError === undefined) {
-                    setSpreadUncertain(false);
+                    setSpreadNeedsReload(false);
                     setFailedAction(undefined);
                     setSpreadError(undefined);
                   }
@@ -411,7 +425,7 @@ export function AlbumWorkspace(props: {
               if (action !== undefined) void mutateSpread(action);
             }}
           >
-            {spreadUncertain() ? "Reload saved workspace" : reloadTarget() === undefined ? "Retry spread action" : "Retry workspace"}
+            {spreadNeedsReload() ? "Reload saved workspace" : reloadTarget() === undefined ? "Retry spread action" : "Retry workspace"}
           </button>
         </p>
       </Show>

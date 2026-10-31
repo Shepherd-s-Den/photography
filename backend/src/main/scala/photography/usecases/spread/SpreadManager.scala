@@ -17,11 +17,11 @@ import photography.ports.album.AlbumCompositionRepository.Located
 import photography.syntax.EitherSyntax.*
 import photography.syntax.EitherSyntax.Pure.*
 import photography.usecases.spread.SpreadManager.*
-import photography.usecases.spread.SpreadTemplateManager.FindTemplateResult
+import photography.ports.spread.SpreadTemplateRepository
+import photography.ports.spread.SpreadTemplateRepository.FindTemplateResult
 
 trait SpreadManager[F[_]]:
   def add(album: AlbumId, chapter: ChapterId, after: SpreadId): F[AddResult]
-  def move(album: AlbumId, spread: SpreadId, direction: Direction): F[MoveResult]
   def changeTemplate(album: AlbumId, spread: SpreadId, template: SpreadTemplateId, confirmPlacements: Boolean): F[ChangeTemplateResult]
   def delete(album: AlbumId, spread: SpreadId, confirmPlacements: Boolean): F[DeleteResult]
   def readPlacements(album: AlbumId, spread: SpreadId): F[PlacementReadResult]
@@ -29,7 +29,7 @@ trait SpreadManager[F[_]]:
 
 object SpreadManager:
   def make[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
-      templates: SpreadTemplateManager[F],
+      templates: SpreadTemplateRepository[F],
       composition: AlbumCompositionRepository[Db],
       spreads: SpreadRepository[Db],
       placements: PhotoPlacementRepository[Db],
@@ -38,7 +38,7 @@ object SpreadManager:
     new LiveSpreadManager(templates, composition, spreads, placements, defaultPhotoLayout)
 
   final private class LiveSpreadManager[F[_]: MonadCancelThrow: IdGenerator: Mutex: Logger, Db[_]: MonadThrow](
-      templates: SpreadTemplateManager[F],
+      templates: SpreadTemplateRepository[F],
       composition: AlbumCompositionRepository[Db],
       spreads: SpreadRepository[Db],
       placements: PhotoPlacementRepository[Db],
@@ -63,18 +63,6 @@ object SpreadManager:
               Transaction[Db, F].run(mutation.merge)
           case _ => AddResult.Failed.pure[F]
 
-    override def move(album: AlbumId, spread: SpreadId, direction: Direction): F[MoveResult] =
-      val mutation =
-        for
-          _       <- composition.hasAlbum(album).map(Either.cond(_, (), MoveResult.AlbumNotFound: MoveResult)).eitherT
-          target  <- composition.findSpread(album, spread).orFail(ifEmpty = MoveResult.SpreadNotFound: MoveResult)
-          photo   <- findPhoto(target).orFail[Db, MoveResult](ifEmpty = MoveResult.Rejected(Conflict.OpeningMove))
-          order   <- composition.findChapterOrder(album, photo.chapter).orFail(ifEmpty = MoveResult.SpreadNotFound: MoveResult)
-          swapped <- swapNeighbour(order = order, spread, direction).orFail[Db, MoveResult](ifEmpty = MoveResult.Rejected(Conflict.NoNeighbour))
-          _       <- spreads.reorder(photo.chapter, order = swapped).lift[MoveResult]
-        yield MoveResult.Moved(spread): MoveResult
-      act[MoveResult](MoveResult.Failed)(Transaction[Db, F].run(mutation.merge))
-
     override def changeTemplate(
         album: AlbumId,
         spread: SpreadId,
@@ -95,8 +83,8 @@ object SpreadManager:
                   _ <- spreads.replace(fresh).lift[ChangeTemplateResult]
                 yield ChangeTemplateResult.Changed(spread, template): ChangeTemplateResult
               Transaction[Db, F].run(mutation.merge)
-          case FindTemplateResult.NotFound => (ChangeTemplateResult.Rejected(Conflict.UnknownTemplate): ChangeTemplateResult).pure[F]
-          case FindTemplateResult.Failed   => (ChangeTemplateResult.Failed: ChangeTemplateResult).pure[F]
+          case FindTemplateResult.NotFound  => (ChangeTemplateResult.Rejected(Conflict.UnknownTemplate): ChangeTemplateResult).pure[F]
+          case FindTemplateResult.Failed(_) => (ChangeTemplateResult.Failed: ChangeTemplateResult).pure[F]
 
     override def delete(album: AlbumId, spread: SpreadId, confirmPlacements: Boolean): F[DeleteResult] =
       val mutation =
@@ -235,18 +223,6 @@ object SpreadManager:
       val index = order.toList.indexWhere(_.value === after.value)
       Option.when(index >= 0)(NonEmptyList(order.head, tail = order.tail.patch(index, List(fresh), 0)))
 
-    private def swapNeighbour(order: NonEmptyList[SpreadId], spread: SpreadId, direction: Direction) =
-      val photos    = order.tail
-      val index     = photos.indexWhere(_.value === spread.value)
-      val neighbour = direction match
-        case Direction.Earlier => index - 1
-        case Direction.Later   => index + 1
-      photos.lift(neighbour).map: other =>
-        val swapped = photos.zipWithIndex.map { case (id, position) =>
-          if position === index then other else if position === neighbour then spread else id
-        }
-        NonEmptyList(order.head, tail = swapped)
-
     private def removeFromOrder(order: NonEmptyList[SpreadId], spread: SpreadId) =
       NonEmptyList(order.head, tail = order.tail.filterNot(_.value === spread.value))
 
@@ -303,9 +279,6 @@ object SpreadManager:
 
     private val untouched = PhotoTransform(Shift(x = 0.0, y = 0.0), mirrored = false, zoom = 1.0)
 
-  enum Direction derives CanEqual:
-    case Earlier, Later
-
   enum Edit:
     case Place(slot: PhotoSpreadSlotId, photo: PhotoId)
     case Remove(id: SpreadPlacementId)
@@ -326,17 +299,12 @@ object SpreadManager:
     case PhotoNotInCollection, PhotoAlreadyUsed, SlotNotFound, PlacementNotFound, InvalidTransform
 
   enum Conflict derives CanEqual:
-    case AtCapacity, AddTarget, ContextMismatch, OpeningMove, OpeningDelete, NoNeighbour, UnknownTemplate
+    case AtCapacity, AddTarget, ContextMismatch, OpeningDelete, UnknownTemplate
 
   enum AddResult derives CanEqual:
     case Added(id: SpreadId)
     case Rejected(conflict: Conflict)
     case AlbumNotFound, ChapterNotFound, SpreadNotFound, Failed
-
-  enum MoveResult derives CanEqual:
-    case Moved(id: SpreadId)
-    case Rejected(conflict: Conflict)
-    case AlbumNotFound, SpreadNotFound, Failed
 
   enum ChangeTemplateResult derives CanEqual:
     case Changed(id: SpreadId, template: SpreadTemplateId)
