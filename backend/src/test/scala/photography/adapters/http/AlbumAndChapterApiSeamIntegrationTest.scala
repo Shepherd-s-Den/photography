@@ -1,5 +1,9 @@
 package photography.adapters.http
 
+import photography.usecases.photo.AlbumPhotoEvents
+import photography.usecases.chapter.ChapterManager
+import photography.domain.gear.GearSelection
+
 import cats.data.NonEmptyList
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
@@ -26,7 +30,7 @@ import java.nio.file.Path
 import java.time.{Instant, LocalDate, LocalDateTime}
 import java.util.UUID
 
-final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
+final class AlbumAndChapterApiSeamIntegrationTest extends CatsEffectSuite:
   private val country      = Country(CountryId(new UUID(0L, 8L)), code = "RO", name = "Romania", AbsoluteLocation(Path.of("/flags/ro.svg")))
   private val otherCountry = country.copy(id = CountryId(new UUID(0L, 9L)), code = "JP", name = "Japan")
   private val box          = SlotBox(x = 10.0, y = 20.0, width = 30.0, height = 40.0)
@@ -488,7 +492,7 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
       ) =
         val call = s"update:${id.value}:${target.value}:$name|$period|$folder|${countries.toList.map(_.value).mkString(",")}"
         refs.calls.update(_ :+ call).as(updateResult)
-    AlbumWorkspaceApi.make(workspaces, albums, chapters).routes.orNotFound
+    (AlbumApi.make(albums, workspaces, buildUnusedEvents).routes <+> ChapterApi.make(workspaces, albums, chapters, buildUnusedGear).routes).orNotFound
   // scalafix:on DisableSyntax.defaultArgs
 
   // scalafix:off DisableSyntax.defaultArgs
@@ -508,3 +512,16 @@ final class AlbumWorkspaceApiSeamIntegrationTest extends CatsEffectSuite:
   private def json(value: String)     = parse(value).fold(error => fail(error.message), identity)
   private def hasFeedback(body: Json) =
     body.asObject.exists(_.keys.toSet === Set("message")) && body.hcursor.get[String]("message").toOption.exists(_.nonEmpty)
+
+  private def buildUnusedEvents =
+    new AlbumPhotoEvents[IO]:
+      override def subscribe(id: AlbumId): IO[AlbumPhotoEvents.SubscribeResult[IO]] =
+        IO.raiseError[AlbumPhotoEvents.SubscribeResult[IO]](new AssertionError("Unexpected event subscription"))
+      override def invalidate(id: AlbumId, chapter: ChapterId): IO[Unit] = IO.raiseError[Unit](new AssertionError("Unexpected invalidation"))
+
+  private def buildUnusedGear =
+    new ChapterManager[IO]:
+      override def readGear(album: AlbumId, chapter: ChapterId): IO[ChapterManager.GearReadResult] =
+        IO.raiseError[ChapterManager.GearReadResult](new AssertionError("Unexpected gear read"))
+      override def replaceGear(album: AlbumId, chapter: ChapterId, selection: GearSelection): IO[ChapterManager.GearReplaceResult] =
+        IO.raiseError[ChapterManager.GearReplaceResult](new AssertionError("Unexpected gear replacement"))

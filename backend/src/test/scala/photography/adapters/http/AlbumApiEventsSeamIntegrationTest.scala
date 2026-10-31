@@ -1,5 +1,8 @@
 package photography.adapters.http
 
+import photography.domain.album.{AlbumAuthors, AlbumTitle, AlbumYear}
+import photography.usecases.album.{AlbumManager, AlbumWorkspaceManager}
+
 import cats.effect.{IO, Ref, Resource}
 import cats.effect.testkit.TestControl
 import cats.syntax.all.*
@@ -12,7 +15,7 @@ import photography.usecases.photo.AlbumPhotoEvents
 import photography.usecases.photo.AlbumPhotoEvents.{Event, SubscribeResult}
 import java.util.UUID
 
-final class AlbumPhotoEventsApiSeamIntegrationTest extends CatsEffectSuite:
+final class AlbumApiEventsSeamIntegrationTest extends CatsEffectSuite:
   private val album   = AlbumId(new UUID(0L, 1L))
   private val chapter = ChapterId(new UUID(0L, 2L))
   private val uri     = Uri.unsafeFromString(s"/api/albums/${album.value}/photo-events")
@@ -24,7 +27,7 @@ final class AlbumPhotoEventsApiSeamIntegrationTest extends CatsEffectSuite:
         lifecycle = Resource.make(IO.unit)(_ => released.set(true))
         events    = Stream.resource(lifecycle) >> (Stream.emits(Vector(Event.Subscribed, Event.InventoryChanged(chapter))) ++ Stream.never[IO])
         service   = buildEvents(SubscribeResult.Opened(events))
-        response <- AlbumPhotoEventsApi.make(service).routes.orNotFound.run(Request[IO](uri = uri))
+        response <- AlbumApi.make(buildUnusedAlbums, buildUnusedWorkspaces, service).routes.orNotFound.run(Request[IO](uri = uri))
         received <- response.body.through(ServerSentEvent.decoder[IO]).take(3).compile.toVector
         closed   <- released.get
       yield
@@ -44,7 +47,7 @@ final class AlbumPhotoEventsApiSeamIntegrationTest extends CatsEffectSuite:
       SubscribeResult.AlbumNotFound[IO]() -> Status.NotFound,
       SubscribeResult.Failed[IO]()        -> Status.InternalServerError
     ).traverse_ { case (result, expected) =>
-      val app = AlbumPhotoEventsApi.make(buildEvents(result)).routes.orNotFound
+      val app = AlbumApi.make(buildUnusedAlbums, buildUnusedWorkspaces, buildEvents(result)).routes.orNotFound
 
       for
         response  <- app.run(Request[IO](uri = uri))
@@ -60,3 +63,27 @@ final class AlbumPhotoEventsApiSeamIntegrationTest extends CatsEffectSuite:
     new AlbumPhotoEvents[IO]:
       override def subscribe(id: AlbumId): IO[SubscribeResult[IO]]       = IO(assertEquals(id, album)).as(result)
       override def invalidate(id: AlbumId, chapter: ChapterId): IO[Unit] = IO.raiseError[Unit](new AssertionError("Unexpected invalidation"))
+
+  private def buildUnusedAlbums =
+    new AlbumManager[IO]:
+      override def saveSynopsis(id: AlbumId, text: String): IO[AlbumManager.SaveSynopsisResult] =
+        IO.raiseError[AlbumManager.SaveSynopsisResult](new AssertionError("Unexpected synopsis mutation"))
+      override def saveAuthors(id: AlbumId, authors: AlbumAuthors): IO[AlbumManager.SaveAuthorsResult] =
+        IO.raiseError[AlbumManager.SaveAuthorsResult](new AssertionError("Unexpected author mutation"))
+      override def get(id: AlbumId): IO[AlbumManager.GetAlbumResult] =
+        IO.raiseError[AlbumManager.GetAlbumResult](new AssertionError("Unexpected album read"))
+      override def list(page: Int): IO[AlbumManager.ListAlbumsResult] =
+        IO.raiseError[AlbumManager.ListAlbumsResult](new AssertionError("Unexpected album list"))
+      override def create(year: AlbumYear, title: AlbumTitle): IO[AlbumManager.CreateAlbumResult] =
+        IO.raiseError[AlbumManager.CreateAlbumResult](new AssertionError("Unexpected album creation"))
+      override def rename(id: AlbumId, title: AlbumTitle): IO[AlbumManager.RenameResult] =
+        IO.raiseError[AlbumManager.RenameResult](new AssertionError("Unexpected album rename"))
+      override def delete(id: AlbumId): IO[AlbumManager.DeleteAlbumResult] =
+        IO.raiseError[AlbumManager.DeleteAlbumResult](new AssertionError("Unexpected album deletion"))
+
+  private def buildUnusedWorkspaces =
+    new AlbumWorkspaceManager[IO]:
+      override def get(id: AlbumId): IO[AlbumWorkspaceManager.GetResult] =
+        IO.raiseError[AlbumWorkspaceManager.GetResult](new AssertionError("Unexpected workspace read"))
+      override def listChapter(id: ChapterId): IO[AlbumWorkspaceManager.ChapterResult] =
+        IO.raiseError[AlbumWorkspaceManager.ChapterResult](new AssertionError("Unexpected photo inventory read"))

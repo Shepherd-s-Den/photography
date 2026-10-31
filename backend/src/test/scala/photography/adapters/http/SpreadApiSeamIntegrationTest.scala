@@ -17,7 +17,7 @@ import photography.usecases.spread.SpreadManager.*
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
-final class AlbumSpreadApiSeamIntegrationTest extends CatsEffectSuite:
+final class SpreadApiSeamIntegrationTest extends CatsEffectSuite:
   private val album    = UUID.fromString("00000000-0000-0000-0000-000000000001")
   private val chapter  = UUID.fromString("00000000-0000-0000-0000-000000000002")
   private val spread   = UUID.fromString("00000000-0000-0000-0000-000000000003")
@@ -217,5 +217,5 @@ final class AlbumSpreadApiSeamIntegrationTest extends CatsEffectSuite:
         calls.update(_ :+ s"change:${album.value}:${spread.value}:${template.value}:$confirmPlacements").as(changeOutcome)
       override def delete(album: AlbumId, spread: SpreadId, confirmPlacements: Boolean): IO[DeleteResult] =
         calls.update(_ :+ s"delete:${album.value}:${spread.value}:$confirmPlacements").as(deleteOutcome)
-    AlbumSpreadApi.make(spreads).routes.orNotFound
+    SpreadApi.make(spreads).routes.orNotFound
   // scalafix:on DisableSyntax.defaultArgs

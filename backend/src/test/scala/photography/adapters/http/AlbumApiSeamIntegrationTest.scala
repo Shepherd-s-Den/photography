@@ -1,5 +1,9 @@
 package photography.adapters.http
 
+import photography.usecases.album.AlbumWorkspaceManager
+import photography.usecases.photo.AlbumPhotoEvents
+import photography.domain.album.ChapterId
+
 import cats.effect.{IO, Ref}
 import cats.syntax.all.*
 import io.circe.Json
@@ -206,7 +210,7 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
       override def rename(albumId: AlbumId, title: AlbumTitle): IO[RenameResult] =
         refs.calls.update(_ :+ s"rename:${albumId.value}:$title").as(renameResult)
       override def delete(albumId: AlbumId): IO[DeleteAlbumResult] = refs.calls.update(_ :+ s"delete:${albumId.value}").as(deleteAlbumResult)
-    AlbumApi.make(albums).routes.orNotFound
+    AlbumApi.make(albums, buildUnusedWorkspaces, buildUnusedEvents).routes.orNotFound
   // scalafix:on DisableSyntax.defaultArgs
 
   private def send(server: HttpApp[IO], method: Method, path: String, body: String) =
@@ -222,3 +226,16 @@ final class AlbumApiSeamIntegrationTest extends CatsEffectSuite:
   private def hasValidationFeedback(response: ApiResponse) =
     response.maybeBody.exists: body =>
       body.asObject.exists(_.keys.toSet === Set("message")) && body.hcursor.get[String]("message").toOption.exists(_.nonEmpty)
+
+  private def buildUnusedWorkspaces =
+    new AlbumWorkspaceManager[IO]:
+      override def get(id: AlbumId): IO[AlbumWorkspaceManager.GetResult] =
+        IO.raiseError[AlbumWorkspaceManager.GetResult](new AssertionError("Unexpected workspace read"))
+      override def listChapter(id: ChapterId): IO[AlbumWorkspaceManager.ChapterResult] =
+        IO.raiseError[AlbumWorkspaceManager.ChapterResult](new AssertionError("Unexpected photo inventory read"))
+
+  private def buildUnusedEvents =
+    new AlbumPhotoEvents[IO]:
+      override def subscribe(id: AlbumId): IO[AlbumPhotoEvents.SubscribeResult[IO]] =
+        IO.raiseError[AlbumPhotoEvents.SubscribeResult[IO]](new AssertionError("Unexpected event subscription"))
+      override def invalidate(id: AlbumId, chapter: ChapterId): IO[Unit] = IO.raiseError[Unit](new AssertionError("Unexpected invalidation"))

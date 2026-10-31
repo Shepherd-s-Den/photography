@@ -18,7 +18,7 @@ import photography.usecases.spread.SpreadManager
 import java.util.UUID
 import java.nio.charset.StandardCharsets
 
-class PhotoPlacementApiSeamIntegrationTest extends CatsEffectSuite:
+class SpreadAndCoverApiSeamIntegrationTest extends CatsEffectSuite:
   private val album         = AlbumId(new UUID(0L, 1L))
   private val cover         = Cover(album, SpineOwner.Back, CoverSlot(CoverSlotId(new UUID(0L, 2L))), CoverSlot(CoverSlotId(new UUID(0L, 3L))))
   private val transform     = PhotoTransform(Shift(x = 12.5, y = -7.25), mirrored = true, zoom = 3.0)
@@ -233,18 +233,21 @@ class PhotoPlacementApiSeamIntegrationTest extends CatsEffectSuite:
       missingFields ++ invalidFields ++ adjustments
     val api           = buildApi(CoverManager.Result.Failed, rejectCalls = true)
     val malformedBody = Stream.emits("{invalid json".getBytes(StandardCharsets.UTF_8)).covary[IO]
-    val malformed     = Request[IO](Method.POST, Uri.unsafeFromString(coverPath)).withBodyStream(malformedBody)
-      .putHeaders(`Content-Type`(MediaType.application.json))
+    val malformed     = Vector(coverPath, spreadPath).map: path =>
+      Request[IO](Method.POST, Uri.unsafeFromString(path)).withBodyStream(malformedBody)
+        .putHeaders(`Content-Type`(MediaType.application.json))
     val decodedFailures = Vector(coverPath, spreadPath).flatTraverse: path =>
       requests.traverse(value => send(api, Request[IO](Method.POST, Uri.unsafeFromString(path)).withEntity(value)))
 
     for
       failures <- decodedFailures
-      syntax   <- send(api, malformed)
+      syntax   <- malformed.traverse(request => send(api, request))
     yield
-      val responses = failures :+ syntax
-      val feedback  = responses.map { case (status, body) => (status, hasFeedback(body)) }
+      val responses      = failures ++ syntax
+      val feedback       = responses.map { case (status, body) => (status, hasFeedback(body)) }
+      val expectedSyntax = (Status.BadRequest, Json.obj("message" -> Json.fromString("Supply a valid JSON placement request")))
       assertEquals(feedback, Vector.fill(responses.size)((Status.BadRequest, true)))
+      assertEquals(syntax, Vector.fill(malformed.size)(expectedSyntax))
 
   test("should exclude noncanonical path identities without calling application services"):
     val invalidIdentities = Vector("0-0-0-0-1", "AAAAAAAA-AAAA-4AAA-AAAA-AAAAAAAAAAAA")
@@ -330,7 +333,7 @@ class PhotoPlacementApiSeamIntegrationTest extends CatsEffectSuite:
         assertEquals(spread, SpreadId(new UUID(0L, 6L)))
         maybeSpreadEdit.foreach(expected => assertEquals(request, expected))
         spreadResult.pure[IO]
-    PhotoPlacementApi.make(spreads, covers)
+    SpreadApi.make(spreads).routes <+> CoverApi.make(covers).routes
   // scalafix:on DisableSyntax.defaultArgs
 
   private def send(api: HttpRoutes[IO], request: Request[IO]) =
